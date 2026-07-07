@@ -53,6 +53,10 @@ type SchemaError struct{ Msg string }
 
 func (e *SchemaError) Error() string { return e.Msg }
 
+func NewSchemaError(format string, args ...any) *SchemaError {
+	return &SchemaError{Msg: fmt.Sprintf(format, args...)}
+}
+
 type ExecuteError struct{ Msg string }
 
 func (e *ExecuteError) Error() string { return e.Msg }

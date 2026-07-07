@@ -286,6 +286,33 @@ func (p *Parser) Parse(rawTokens []tokens.Token, sql string) (expressions []exp.
 	return p.parse(p.parseStatement, rawTokens, sql), nil
 }
 
+func (p *Parser) ParseInto(rawTokens []tokens.Token, sql string, into exp.Kind) (out []exp.Expression, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			switch e := r.(type) {
+			case *sqlerrors.ParseError:
+				err = e
+			case error:
+				err = e
+			default:
+				panic(r)
+			}
+		}
+	}()
+	var method func() exp.Expression
+	switch into {
+	case exp.KindDataType:
+		method = func() exp.Expression { return p.parseTypes(false, true, false, false) }
+	case exp.KindTable:
+		method = func() exp.Expression { return p.parseTableParts(false, false, false, false) }
+	case exp.KindIdentifier:
+		method = func() exp.Expression { return p.parseIdVar(true, nil) }
+	default:
+		return nil, fmt.Errorf("no parser registered for kind %v", into)
+	}
+	return p.parse(method, rawTokens, sql), nil
+}
+
 func (p *Parser) checkErrors() {
 	if p.errorLevel == sqlerrors.RAISE && len(p.errors) > 0 {
 		errs := make([]error, len(p.errors))

@@ -1,5 +1,10 @@
 package expressions
 
+import (
+	"fmt"
+	"strings"
+)
+
 type DType string
 
 const (
@@ -277,3 +282,220 @@ func DataType(args Args) Expression      { return newNode(KindDataType, args) }
 func DataTypeParam(args Args) Expression { return newNode(KindDataTypeParam, args) }
 func Interval(args Args) Expression      { return newNode(KindInterval, args) }
 func IntervalSpan(args Args) Expression  { return newNode(KindIntervalSpan, args) }
+
+var StructTypes = map[DType]bool{
+	DTypeFile:   true,
+	DTypeNested: true,
+	DTypeObject: true,
+	DTypeStruct: true,
+	DTypeUnion:  true,
+}
+
+var ArrayTypes = map[DType]bool{
+	DTypeArray: true,
+	DTypeList:  true,
+}
+
+var NestedTypes = map[DType]bool{
+	DTypeFile:   true,
+	DTypeNested: true,
+	DTypeObject: true,
+	DTypeStruct: true,
+	DTypeUnion:  true,
+	DTypeArray:  true,
+	DTypeList:   true,
+	DTypeMap:    true,
+}
+
+var TextTypes = map[DType]bool{
+	DTypeChar:     true,
+	DTypeNChar:    true,
+	DTypeNVarchar: true,
+	DTypeText:     true,
+	DTypeVarchar:  true,
+	DTypeName:     true,
+}
+
+var SignedIntegerTypes = map[DType]bool{
+	DTypeBigInt:    true,
+	DTypeInt:       true,
+	DTypeInt128:    true,
+	DTypeInt256:    true,
+	DTypeMediumInt: true,
+	DTypeSmallInt:  true,
+	DTypeTinyInt:   true,
+}
+
+var UnsignedIntegerTypes = map[DType]bool{
+	DTypeUBigInt:    true,
+	DTypeUInt:       true,
+	DTypeUInt128:    true,
+	DTypeUInt256:    true,
+	DTypeUMediumInt: true,
+	DTypeUSmallInt:  true,
+	DTypeUTinyInt:   true,
+}
+
+var IntegerTypes = map[DType]bool{
+	DTypeBigInt:     true,
+	DTypeInt:        true,
+	DTypeInt128:     true,
+	DTypeInt256:     true,
+	DTypeMediumInt:  true,
+	DTypeSmallInt:   true,
+	DTypeTinyInt:    true,
+	DTypeUBigInt:    true,
+	DTypeUInt:       true,
+	DTypeUInt128:    true,
+	DTypeUInt256:    true,
+	DTypeUMediumInt: true,
+	DTypeUSmallInt:  true,
+	DTypeUTinyInt:   true,
+	DTypeBit:        true,
+}
+
+var FloatTypes = map[DType]bool{
+	DTypeDouble: true,
+	DTypeFloat:  true,
+}
+
+var RealTypes = map[DType]bool{
+	DTypeDouble:     true,
+	DTypeFloat:      true,
+	DTypeBigDecimal: true,
+	DTypeDecimal:    true,
+	DTypeDecimal32:  true,
+	DTypeDecimal64:  true,
+	DTypeDecimal128: true,
+	DTypeDecimal256: true,
+	DTypeDecFloat:   true,
+	DTypeMoney:      true,
+	DTypeSmallMoney: true,
+	DTypeUDecimal:   true,
+	DTypeUDouble:    true,
+}
+
+var NumericTypes = map[DType]bool{
+	DTypeBigInt:     true,
+	DTypeInt:        true,
+	DTypeInt128:     true,
+	DTypeInt256:     true,
+	DTypeMediumInt:  true,
+	DTypeSmallInt:   true,
+	DTypeTinyInt:    true,
+	DTypeUBigInt:    true,
+	DTypeUInt:       true,
+	DTypeUInt128:    true,
+	DTypeUInt256:    true,
+	DTypeUMediumInt: true,
+	DTypeUSmallInt:  true,
+	DTypeUTinyInt:   true,
+	DTypeBit:        true,
+	DTypeDouble:     true,
+	DTypeFloat:      true,
+	DTypeBigDecimal: true,
+	DTypeDecimal:    true,
+	DTypeDecimal32:  true,
+	DTypeDecimal64:  true,
+	DTypeDecimal128: true,
+	DTypeDecimal256: true,
+	DTypeDecFloat:   true,
+	DTypeMoney:      true,
+	DTypeSmallMoney: true,
+	DTypeUDecimal:   true,
+	DTypeUDouble:    true,
+}
+
+var TemporalTypes = map[DType]bool{
+	DTypeDate:          true,
+	DTypeDate32:        true,
+	DTypeDatetime:      true,
+	DTypeDatetime2:     true,
+	DTypeDatetime64:    true,
+	DTypeSmallDatetime: true,
+	DTypeTime:          true,
+	DTypeTimestamp:     true,
+	DTypeTimestampNtz:  true,
+	DTypeTimestampLtz:  true,
+	DTypeTimestampTz:   true,
+	DTypeTimestampMs:   true,
+	DTypeTimestampNs:   true,
+	DTypeTimestampS:    true,
+	DTypeTimeTz:        true,
+}
+
+func (d DType) IntoExpr(kwargs Args) Expression {
+	return applyKwargs(DataType(Args{"this": d}), kwargs)
+}
+
+func maybeCopy(e Expression, copyValue bool) Expression {
+	if copyValue && e != nil {
+		return e.Copy()
+	}
+	return e
+}
+
+func DataTypeBuild(dtype any, dialect string, udt bool, copyValue bool, kwargs Args) (Expression, error) {
+	switch v := dtype.(type) {
+	case string:
+		return DataTypeFromStr(v, dialect, udt, kwargs)
+	case DType:
+		return applyKwargs(DataType(Args{"this": v}), kwargs), nil
+	case Expression:
+		if v.Kind() == KindDataType {
+			return maybeCopy(v, copyValue), nil
+		}
+		if udt && (v.Kind() == KindIdentifier || v.Kind() == KindDot) {
+			return applyKwargs(DataType(Args{"this": DTypeUserDefined, "kind": v}), kwargs), nil
+		}
+	}
+	return nil, fmt.Errorf("Invalid data type: %T. Expected str or DType", dtype)
+}
+
+func DataTypeFromStr(dtype, dialect string, udt bool, kwargs Args) (Expression, error) {
+	if strings.ToUpper(dtype) == "UNKNOWN" {
+		return applyKwargs(DataType(Args{"this": DTypeUnknown}), kwargs), nil
+	}
+	if ParseIntoFunc == nil {
+		return nil, fmt.Errorf("expressions.ParseIntoFunc is not configured")
+	}
+	expr, err := ParseIntoFunc(dtype, dialect, KindDataType, true)
+	if err != nil {
+		if udt {
+			return applyKwargs(DataType(Args{"this": DTypeUserDefined, "kind": dtype}), kwargs), nil
+		}
+		return nil, err
+	}
+	return applyKwargs(expr, kwargs), nil
+}
+
+func DataTypeIsType(e Expression, checkNullable bool, dtypes ...any) bool {
+	if e == nil {
+		return false
+	}
+	self := e
+	if self.Kind() != KindDataType {
+		self = asExpression(e.Arg("to"))
+		if self == nil || self.Kind() != KindDataType {
+			return false
+		}
+	}
+	selfNullable := truthy(self.Arg("nullable"))
+	for _, dtype := range dtypes {
+		other, err := DataTypeBuild(dtype, "", true, false, nil)
+		if err != nil || other == nil {
+			continue
+		}
+		otherNullable := truthy(other.Arg("nullable"))
+		var matches bool
+		if len(other.Expressions()) > 0 || (checkNullable && (selfNullable || otherNullable)) || self.Arg("this") == DTypeUserDefined || other.Arg("this") == DTypeUserDefined {
+			matches = self.Equal(other)
+		} else {
+			matches = self.Arg("this") == other.Arg("this")
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}

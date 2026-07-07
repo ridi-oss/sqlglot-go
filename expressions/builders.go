@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strings"
 )
 
 var safeIdentifierRE = regexp.MustCompile(`^[_a-zA-Z]\w*$`)
 
 var MaybeParseFunc func(sql string, dialect string) (Expression, error)
+var ParseIntoFunc func(sql string, dialect string, into Kind, ignoreErrors bool) (Expression, error)
 
 func ToIdentifier(name any, quoted ...bool) Expression {
 	if name == nil {
@@ -114,6 +116,96 @@ func MaybeParse(sqlOrExpression any, dialect string, copyValue bool) Expression 
 		panic(err)
 	}
 	return expr
+}
+
+func maybeParseInto(sqlOrExpr any, dialect string, into Kind, copyValue bool) (Expression, error) {
+	if expr, ok := sqlOrExpr.(Expression); ok {
+		return maybeCopy(expr, copyValue), nil
+	}
+	if ParseIntoFunc == nil {
+		return nil, fmt.Errorf("expressions.ParseIntoFunc is not configured")
+	}
+	return ParseIntoFunc(fmt.Sprint(sqlOrExpr), dialect, into, false)
+}
+
+func presentPart(v any) bool {
+	if v == nil {
+		return false
+	}
+	if s, ok := v.(string); ok {
+		return s != ""
+	}
+	return true
+}
+
+func Table_(table, db, catalog any, quoted *bool, alias any) Expression {
+	args := Args{}
+	if presentPart(table) {
+		if quoted != nil {
+			args["this"] = ToIdentifier(table, *quoted)
+		} else {
+			args["this"] = ToIdentifier(table)
+		}
+	}
+	if presentPart(db) {
+		if quoted != nil {
+			args["db"] = ToIdentifier(db, *quoted)
+		} else {
+			args["db"] = ToIdentifier(db)
+		}
+	}
+	if presentPart(catalog) {
+		if quoted != nil {
+			args["catalog"] = ToIdentifier(catalog, *quoted)
+		} else {
+			args["catalog"] = ToIdentifier(catalog)
+		}
+	}
+	if presentPart(alias) {
+		args["alias"] = TableAlias(Args{"this": ToIdentifier(alias)})
+	}
+	return Table(args)
+}
+
+func ToTable(sqlPath any, dialect string, copyValue bool, kwargs Args) (Expression, error) {
+	if expr, ok := sqlPath.(Expression); ok && expr.Kind() == KindTable {
+		return maybeCopy(expr, copyValue), nil
+	}
+	table, err := maybeParseInto(sqlPath, dialect, KindTable, true)
+	if err != nil {
+		s := fmt.Sprint(sqlPath)
+		parts := splitNumWords(s, ".", 3, true)
+		catalog, db, this := parts[0], parts[1], parts[2]
+		if this == "" {
+			return nil, err
+		}
+		table = Table_(this, db, catalog, nil, nil)
+	}
+	return applyKwargs(table, kwargs), nil
+}
+
+func ParseIdentifier(name any, dialect string) Expression {
+	if s, ok := name.(string); ok && safeIdentifierRE.MatchString(s) {
+		return Identifier(Args{"this": s, "quoted": false})
+	}
+	expr, err := maybeParseInto(name, dialect, KindIdentifier, false)
+	if err != nil {
+		return ToIdentifier(name)
+	}
+	return expr
+}
+
+func splitNumWords(value, sep string, minNumWords int, fillFromStart bool) []string {
+	words := strings.Split(value, sep)
+	missing := minNumWords - len(words)
+	if missing <= 0 {
+		return words
+	}
+	padding := make([]string, missing)
+	if fillFromStart {
+		return append(padding, words...)
+	}
+	return append(words, padding...)
 }
 
 func Condition(expression any, dialect string, copyValue bool) Expression {

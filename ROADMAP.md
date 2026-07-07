@@ -38,7 +38,14 @@ Slices (ordered; each must land `go test ./...` green before the next):
    round-trip: 732/955 pass, 203 need deferred 1d grammar, 20 gen-mismatch (tracked). Public
    API: Generate / Transpile + Expression.SQL. MySQL/Postgres generator overrides → slice 5.
 
-3. SCHEMA — schema.py (MappingSchema), datatypes.py (DataType/DType build), time.py.
+3. SCHEMA — DONE (branch sjcho/sqlglot-go/schema; 93 tests green). New schema/ package:
+   Schema iface + MappingSchema + EnsureSchema (nested-mapping normalization, ordered Mapping
+   for deterministic iteration, string-part trie, dialect identifier normalization, column_names/
+   get_column_type/find/supported_table_args). Completed DataType semantics in expressions/
+   datatype.go: DataTypeBuild/FromStr (via a new ParseIntoFunc hook — no parser import cycle),
+   DataTypeIsType + category sets (TEXT/INTEGER/FLOAT/NUMERIC/TEMPORAL/NESTED/…). time.py NOT
+   needed (zero refs from schema/datatypes). UDF machinery deferred (probe/tests don't use it).
+   A nested dict {table:{col:type}} → MappingSchema → column_names/get_column_type verified.
 
 4. OPTIMIZER PASSES — in probe order:
    qualify_tables → normalize_identifiers → isolate_table_selects → qualify_columns
@@ -48,6 +55,8 @@ Slices (ordered; each must land `go test ./...` green before the next):
 
 5. MYSQL + POSTGRES WIRING — dialects/{mysql,postgres}.py, parsers/{mysql,postgres}.py,
    typing/{mysql,postgres}.py, generator overrides. Both extend base directly (no fan-out).
+   TODO carried from slice 3: move HSTORE from the base tokenizer KEYWORDS (tokens/tokenizer.go)
+   into the Postgres tokenizer override — upstream defines it only in Postgres (postgres.py:92).
 
 6. PROBE END-TO-END — jsonpath, serde, lineage bits probe touches; run probe.py’s path
    (parse → qualify → traverse_scope) against real queries; parity vs Python sqlglot 30.12.0.

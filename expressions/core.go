@@ -846,6 +846,16 @@ func (n *Node) Parts() []Expression {
 	return nil
 }
 
+var TablePartKeys = []string{"this", "db", "catalog"}
+
+func applyKwargs(e Expression, kwargs Args) Expression {
+	// kwargs is empty or single-key in the M1 surface, so map iteration order is immaterial.
+	for k, v := range kwargs {
+		e.Set(k, v)
+	}
+	return e
+}
+
 func (n *Node) TableName() string   { return n.Text("table") }
 func (n *Node) DbName() string      { return n.Text("db") }
 func (n *Node) CatalogName() string { return n.Text("catalog") }

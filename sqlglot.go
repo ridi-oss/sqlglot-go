@@ -48,6 +48,36 @@ func ParseOne(sql string, dialect string) (expressions.Expression, error) {
 	return res[0], nil
 }
 
+func ParseInto(sql, dialect string, into expressions.Kind) (expressions.Expression, error) {
+	return parseInto(sql, dialect, into, false)
+}
+
+func parseInto(sql, dialect string, into expressions.Kind, ignoreErrors bool) (expressions.Expression, error) {
+	d, err := dialects.GetOrRaise(dialect)
+	if err != nil {
+		return nil, err
+	}
+	toks, err := d.NewTokenizer().Tokenize(sql)
+	if err != nil {
+		return nil, err
+	}
+	level := sqlerrors.IMMEDIATE
+	if ignoreErrors {
+		level = sqlerrors.IGNORE
+	}
+	res, err := parser.NewWithErrorLevel(d, level).ParseInto(toks, sql, into)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 || res[0] == nil {
+		return nil, sqlerrors.NewParseError(fmtstd.Sprintf("No expression was parsed from '%s'", sql))
+	}
+	if len(res) > 1 {
+		return expressions.Block(expressions.Args{"expressions": res}), nil
+	}
+	return res[0], nil
+}
+
 func Generate(e expressions.Expression, dialect string, opts generator.Options) (string, error) {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
@@ -78,6 +108,9 @@ func Transpile(sql string, read string, write string, opts generator.Options) ([
 func init() {
 	expressions.MaybeParseFunc = func(sql string, dialect string) (expressions.Expression, error) {
 		return ParseOne(sql, dialect)
+	}
+	expressions.ParseIntoFunc = func(sql string, dialect string, into expressions.Kind, ignoreErrors bool) (expressions.Expression, error) {
+		return parseInto(sql, dialect, into, ignoreErrors)
 	}
 	expressions.GenerateFunc = func(e expressions.Expression, opts expressions.GenerateOptions) (string, error) {
 		return Generate(e, opts.Dialect, generator.Options{

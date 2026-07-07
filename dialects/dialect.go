@@ -4,11 +4,23 @@ import (
 	"fmt"
 	"strings"
 
+	exp "github.com/sjincho/sqlglot-go/expressions"
 	"github.com/sjincho/sqlglot-go/tokens"
+)
+
+type NormalizationStrategy int
+
+const (
+	Lowercase NormalizationStrategy = iota
+	Uppercase
+	CaseSensitive
+	CaseInsensitive
+	CaseInsensitiveUppercase
 )
 
 type Dialect struct {
 	TokenizerConfig          tokens.TokenizerConfig
+	NormalizationStrategy    NormalizationStrategy
 	DPipeIsStringConcat      bool
 	StrictStringConcat       bool
 	TypedDivision            bool
@@ -35,6 +47,7 @@ func Base() *Dialect {
 	datePartMapping := baseDatePartMapping()
 	return &Dialect{
 		TokenizerConfig:          tokens.BaseConfig(),
+		NormalizationStrategy:    Lowercase,
 		DPipeIsStringConcat:      true,
 		NullOrdering:             "nulls_are_small",
 		DatePartMapping:          datePartMapping,
@@ -177,4 +190,19 @@ func GetOrRaise(name string) (*Dialect, error) {
 
 func (d *Dialect) NewTokenizer() *tokens.Tokenizer {
 	return tokens.NewTokenizerWithConfig(d.TokenizerConfig)
+}
+
+func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
+	if e != nil && e.Kind() == exp.KindIdentifier && d.NormalizationStrategy != CaseSensitive {
+		quoted, _ := e.Arg("quoted").(bool)
+		if !quoted || d.NormalizationStrategy == CaseInsensitive || d.NormalizationStrategy == CaseInsensitiveUppercase {
+			this, _ := e.Arg("this").(string)
+			if d.NormalizationStrategy == Uppercase || d.NormalizationStrategy == CaseInsensitiveUppercase {
+				e.Set("this", strings.ToUpper(this))
+			} else {
+				e.Set("this", strings.ToLower(this))
+			}
+		}
+	}
+	return e
 }
