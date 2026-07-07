@@ -806,6 +806,8 @@ func (p *Parser) parseJoin(skipJoinToken bool, parseBracket bool, aliasTokensArg
 	}
 	if p.match(tokens.ON) {
 		kwargs["on"] = p.parseDisjunction()
+	} else if p.match(tokens.USING) {
+		kwargs["using"] = p.parseUsingIdentifiers()
 	}
 	comments := append([]string(nil), joinComments...)
 	for _, token := range []*tokens.Token{method, side, kind} {
@@ -1124,6 +1126,9 @@ func (p *Parser) parseUnary() exp.Expression {
 }
 
 func (p *Parser) parseType() exp.Expression {
+	if typed := p.parseTypedStringLiteral(); typed != nil {
+		return typed
+	}
 	if atom := p.parseAtom(); atom != nil {
 		return atom
 	}
@@ -1131,6 +1136,28 @@ func (p *Parser) parseType() exp.Expression {
 		return p.parseColumnOps(interval)
 	}
 	return p.parseColumn()
+}
+
+func (p *Parser) parseTypedStringLiteral() exp.Expression {
+	switch p.curr.TokenType {
+	case tokens.DATE, tokens.DATETIME, tokens.TIMESTAMP, tokens.TIMESTAMPTZ:
+		if p.next.TokenType != tokens.STRING {
+			return nil
+		}
+		typeToken := p.curr
+		p.advance()
+		stringToken := p.curr
+		p.advance()
+		to, err := exp.DataTypeBuild(stringsUpper(typeToken.Text), "", p.dialect.SupportsUserDefinedTypes, true, nil)
+		if err != nil {
+			p.raiseError(err.Error(), typeToken)
+			return nil
+		}
+		literal := p.expression(exp.LiteralString(stringToken.Text), &stringToken, nil)
+		return p.expression(exp.Cast(exp.Args{"this": literal, "to": to}), &typeToken, nil)
+	default:
+		return nil
+	}
 }
 
 func (p *Parser) parseAtom() exp.Expression {
@@ -1141,9 +1168,12 @@ func (p *Parser) parseAtom() exp.Expression {
 	}
 	token := p.curr
 	switch token.TokenType {
-	case tokens.STRING, tokens.NUMBER, tokens.NULL, tokens.TRUE, tokens.FALSE, tokens.STAR:
+	case tokens.STRING, tokens.NUMBER, tokens.NULL, tokens.TRUE, tokens.FALSE:
 		p.advance()
 		return p.primaryFromToken(token)
+	case tokens.STAR:
+		p.advance()
+		return p.parseStarOps(token)
 	}
 	return nil
 }
@@ -1343,9 +1373,12 @@ func (p *Parser) parseParen() exp.Expression {
 func (p *Parser) parsePrimary() exp.Expression {
 	token := p.curr
 	switch token.TokenType {
-	case tokens.STRING, tokens.NUMBER, tokens.NULL, tokens.TRUE, tokens.FALSE, tokens.STAR:
+	case tokens.STRING, tokens.NUMBER, tokens.NULL, tokens.TRUE, tokens.FALSE:
 		p.advance()
 		return p.primaryFromToken(token)
+	case tokens.STAR:
+		p.advance()
+		return p.parseStarOps(token)
 	}
 	if p.matchPair(tokens.DOT, tokens.NUMBER, true) {
 		return exp.LiteralNumber("0." + p.prev.Text)
@@ -1477,9 +1510,49 @@ func (p *Parser) parseStar() exp.Expression {
 	if p.curr.TokenType == tokens.STAR {
 		token := p.curr
 		p.advance()
-		return p.primaryFromToken(token)
+		return p.parseStarOps(token)
 	}
 	return p.parsePlaceholder()
+}
+
+func (p *Parser) parseStarOps(starToken tokens.Token) exp.Expression {
+	var ilike exp.Expression
+	if p.match(tokens.ILIKE) {
+		if p.match(tokens.STRING) {
+			ilike = p.expression(exp.LiteralString(p.prev.Text), &p.prev, nil)
+		} else {
+			ilike = p.parseIdVar(false, nil)
+		}
+	}
+	args := exp.Args{
+		"ilike":   ilike,
+		"except_": p.parseStarOp("EXCEPT", "EXCLUDE"),
+		"replace": p.parseStarOp("REPLACE"),
+		"rename":  p.parseStarOp("RENAME"),
+	}
+	return p.expression(exp.Star(args), &starToken, nil)
+}
+
+func (p *Parser) parseStarOp(keywords ...string) []exp.Expression {
+	matched := false
+	for _, keyword := range keywords {
+		if p.curr.TokenType != tokens.STRING && stringsUpper(p.curr.Text) == keyword {
+			p.advance()
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return nil
+	}
+	if p.curr.TokenType == tokens.L_PAREN {
+		return p.parseWrappedCsv(p.parseExpression)
+	}
+	expression := p.parseAlias(p.parseDisjunction(), true)
+	if expression != nil {
+		return []exp.Expression{expression}
+	}
+	return nil
 }
 
 func (p *Parser) parsePlaceholder() exp.Expression {

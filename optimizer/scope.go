@@ -79,6 +79,7 @@ type Scope struct {
 	localColumns            []exp.Expression
 	localColumnsDone        bool
 	selectedSources         map[string]selectedSource
+	selectedSourcesOrder    []string
 	selectedSourcesDone     bool
 	references              []reference
 	referencesDone          bool
@@ -150,6 +151,7 @@ func (s *Scope) clearCache() {
 	s.semiAntiJoinTables = map[string]bool{}
 	s.columnIndex = map[exp.Expression]bool{}
 	s.selectedSources = nil
+	s.selectedSourcesOrder = nil
 	s.selectedSourcesDone = false
 	s.columns = nil
 	s.columnsDone = false
@@ -764,9 +766,15 @@ func (s *Scope) TableColumns() []exp.Expression {
 
 func (s *Scope) SelectedSources() map[string]selectedSource { return s.selectedSourcesMap() }
 
+func (s *Scope) SelectedSourceNames() []string {
+	s.selectedSourcesMap()
+	return append([]string(nil), s.selectedSourcesOrder...)
+}
+
 func (s *Scope) selectedSourcesMap() map[string]selectedSource {
 	if !s.selectedSourcesDone {
 		result := map[string]selectedSource{}
+		order := []string{}
 		for _, ref := range s.References() {
 			if s.SemiOrAntiJoinTables()[ref.Name] {
 				continue
@@ -776,9 +784,11 @@ func (s *Scope) selectedSourcesMap() map[string]selectedSource {
 			}
 			if source, ok := s.Sources[ref.Name]; ok {
 				result[ref.Name] = selectedSource{Node: ref.Node, Source: source}
+				order = append(order, ref.Name)
 			}
 		}
 		s.selectedSources = result
+		s.selectedSourcesOrder = order
 		s.selectedSourcesDone = true
 	}
 	return s.selectedSources

@@ -9,6 +9,8 @@ import (
 
 var safeIdentifierRE = regexp.MustCompile(`^[_a-zA-Z]\w*$`)
 
+func IsSafeIdentifier(name string) bool { return safeIdentifierRE.MatchString(name) }
+
 var MaybeParseFunc func(sql string, dialect string) (Expression, error)
 var ParseIntoFunc func(sql string, dialect string, into Kind, ignoreErrors bool) (Expression, error)
 

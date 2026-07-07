@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	exp "github.com/sjincho/sqlglot-go/expressions"
 	"github.com/sjincho/sqlglot-go/schema"
 )
 
@@ -58,6 +59,45 @@ func loadSQLFixturePairs(t *testing.T, filename string) []sqlFixturePair {
 	}
 	return pairs
 }
+
+func loadSQLFixtures(t *testing.T, filename string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", filename))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", filename, err)
+	}
+	statements := strings.Split(filterComments(string(data)), "\n")
+	out := []string{}
+	for _, statement := range statements {
+		statement = strings.TrimSpace(statement)
+		if statement != "" {
+			out = append(out, statement)
+		}
+	}
+	return out
+}
+
+func assertASTInvariants(t *testing.T, root exp.Expression) {
+	t.Helper()
+	for _, node := range root.Walk() {
+		for _, key := range exp.ArgKeys(node.Kind()) {
+			switch v := node.Arg(key).(type) {
+			case exp.Expression:
+				if v != nil && (v.ArgKey() != key || v.Parent() != node) {
+					t.Fatalf("AST invariant: %v.%s", node.Kind(), key)
+				}
+			case []exp.Expression:
+				for _, child := range v {
+					if child != nil && (child.ArgKey() != key || child.Parent() != node) {
+						t.Fatalf("AST invariant: %v.%s", node.Kind(), key)
+					}
+				}
+			}
+		}
+	}
+}
+
+func boolPtr(value bool) *bool { return &value }
 
 func stringToBool(value string) bool {
 	switch strings.ToLower(value) {

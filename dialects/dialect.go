@@ -3,6 +3,7 @@ package dialects
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	exp "github.com/sjincho/sqlglot-go/expressions"
 	"github.com/sjincho/sqlglot-go/tokens"
@@ -19,29 +20,42 @@ const (
 )
 
 type Dialect struct {
-	TokenizerConfig             tokens.TokenizerConfig
-	NormalizationStrategy       NormalizationStrategy
-	DPipeIsStringConcat         bool
-	StrictStringConcat          bool
-	TypedDivision               bool
-	SafeDivision                bool
-	SupportsColumnJoinMarks     bool
-	ColonIsVariantExtract       bool
-	NullOrdering                string
-	SupportsOrderByAll          bool
-	TryCastRequiresString       *bool
-	DatePartMapping             map[string]string
-	ValidIntervalUnits          map[string]bool
-	SupportsUserDefinedTypes    bool
-	SupportsFixedSizeArrays     bool
-	SupportsLimitAll            bool
-	IntervalSpans               bool
-	NormalizeFunctions          string
-	DefaultFunctionsColumnNames map[exp.Kind][]string
-	AliasPostTablesample        bool
-	AliasPostVersion            bool
-	UnnestColumnOnly            bool
-	IndexOffset                 int
+	TokenizerConfig                    tokens.TokenizerConfig
+	NormalizationStrategy              NormalizationStrategy
+	DPipeIsStringConcat                bool
+	StrictStringConcat                 bool
+	TypedDivision                      bool
+	SafeDivision                       bool
+	SupportsColumnJoinMarks            bool
+	ColonIsVariantExtract              bool
+	NullOrdering                       string
+	SupportsOrderByAll                 bool
+	TryCastRequiresString              *bool
+	DatePartMapping                    map[string]string
+	ValidIntervalUnits                 map[string]bool
+	SupportsUserDefinedTypes           bool
+	SupportsFixedSizeArrays            bool
+	SupportsLimitAll                   bool
+	IntervalSpans                      bool
+	NormalizeFunctions                 string
+	DefaultFunctionsColumnNames        map[exp.Kind][]string
+	AliasPostTablesample               bool
+	AliasPostVersion                   bool
+	UnnestColumnOnly                   bool
+	Pseudocolumns                      map[string]bool
+	PreferCTEAliasColumn               bool
+	ForceEarlyAliasRefExpansion        bool
+	ExpandOnlyGroupAliasRef            bool
+	AnnotateAllScopes                  bool
+	DisablesAliasRefExpansion          bool
+	SupportsAliasRefsInJoinConditions  bool
+	ProjectionAliasesShadowSourceNames bool
+	TablesReferenceableAsColumns       bool
+	SupportsStructStarExpansion        bool
+	ExcludesPseudocolumnsFromStar      bool
+	QueryResultsAreStructs             bool
+	RequiresParenthesizedStructAccess  bool
+	IndexOffset                        int
 }
 
 func Base() *Dialect {
@@ -61,6 +75,7 @@ func Base() *Dialect {
 		AliasPostTablesample:     false,
 		AliasPostVersion:         true,
 		UnnestColumnOnly:         false,
+		Pseudocolumns:            map[string]bool{},
 		IndexOffset:              0,
 	}
 }
@@ -206,6 +221,64 @@ func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
 		}
 	}
 	return e
+}
+
+func (d *Dialect) CaseSensitive(text string) bool {
+	if d.NormalizationStrategy == CaseInsensitive {
+		return false
+	}
+	unsafe := unicode.IsUpper
+	if d.NormalizationStrategy == Uppercase {
+		unsafe = unicode.IsLower
+	}
+	for _, r := range text {
+		if unsafe(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Dialect) CanQuote(identifier exp.Expression, identify any) bool {
+	if identifier == nil || identifier.Kind() != exp.KindIdentifier {
+		return false
+	}
+	quoted, _ := identifier.Arg("quoted").(bool)
+	if quoted {
+		return true
+	}
+	if identify == nil {
+		return false
+	}
+	if b, ok := identify.(bool); ok && !b {
+		return false
+	}
+	if parent := identifier.Parent(); parent != nil && parent.Is(exp.TraitFunc) {
+		return false
+	}
+	if b, ok := identify.(bool); ok && b {
+		return true
+	}
+	name := identifier.Name()
+	isSafe := !d.CaseSensitive(name) && exp.IsSafeIdentifier(name)
+	switch identify {
+	case "safe":
+		return isSafe
+	case "unsafe":
+		return !isSafe
+	}
+	panic(fmt.Sprintf("Unexpected argument for identify: '%v'", identify))
+}
+
+func (d *Dialect) QuoteIdentifier(identifier exp.Expression, identify bool) exp.Expression {
+	if identifier != nil && identifier.Kind() == exp.KindIdentifier {
+		mode := any(identify)
+		if !identify {
+			mode = "unsafe"
+		}
+		identifier.Set("quoted", d.CanQuote(identifier, mode))
+	}
+	return identifier
 }
 
 func (d *Dialect) GenerateValuesAliases(values exp.Expression) []exp.Expression {

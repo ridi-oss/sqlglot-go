@@ -55,12 +55,19 @@ Slices (ordered; each must land `go test ./...` green before the next):
      qualify_tables, normalize_identifiers, isolate_table_selects. traverse_scope verified on
      JOIN/UNION/CTE/correlated-subquery. Ported scope + qualify_tables/normalize_identifiers/
      isolate_table_selects fixtures.
-   - 4b: qualify_columns (always runs annotate_types + quote_identifiers) → annotate_types →
-     resolver → simplify_parens → the qualify() driver. Port qualify_columns.sql fixtures.
-     MUST also: (a) add NamedSelects KindSubquery case (TODO in core.go — qualify_columns needs
-     unfiltered subquery output names); (b) add the AST-invariant assertion (arg_key + parent
-     back-pointer, test_optimizer.py:213-217) to the optimizer fixture harness — critical now
-     that qualify_columns rewrites the tree. canonicalize/normalize deferred unless qualify needs.
+   - 4b: DONE (branch sjcho/sqlglot-go/qualify; 106 tests green). resolver + qualify_columns
+     + validate_qualify_columns + quote_identifiers + expand_stars + the qualify() driver +
+     simplify_parens. ALL 165 in-scope qualify_columns.sql fixtures pass (exact .sql() + AST
+     invariant), 18 invalid cases raise. qualify() runs end-to-end (JOIN with unqualified cols
+     → qualified + stars expanded + validated). Carried 4a items done: NamedSelects KindSubquery
+     (+ Selects()); AST-invariant assertion added to the optimizer harness (assertASTInvariants).
+   - 4c (DEFERRED, OFF probe's critical path): full TypeAnnotator/annotate_types (coercion
+     tables, per-node type rules). KEY FINDING: annotate_scope is NEVER called for base/mysql/
+     postgres — both call sites are gated by ANNOTATE_ALL_SCOPES / SUPPORTS_STRUCT_STAR_EXPANSION,
+     both false in base (qualify_columns.py:112,788). A minimal constructible TypeAnnotator +
+     no-op AnnotateScope suffices for qualify(); probe never triggers annotation. Port the full
+     machinery only for annotate_types.sql test fidelity, after probe e2e. Also deferred:
+     canonicalize/normalize (not on qualify's path).
 
 5. MYSQL + POSTGRES WIRING — dialects/{mysql,postgres}.py, parsers/{mysql,postgres}.py,
    typing/{mysql,postgres}.py, generator overrides. Both extend base directly (no fan-out).
@@ -119,6 +126,14 @@ Resolved in the slice-1c review pass:
 - parseWindow parsed the frame EXCLUDE option with raise_unmatched=false; upstream
   _parse_window (parser.py:8405) uses the default True, so a malformed EXCLUDE option must
   raise "Unknown option". Fixed in parser/parser.go. Test: TestWindowExtras (malformed case).
+
+Resolved in the slice-4b review pass:
+- expandStarsInScope reset the EXCEPT/RENAME/REPLACE maps per selection, so a modifier on a
+  leading full `*` did not leak into a later bare `*` (upstream keys by id(table): full stars
+  share the stable selected_sources key → leak; qualified stars use fresh keys → no leak).
+  Fixed: maps declared once outside the loop; full-star keyed by source name (stable),
+  qualified-star keyed by a per-selection-unique token. Test: TestExpandStarsFullStarLeak.
+  All 165 in-scope fixtures still pass.
 
 Slice-1b review disposition:
 - Reviewer flagged parseValue ignoring its `values` param, claiming upstream has an

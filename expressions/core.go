@@ -71,6 +71,7 @@ type Expression interface {
 	Unwrap() Expression
 	SameParent() bool
 	AliasColumnNames() []string
+	Selects() []Expression
 	NamedSelects() []string
 	ToPy() any
 	Parts() []Expression
@@ -338,6 +339,14 @@ func (n *Node) Name() string {
 		if this := n.This(); this != nil {
 			return this.Name()
 		}
+	case KindJoin:
+		if this := n.This(); this != nil {
+			return this.AliasOrName()
+		}
+	case KindCast, KindTryCast, KindCastToStrType:
+		if this := n.This(); this != nil {
+			return this.Name()
+		}
 	}
 	return n.Text("this")
 }
@@ -369,6 +378,8 @@ func (n *Node) OutputName() string {
 		}
 	case KindSubquery:
 		return n.Alias()
+	case KindCast, KindTryCast, KindCastToStrType:
+		return n.Name()
 	}
 	return ""
 }
@@ -873,11 +884,34 @@ func (n *Node) AliasColumnNames() []string {
 	return out
 }
 
+func (n *Node) Selects() []Expression {
+	switch n.kind {
+	case KindSelect:
+		return n.Expressions()
+	case KindUnion, KindExcept, KindIntersect:
+		var expr Expression = n
+		for expr != nil && expr.Is(TraitSetOperation) {
+			expr = expr.This()
+			if expr != nil {
+				expr = expr.Unnest()
+			}
+		}
+		if expr != nil {
+			return expr.Selects()
+		}
+	case KindSubquery:
+		if this := n.This(); this != nil && this.Is(TraitQuery) {
+			return this.Selects()
+		}
+	case KindValues, KindUnnest, KindLateral:
+		if alias, ok := asExpression(n.args["alias"]).(*Node); ok && alias != nil {
+			return alias.ExpressionsFor("columns")
+		}
+	}
+	return nil
+}
+
 func (n *Node) NamedSelects() []string {
-	// TODO(slice4b): add a KindSubquery case — upstream Subquery.named_selects returns the
-	// inner query's UNFILTERED output_names (_named_selects via DerivedTable.selects), which
-	// differs from Select.named_selects (filtered + Aliases-expanded). Unobservable in slice
-	// 4a's Scope surface, but qualify_columns resolves columns through subqueries via this.
 	switch n.kind {
 	case KindSelect:
 		var out []string
@@ -907,12 +941,18 @@ func (n *Node) NamedSelects() []string {
 			}
 		}
 		if expr != nil {
-			out := make([]string, 0, len(expr.Expressions()))
-			for _, e := range expr.Expressions() {
+			out := make([]string, 0, len(expr.Selects()))
+			for _, e := range expr.Selects() {
 				out = append(out, e.OutputName())
 			}
 			return out
 		}
+	case KindSubquery, KindValues, KindUnnest, KindLateral:
+		var out []string
+		for _, e := range n.Selects() {
+			out = append(out, e.OutputName())
+		}
+		return out
 	}
 	return nil
 }

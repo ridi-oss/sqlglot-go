@@ -169,3 +169,24 @@ func truthy(value any) bool {
 	}
 	return true
 }
+
+func containsString(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSet(values []string) map[string]bool {
+	out := map[string]bool{}
+	for _, value := range values {
+		out[value] = true
+	}
+	return out
+}
+
+func copyStringSlice(values []string) []string {
+	return append([]string(nil), values...)
+}
