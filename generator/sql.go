@@ -183,6 +183,24 @@ func (g *Generator) placeholderSQL(e expressions.Expression) string {
 	return "?"
 }
 
+// parameterSQL ports parameter_sql (generator.py:3406-3408). PARAMETER_TOKEN is "@" for
+// base/mysql/postgres (none override the generator default), so it is inlined here.
+func (g *Generator) parameterSQL(e expressions.Expression) string {
+	return "@" + g.sqlKey(e, "this")
+}
+
+// rawStringSQL ports rawstring_sql (generator.py:1653-1659): a raw/heredoc string is
+// re-emitted as an ordinary quoted string literal (e.g. postgres `$$doc$$` -> `'doc'`).
+func (g *Generator) rawStringSQL(e expressions.Expression) string {
+	return g.quoteStart + g.escapeStr(e.Text("this")) + g.quoteEnd
+}
+
+// fileFormatPropertySQL renders the FileFormatProperty node as `FORMAT=<fmt>`, matching
+// upstream's generic property_sql path (generator.py:2083-2092, PROPERTY_TO_NAME lookup).
+func (g *Generator) fileFormatPropertySQL(e expressions.Expression) string {
+	return "FORMAT=" + g.sqlKey(e, "this")
+}
+
 func (g *Generator) aliasSQL(e expressions.Expression) string {
 	alias := g.sqlKey(e, "alias")
 	if alias != "" {

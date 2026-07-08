@@ -394,6 +394,20 @@ func (p *Parser) parseStatement() exp.Expression {
 		}
 		return stmt
 	}
+	// Ports parser.py:2293-2294: any leading token in the dialect's tokenizer Commands
+	// set (CALL/EXPLAIN/OPTIMIZE/PREPARE/VACUUM/... - see parseCommand's doc comment)
+	// degrades the whole statement to a raw-text exp.Command via the tokenizer's
+	// already-packed trailing STRING token.
+	if p.matchSet(p.dialect.TokenizerConfig.Commands) {
+		return p.parseCommand()
+	}
+	return p.parseExpressionStatement()
+}
+
+// parseExpressionStatement is the ordinary (non-statement-parser, non-Command) tail of
+// parseStatement: a top-level expression or SELECT with query modifiers. Extracted so a
+// dialect-gated statement parser can fall back to it (see parseEndTransaction).
+func (p *Parser) parseExpressionStatement() exp.Expression {
 	expression := p.parseExpression()
 	if expression != nil {
 		expression = p.parseSetOperations(expression)
@@ -673,6 +687,10 @@ func (p *Parser) parseTable(schema bool, joins bool, aliasTokens map[tokens.Toke
 	if only {
 		this.Set("only", only)
 	}
+	// Postgres supports a wildcard (table) suffix operator, e.g. `ONLY t1, t2*` in
+	// TRUNCATE / a FROM list - a no-op in this context, so consume and discard it
+	// (parser.py:4890-4891).
+	p.match(tokens.STAR)
 	if schema {
 		return p.parseSchema(this)
 	}
@@ -1437,12 +1455,23 @@ func (p *Parser) parsePrimary() exp.Expression {
 	case tokens.STRING, tokens.NUMBER, tokens.NULL, tokens.TRUE, tokens.FALSE:
 		p.advance()
 		return p.primaryFromToken(token)
+	case tokens.HEREDOC_STRING, tokens.RAW_STRING:
+		// Upstream PRIMARY_PARSERS maps HEREDOC_STRING/RAW_STRING to a RawString (parser.py:1123-1132),
+		// so these are valid in normal expression position, not only via parseString.
+		p.advance()
+		return p.expression(exp.RawString(exp.Args{"this": token.Text}), &token, nil)
 	case tokens.STAR:
 		p.advance()
 		return p.parseStarOps(token)
 	}
 	if p.matchPair(tokens.DOT, tokens.NUMBER, true) {
 		return exp.LiteralNumber("0." + p.prev.Text)
+	}
+	// Ports the `if not self._match(TokenType.L_PAREN): return self._parse_placeholder()`
+	// tail of _parse_primary (parser.py): a non-paren primary may be a placeholder/parameter
+	// (`?`, `@var`). Peek rather than consume so parseParen still matches the L_PAREN itself.
+	if p.curr.TokenType != tokens.L_PAREN {
+		return p.parsePlaceholder()
 	}
 	return p.parseParen()
 }
@@ -1616,11 +1645,35 @@ func (p *Parser) parseStarOp(keywords ...string) []exp.Expression {
 	return nil
 }
 
+// parsePlaceholder ports PLACEHOLDER_PARSERS (parser.py:1175-1183) + _parse_placeholder
+// (parser.py:8590-8597). The COLON (`:name`) entry is not ported yet; PARAMETER (`@var`)
+// routes to parseParameter.
 func (p *Parser) parsePlaceholder() exp.Expression {
 	if p.match(tokens.PLACEHOLDER) {
 		return p.expression(exp.Placeholder(nil), &p.prev, nil)
 	}
+	if p.match(tokens.PARAMETER) {
+		return p.parseParameter()
+	}
 	return nil
+}
+
+// parseParameter ports _parse_parameter (parser.py:8586-8588): the leading `@` is already
+// consumed; the following identifier/var becomes the parameter's `this` (mysql `@var1`).
+func (p *Parser) parseParameter() exp.Expression {
+	this := p.parseIdentifier()
+	if this == nil {
+		this = p.parsePrimaryOrVar()
+	}
+	return p.expression(exp.Parameter(exp.Args{"this": this}), nil, nil)
+}
+
+// parsePrimaryOrVar ports _parse_primary_or_var (parser.py:8566-8567).
+func (p *Parser) parsePrimaryOrVar() exp.Expression {
+	if primary := p.parsePrimary(); primary != nil {
+		return primary
+	}
+	return p.parseVar(true, nil, false)
 }
 
 func (p *Parser) parseCsv(parseMethod func() exp.Expression, sep ...tokens.TokenType) []exp.Expression {
@@ -2314,25 +2367,36 @@ var subqueryPredicates = map[tokens.TokenType]func(exp.Args) exp.Expression{
 
 var functionParsers = map[string]func(*Parser) exp.Expression{}
 
-var statementParsers map[tokens.TokenType]func(*Parser) exp.Expression
+// statementParsers is declared with an empty-map var initializer (rather than left nil and
+// only ever assigned inside init()) so it's guaranteed to be a valid, non-nil map as soon
+// as package-level var initialization completes and BEFORE any init() func runs (Go var
+// initializers always precede init() funcs, regardless of file). That lets each statement-
+// family part register its own entries from its own func init() via plain key assignment,
+// safely, regardless of init() run order across files (plan's "seam" for parallel,
+// disjoint-file family parts). Embedding the entries directly in this initializer instead
+// (a map literal with (*Parser).parseInsert etc. as values) is not viable: those methods
+// transitively call parseStatement, which reads statementParsers, and Go's package
+// dependency analysis flags that as an initialization cycle - so, like the pre-existing
+// functionParsers below, the entries are populated by assignment in init() instead.
+var statementParsers = map[tokens.TokenType]func(*Parser) exp.Expression{}
 
 var queryModifierParsers map[tokens.TokenType]func(*Parser) (string, any)
 
 func init() {
+	statementParsers[tokens.INSERT] = (*Parser).parseInsert
+	statementParsers[tokens.UPDATE] = (*Parser).parseUpdate
+	statementParsers[tokens.DELETE] = (*Parser).parseDelete
+	statementParsers[tokens.MERGE] = (*Parser).parseMerge
+	statementParsers[tokens.CREATE] = (*Parser).parseCreate
+	statementParsers[tokens.REPLACE] = (*Parser).parseCreate
+	statementParsers[tokens.PRAGMA] = (*Parser).parsePragma
+
 	noParenFunctionParsers = map[string]func(*Parser) exp.Expression{
 		"ANY": func(p *Parser) exp.Expression {
 			return p.expression(exp.Any(exp.Args{"this": p.parseBitwise()}), nil, nil)
 		},
 		"CASE": func(p *Parser) exp.Expression { return p.parseCase() },
 		"IF":   func(p *Parser) exp.Expression { return p.parseIf() },
-	}
-	statementParsers = map[tokens.TokenType]func(*Parser) exp.Expression{
-		tokens.INSERT:  (*Parser).parseInsert,
-		tokens.UPDATE:  (*Parser).parseUpdate,
-		tokens.DELETE:  (*Parser).parseDelete,
-		tokens.MERGE:   (*Parser).parseMerge,
-		tokens.CREATE:  (*Parser).parseCreate,
-		tokens.REPLACE: (*Parser).parseCreate,
 	}
 	functionParsers = map[string]func(*Parser) exp.Expression{
 		"CAST":        func(p *Parser) exp.Expression { return p.parseCast(p.strictCast, nil) },

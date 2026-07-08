@@ -360,10 +360,11 @@ func excludeComments(e expressions.Expression) bool {
 
 func withSeparatedComments(k expressions.Kind) bool {
 	switch k {
-	case expressions.KindCommand, expressions.KindCreate, expressions.KindDelete, expressions.KindFrom,
-		expressions.KindJoin, expressions.KindOrder, expressions.KindGroup, expressions.KindHaving,
-		expressions.KindSelect, expressions.KindUnion, expressions.KindExcept, expressions.KindIntersect,
-		expressions.KindUpdate, expressions.KindWhere, expressions.KindWith, expressions.KindInsert:
+	case expressions.KindCommand, expressions.KindCreate, expressions.KindDescribe, expressions.KindDelete,
+		expressions.KindFrom, expressions.KindJoin, expressions.KindOrder, expressions.KindGroup,
+		expressions.KindHaving, expressions.KindSelect, expressions.KindUnion, expressions.KindExcept,
+		expressions.KindIntersect, expressions.KindUpdate, expressions.KindWhere, expressions.KindWith,
+		expressions.KindInsert:
 		return true
 	}
 	return false

@@ -1355,6 +1355,8 @@ func NullSafeNEQ(args Args) Expression { return newNode(KindNullSafeNEQ, args) }
 func Anonymous(args Args) Expression   { return newNode(KindAnonymous, args) }
 func Hint(args Args) Expression        { return newNode(KindHint, args) }
 func Placeholder(args Args) Expression { return newNode(KindPlaceholder, args) }
+func Parameter(args Args) Expression   { return newNode(KindParameter, args) }
+func RawString(args Args) Expression   { return newNode(KindRawString, args) }
 
 func LiteralNumber(number any) Expression {
 	text := fmt.Sprint(number)

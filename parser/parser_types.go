@@ -265,9 +265,16 @@ func (p *Parser) parseDcolon() exp.Expression {
 	return p.parseTypes(false, false, true, false)
 }
 
+// parseString ports _parse_string + STRING_PARSERS (parser.py:1122-1136, 8519-8523):
+// plain STRING -> Literal, and HEREDOC_STRING (postgres `$$...$$`) / RAW_STRING ->
+// RawString. NATIONAL_STRING/UNICODE_STRING are not modeled yet (their nodes aren't
+// ported), so those still fall through to parsePlaceholder.
 func (p *Parser) parseString() exp.Expression {
 	if p.match(tokens.STRING) {
 		return p.expression(exp.LiteralString(p.prev.Text), &p.prev, nil)
+	}
+	if p.match(tokens.HEREDOC_STRING) || p.match(tokens.RAW_STRING) {
+		return p.expression(exp.RawString(exp.Args{"this": p.prev.Text}), &p.prev, nil)
 	}
 	return p.parsePlaceholder()
 }

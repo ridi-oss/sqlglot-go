@@ -188,6 +188,37 @@ const (
 	KindJoinHint
 	KindTableColumn
 	KindFinal
+	// The 19 Kinds below close the statement-level parse gaps (SET/SHOW/USE/DESCRIBE/
+	// EXPLAIN/BEGIN/COMMIT/ROLLBACK/KILL/LOAD DATA/ANALYZE/GRANT/REVOKE/COMMENT ON/
+	// TRUNCATE, plus PRAGMA): ddl.py:104,121,157,173,181,191,306,385,389,393,426;
+	// query.py:589,609,619,1879; properties.py:16,20; dml.py:281. All are plain
+	// Expression subclasses (no Func/Condition/... mixins), so none get traitsOf rows.
+	KindSet
+	KindSetItem
+	KindShow
+	KindUse
+	KindKill
+	KindDescribe
+	KindLoadData
+	KindTransaction
+	KindCommit
+	KindRollback
+	KindGrant
+	KindRevoke
+	KindGrantPrivilege
+	KindGrantPrincipal
+	KindComment
+	KindTruncateTable
+	KindPartition
+	KindAnalyze
+	KindPragma
+	// Supporting expression/property nodes ported alongside the statement families to
+	// close their remaining round-trip gaps: Parameter (mysql `@var` user variables,
+	// core.py:1833), RawString (postgres `$$...$$` / raw string literals, query.py:490),
+	// and FileFormatProperty (the `FORMAT=<fmt>` option on DESCRIBE, properties.py:176).
+	KindParameter
+	KindRawString
+	KindFileFormatProperty
 )
 
 type Trait uint32
@@ -431,6 +462,33 @@ var argTypes = map[Kind][]argSpec{
 	KindJoinHint:       {{"this", true}, {"expressions", true}},
 	KindTableColumn:    defaultArgTypes,
 	KindFinal:          defaultArgTypes,
+	// Set/SetItem/Show/.../Pragma (ddl.py, query.py, properties.py, dml.py; see the Kind
+	// block comment above for exact line numbers).
+	KindSet:            {{"expressions", false}, {"unset", false}, {"tag", false}},
+	KindSetItem:        {{"this", false}, {"expressions", false}, {"kind", false}, {"collate", false}, {"global_", false}},
+	KindShow:           {{"this", true}, {"history", false}, {"terse", false}, {"target", false}, {"offset", false}, {"starts_with", false}, {"limit", false}, {"from_", false}, {"like", false}, {"where", false}, {"db", false}, {"scope", false}, {"scope_kind", false}, {"full", false}, {"mutex", false}, {"query", false}, {"channel", false}, {"global_", false}, {"log", false}, {"position", false}, {"types", false}, {"privileges", false}, {"for_table", false}, {"for_group", false}, {"for_user", false}, {"for_role", false}, {"into_outfile", false}, {"json", false}, {"iceberg", false}},
+	KindUse:            {{"this", false}, {"expressions", false}, {"kind", false}},
+	KindKill:           {{"this", true}, {"kind", false}},
+	KindDescribe:       {{"this", true}, {"style", false}, {"kind", false}, {"properties", false}, {"expressions", false}, {"partition", false}, {"format", false}, {"as_json", false}},
+	KindLoadData:       {{"this", true}, {"local", false}, {"overwrite", false}, {"temp", false}, {"inpath", false}, {"files", false}, {"partition", false}, {"input_format", false}, {"serde", false}},
+	KindTransaction:    {{"this", false}, {"modes", false}, {"mark", false}},
+	KindCommit:         {{"chain", false}, {"this", false}, {"durability", false}},
+	KindRollback:       {{"savepoint", false}, {"this", false}},
+	KindGrant:          {{"privileges", true}, {"kind", false}, {"securable", true}, {"principals", true}, {"grant_option", false}},
+	KindRevoke:         {{"privileges", true}, {"kind", false}, {"securable", true}, {"principals", true}, {"grant_option", false}, {"cascade", false}},
+	KindGrantPrivilege: {{"this", true}, {"expressions", false}},
+	KindGrantPrincipal: {{"this", true}, {"kind", false}},
+	KindComment:        {{"this", true}, {"kind", true}, {"expression", true}, {"exists", false}, {"materialized", false}},
+	KindTruncateTable:  {{"expressions", true}, {"is_database", false}, {"exists", false}, {"only", false}, {"cluster", false}, {"identity", false}, {"option", false}, {"partition", false}},
+	KindPartition:      {{"expressions", true}, {"subpartition", false}},
+	KindAnalyze:        {{"kind", false}, {"this", false}, {"options", false}, {"mode", false}, {"partition", false}, {"expression", false}, {"properties", false}},
+	KindPragma:         defaultArgTypes,
+	// Parameter/RawString/FileFormatProperty arg lists transcribed from core.py:1834
+	// ({"this": True, "expression": False}), query.py:491 ({"this": True}), and
+	// properties.py:177 ({"this": False, "expressions": False, "hive_format": False}).
+	KindParameter:          {{"this", true}, {"expression", false}},
+	KindRawString:          {{"this", true}},
+	KindFileFormatProperty: {{"this", false}, {"expressions", false}, {"hive_format", false}},
 }
 
 var traitsOf = map[Kind]Trait{
@@ -439,6 +497,8 @@ var traitsOf = map[Kind]Trait{
 	KindNull:               TraitCondition,
 	KindBoolean:            TraitCondition,
 	KindPlaceholder:        TraitCondition,
+	KindParameter:          TraitCondition,
+	KindRawString:          TraitCondition,
 	KindDot:                TraitCondition | TraitBinary,
 	KindAdd:                TraitCondition | TraitBinary,
 	KindSub:                TraitCondition | TraitBinary,
@@ -752,6 +812,28 @@ var className = map[Kind]string{
 	KindJoinHint:            "JoinHint",
 	KindTableColumn:         "TableColumn",
 	KindFinal:               "Final",
+	KindSet:                 "Set",
+	KindSetItem:             "SetItem",
+	KindShow:                "Show",
+	KindUse:                 "Use",
+	KindKill:                "Kill",
+	KindDescribe:            "Describe",
+	KindLoadData:            "LoadData",
+	KindTransaction:         "Transaction",
+	KindCommit:              "Commit",
+	KindRollback:            "Rollback",
+	KindGrant:               "Grant",
+	KindRevoke:              "Revoke",
+	KindGrantPrivilege:      "GrantPrivilege",
+	KindGrantPrincipal:      "GrantPrincipal",
+	KindComment:             "Comment",
+	KindTruncateTable:       "TruncateTable",
+	KindPartition:           "Partition",
+	KindAnalyze:             "Analyze",
+	KindPragma:              "Pragma",
+	KindParameter:           "Parameter",
+	KindRawString:           "RawString",
+	KindFileFormatProperty:  "FileFormatProperty",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func

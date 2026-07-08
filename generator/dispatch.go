@@ -2,141 +2,155 @@ package generator
 
 import "github.com/sjincho/sqlglot-go/expressions"
 
-var dispatch map[expressions.Kind]func(*Generator, expressions.Expression) string
+// dispatch is declared with an empty-map var initializer (rather than left nil and only
+// ever assigned inside init()) so it's guaranteed to be a valid, non-nil map as soon as
+// package-level var initialization completes and BEFORE any init() func runs (Go var
+// initializers always precede init() funcs, regardless of file). That lets each statement-
+// family part register its own entries from its own func init() via plain key assignment,
+// safely, regardless of init() run order across files (plan's "seam" for parallel,
+// disjoint-file family parts). Embedding the entries directly in this initializer instead
+// (a map literal with (*Generator).negSQL etc. as values) is not viable: those methods
+// transitively call sqlKey -> gen, which reads dispatch, and Go's package dependency
+// analysis flags that as an initialization cycle - so the entries are populated by
+// assignment in init() instead.
+var dispatch = map[expressions.Kind]func(*Generator, expressions.Expression) string{}
 
 func init() {
-	dispatch = map[expressions.Kind]func(*Generator, expressions.Expression) string{
-		expressions.KindExpression:          (*Generator).expressionSQL,
-		expressions.KindColumn:              (*Generator).columnSQL,
-		expressions.KindLiteral:             (*Generator).literalSQL,
-		expressions.KindIdentifier:          (*Generator).identifierSQL,
-		expressions.KindStar:                (*Generator).starSQL,
-		expressions.KindAlias:               (*Generator).aliasSQL,
-		expressions.KindAliases:             (*Generator).aliasesSQL,
-		expressions.KindDot:                 (*Generator).dotSQL,
-		expressions.KindNull:                (*Generator).nullSQL,
-		expressions.KindBoolean:             (*Generator).booleanSQL,
-		expressions.KindVar:                 (*Generator).varSQL,
-		expressions.KindParen:               (*Generator).parenSQL,
-		expressions.KindNeg:                 (*Generator).negSQL,
-		expressions.KindNot:                 (*Generator).notSQL,
-		expressions.KindAdd:                 (*Generator).addSQL,
-		expressions.KindSub:                 (*Generator).subSQL,
-		expressions.KindMul:                 (*Generator).mulSQL,
-		expressions.KindDiv:                 (*Generator).divSQL,
-		expressions.KindMod:                 (*Generator).modSQL,
-		expressions.KindEQ:                  (*Generator).eqSQL,
-		expressions.KindNEQ:                 (*Generator).neqSQL,
-		expressions.KindNullSafeEQ:          (*Generator).nullSafeEQSQL,
-		expressions.KindGT:                  (*Generator).gtSQL,
-		expressions.KindGTE:                 (*Generator).gteSQL,
-		expressions.KindLT:                  (*Generator).ltSQL,
-		expressions.KindLTE:                 (*Generator).lteSQL,
-		expressions.KindAnd:                 (*Generator).andSQL,
-		expressions.KindOr:                  (*Generator).orSQL,
-		expressions.KindBitwiseAnd:          (*Generator).bitwiseAndSQL,
-		expressions.KindBitwiseOr:           (*Generator).bitwiseOrSQL,
-		expressions.KindBitwiseXor:          (*Generator).bitwiseXorSQL,
-		expressions.KindDPipe:               (*Generator).dpipeSQL,
-		expressions.KindBetween:             (*Generator).betweenSQL,
-		expressions.KindIs:                  (*Generator).isSQL,
-		expressions.KindLike:                (*Generator).likeSQL,
-		expressions.KindILike:               (*Generator).ilikeSQL,
-		expressions.KindSimilarTo:           (*Generator).similarToSQL,
-		expressions.KindEscape:              (*Generator).escapeSQL,
-		expressions.KindIn:                  (*Generator).inSQL,
-		expressions.KindSelect:              (*Generator).selectSQL,
-		expressions.KindFrom:                (*Generator).fromSQL,
-		expressions.KindJoin:                (*Generator).joinSQL,
-		expressions.KindTable:               (*Generator).tableSQL,
-		expressions.KindTableColumn:         (*Generator).tableColumnSQL,
-		expressions.KindTableAlias:          (*Generator).tableAliasSQL,
-		expressions.KindWhere:               (*Generator).whereSQL,
-		expressions.KindGroup:               (*Generator).groupSQL,
-		expressions.KindOrder:               (*Generator).orderSQL,
-		expressions.KindLimit:               (*Generator).limitSQL,
-		expressions.KindOffset:              (*Generator).offsetSQL,
-		expressions.KindHint:                (*Generator).hintSQL,
-		expressions.KindBlock:               (*Generator).blockSQL,
-		expressions.KindPlaceholder:         (*Generator).placeholderSQL,
-		expressions.KindTuple:               (*Generator).tupleSQL,
-		expressions.KindWith:                (*Generator).withSQL,
-		expressions.KindCTE:                 (*Generator).cteSQL,
-		expressions.KindRecursiveWithSearch: (*Generator).recursiveWithSearchSQL,
-		expressions.KindUnion:               (*Generator).setOperationsSQL,
-		expressions.KindExcept:              (*Generator).setOperationsSQL,
-		expressions.KindIntersect:           (*Generator).setOperationsSQL,
-		expressions.KindSubquery:            (*Generator).subquerySQL,
-		expressions.KindHaving:              (*Generator).havingSQL,
-		expressions.KindQualify:             (*Generator).qualifySQL,
-		expressions.KindCube:                (*Generator).cubeSQL,
-		expressions.KindRollup:              (*Generator).rollupSQL,
-		expressions.KindGroupingSets:        (*Generator).groupingSetsSQL,
-		expressions.KindOrdered:             (*Generator).orderedSQL,
-		expressions.KindDistinct:            (*Generator).distinctSQL,
-		expressions.KindWindow:              (*Generator).windowSQL,
-		expressions.KindWindowSpec:          (*Generator).windowSpecSQL,
-		expressions.KindFilter:              (*Generator).filterSQL,
-		expressions.KindLimitOptions:        (*Generator).limitOptionsSQL,
-		expressions.KindFetch:               (*Generator).fetchSQL,
-		expressions.KindCase:                (*Generator).caseSQL,
-		expressions.KindIf:                  (*Generator).ifSQL,
-		expressions.KindExists:              (*Generator).existsSQL,
-		expressions.KindAny:                 (*Generator).anySQL,
-		expressions.KindAll:                 (*Generator).allSQL,
-		expressions.KindNullSafeNEQ:         (*Generator).nullSafeNEQSQL,
-		expressions.KindAnonymous:           (*Generator).anonymousSQL,
-		expressions.KindLog:                 (*Generator).logSQL,
-		expressions.KindInsert:              (*Generator).insertSQL,
-		expressions.KindUpdate:              (*Generator).updateSQL,
-		expressions.KindDelete:              (*Generator).deleteSQL,
-		expressions.KindMerge:               (*Generator).mergeSQL,
-		expressions.KindWhen:                (*Generator).whenSQL,
-		expressions.KindWhens:               (*Generator).whensSQL,
-		expressions.KindOnConflict:          (*Generator).onConflictSQL,
-		expressions.KindReturning:           (*Generator).returningSQL,
-		expressions.KindCreate:              (*Generator).createSQL,
-		expressions.KindSchema:              (*Generator).schemaSQL,
-		expressions.KindCommand:             (*Generator).commandSQL,
-		expressions.KindPivot:               (*Generator).pivotSQL,
-		expressions.KindLateral:             (*Generator).lateralSQL,
-		expressions.KindValues:              (*Generator).valuesSQL,
-		expressions.KindColumnDef:           (*Generator).columnDefSQL,
-		expressions.KindDataType:            (*Generator).dataTypeSQL,
-		expressions.KindDataTypeParam:       (*Generator).dataTypeParamSQL,
-		expressions.KindCast:                (*Generator).castSQL,
-		expressions.KindTryCast:             (*Generator).tryCastSQL,
-		expressions.KindExtract:             (*Generator).extractSQL,
-		expressions.KindTrim:                (*Generator).trimSQL,
-		expressions.KindCeil:                (*Generator).ceilFloorSQL,
-		expressions.KindFloor:               (*Generator).ceilFloorSQL,
-		expressions.KindUnnest:              (*Generator).unnestSQL,
-		expressions.KindBracket:             (*Generator).bracketSQL,
-		expressions.KindLock:                (*Generator).lockSQL,
-		expressions.KindPreWhere:            (*Generator).preWhereSQL,
-		expressions.KindCluster:             (*Generator).clusterSQL,
-		expressions.KindDistribute:          (*Generator).distributeSQL,
-		expressions.KindSort:                (*Generator).sortSQL,
-		expressions.KindWithinGroup:         (*Generator).withinGroupSQL,
-		expressions.KindIgnoreNulls:         (*Generator).ignoreNullsSQL,
-		expressions.KindRespectNulls:        (*Generator).respectNullsSQL,
-		expressions.KindPivotAny: func(g *Generator, e expressions.Expression) string {
-			return "ANY" + g.sqlKey(e, "this")
-		},
-		expressions.KindPivotAlias: (*Generator).pivotAliasSQL,
-		expressions.KindInterval:   (*Generator).intervalSQL,
-		expressions.KindIntervalSpan: func(g *Generator, e expressions.Expression) string {
-			return g.sqlKey(e, "this") + " TO " + g.sqlKey(e, "expression")
-		},
-		expressions.KindJSONCast:      (*Generator).jsonCastSQL,
-		expressions.KindJSONTable:     (*Generator).jsonTableSQL,
-		expressions.KindJSONColumnDef: (*Generator).jsonColumnDefSQL,
-		expressions.KindJSONSchema:    (*Generator).jsonSchemaSQL,
-		expressions.KindFormatJson:    (*Generator).formatJSONSQL,
-		expressions.KindArrayAgg:      (*Generator).arrayAggSQL,
-		expressions.KindArraySize:     (*Generator).arraySizeSQL,
-		expressions.KindInitcap:       (*Generator).initcapSQL,
-		expressions.KindHex:           (*Generator).hexSQL,
-		expressions.KindDateAdd:       (*Generator).dateAddSQL,
+	dispatch[expressions.KindExpression] = (*Generator).expressionSQL
+	dispatch[expressions.KindColumn] = (*Generator).columnSQL
+	dispatch[expressions.KindLiteral] = (*Generator).literalSQL
+	dispatch[expressions.KindIdentifier] = (*Generator).identifierSQL
+	dispatch[expressions.KindStar] = (*Generator).starSQL
+	dispatch[expressions.KindAlias] = (*Generator).aliasSQL
+	dispatch[expressions.KindAliases] = (*Generator).aliasesSQL
+	dispatch[expressions.KindDot] = (*Generator).dotSQL
+	dispatch[expressions.KindNull] = (*Generator).nullSQL
+	dispatch[expressions.KindBoolean] = (*Generator).booleanSQL
+	dispatch[expressions.KindVar] = (*Generator).varSQL
+	dispatch[expressions.KindParen] = (*Generator).parenSQL
+	dispatch[expressions.KindNeg] = (*Generator).negSQL
+	dispatch[expressions.KindNot] = (*Generator).notSQL
+	dispatch[expressions.KindAdd] = (*Generator).addSQL
+	dispatch[expressions.KindSub] = (*Generator).subSQL
+	dispatch[expressions.KindMul] = (*Generator).mulSQL
+	dispatch[expressions.KindDiv] = (*Generator).divSQL
+	dispatch[expressions.KindMod] = (*Generator).modSQL
+	dispatch[expressions.KindEQ] = (*Generator).eqSQL
+	dispatch[expressions.KindNEQ] = (*Generator).neqSQL
+	dispatch[expressions.KindNullSafeEQ] = (*Generator).nullSafeEQSQL
+	dispatch[expressions.KindGT] = (*Generator).gtSQL
+	dispatch[expressions.KindGTE] = (*Generator).gteSQL
+	dispatch[expressions.KindLT] = (*Generator).ltSQL
+	dispatch[expressions.KindLTE] = (*Generator).lteSQL
+	dispatch[expressions.KindAnd] = (*Generator).andSQL
+	dispatch[expressions.KindOr] = (*Generator).orSQL
+	dispatch[expressions.KindBitwiseAnd] = (*Generator).bitwiseAndSQL
+	dispatch[expressions.KindBitwiseOr] = (*Generator).bitwiseOrSQL
+	dispatch[expressions.KindBitwiseXor] = (*Generator).bitwiseXorSQL
+	dispatch[expressions.KindDPipe] = (*Generator).dpipeSQL
+	dispatch[expressions.KindBetween] = (*Generator).betweenSQL
+	dispatch[expressions.KindIs] = (*Generator).isSQL
+	dispatch[expressions.KindLike] = (*Generator).likeSQL
+	dispatch[expressions.KindILike] = (*Generator).ilikeSQL
+	dispatch[expressions.KindSimilarTo] = (*Generator).similarToSQL
+	dispatch[expressions.KindEscape] = (*Generator).escapeSQL
+	dispatch[expressions.KindIn] = (*Generator).inSQL
+	dispatch[expressions.KindSelect] = (*Generator).selectSQL
+	dispatch[expressions.KindFrom] = (*Generator).fromSQL
+	dispatch[expressions.KindJoin] = (*Generator).joinSQL
+	dispatch[expressions.KindTable] = (*Generator).tableSQL
+	dispatch[expressions.KindTableColumn] = (*Generator).tableColumnSQL
+	dispatch[expressions.KindTableAlias] = (*Generator).tableAliasSQL
+	dispatch[expressions.KindWhere] = (*Generator).whereSQL
+	dispatch[expressions.KindGroup] = (*Generator).groupSQL
+	dispatch[expressions.KindOrder] = (*Generator).orderSQL
+	dispatch[expressions.KindLimit] = (*Generator).limitSQL
+	dispatch[expressions.KindOffset] = (*Generator).offsetSQL
+	dispatch[expressions.KindHint] = (*Generator).hintSQL
+	dispatch[expressions.KindBlock] = (*Generator).blockSQL
+	dispatch[expressions.KindPlaceholder] = (*Generator).placeholderSQL
+	dispatch[expressions.KindTuple] = (*Generator).tupleSQL
+	dispatch[expressions.KindWith] = (*Generator).withSQL
+	dispatch[expressions.KindCTE] = (*Generator).cteSQL
+	dispatch[expressions.KindRecursiveWithSearch] = (*Generator).recursiveWithSearchSQL
+	dispatch[expressions.KindUnion] = (*Generator).setOperationsSQL
+	dispatch[expressions.KindExcept] = (*Generator).setOperationsSQL
+	dispatch[expressions.KindIntersect] = (*Generator).setOperationsSQL
+	dispatch[expressions.KindSubquery] = (*Generator).subquerySQL
+	dispatch[expressions.KindHaving] = (*Generator).havingSQL
+	dispatch[expressions.KindQualify] = (*Generator).qualifySQL
+	dispatch[expressions.KindCube] = (*Generator).cubeSQL
+	dispatch[expressions.KindRollup] = (*Generator).rollupSQL
+	dispatch[expressions.KindGroupingSets] = (*Generator).groupingSetsSQL
+	dispatch[expressions.KindOrdered] = (*Generator).orderedSQL
+	dispatch[expressions.KindDistinct] = (*Generator).distinctSQL
+	dispatch[expressions.KindWindow] = (*Generator).windowSQL
+	dispatch[expressions.KindWindowSpec] = (*Generator).windowSpecSQL
+	dispatch[expressions.KindFilter] = (*Generator).filterSQL
+	dispatch[expressions.KindLimitOptions] = (*Generator).limitOptionsSQL
+	dispatch[expressions.KindFetch] = (*Generator).fetchSQL
+	dispatch[expressions.KindCase] = (*Generator).caseSQL
+	dispatch[expressions.KindIf] = (*Generator).ifSQL
+	dispatch[expressions.KindExists] = (*Generator).existsSQL
+	dispatch[expressions.KindAny] = (*Generator).anySQL
+	dispatch[expressions.KindAll] = (*Generator).allSQL
+	dispatch[expressions.KindNullSafeNEQ] = (*Generator).nullSafeNEQSQL
+	dispatch[expressions.KindAnonymous] = (*Generator).anonymousSQL
+	dispatch[expressions.KindLog] = (*Generator).logSQL
+	dispatch[expressions.KindInsert] = (*Generator).insertSQL
+	dispatch[expressions.KindUpdate] = (*Generator).updateSQL
+	dispatch[expressions.KindDelete] = (*Generator).deleteSQL
+	dispatch[expressions.KindMerge] = (*Generator).mergeSQL
+	dispatch[expressions.KindWhen] = (*Generator).whenSQL
+	dispatch[expressions.KindWhens] = (*Generator).whensSQL
+	dispatch[expressions.KindOnConflict] = (*Generator).onConflictSQL
+	dispatch[expressions.KindReturning] = (*Generator).returningSQL
+	dispatch[expressions.KindCreate] = (*Generator).createSQL
+	dispatch[expressions.KindSchema] = (*Generator).schemaSQL
+	dispatch[expressions.KindCommand] = (*Generator).commandSQL
+	dispatch[expressions.KindPivot] = (*Generator).pivotSQL
+	dispatch[expressions.KindLateral] = (*Generator).lateralSQL
+	dispatch[expressions.KindValues] = (*Generator).valuesSQL
+	dispatch[expressions.KindColumnDef] = (*Generator).columnDefSQL
+	dispatch[expressions.KindDataType] = (*Generator).dataTypeSQL
+	dispatch[expressions.KindDataTypeParam] = (*Generator).dataTypeParamSQL
+	dispatch[expressions.KindCast] = (*Generator).castSQL
+	dispatch[expressions.KindTryCast] = (*Generator).tryCastSQL
+	dispatch[expressions.KindExtract] = (*Generator).extractSQL
+	dispatch[expressions.KindTrim] = (*Generator).trimSQL
+	dispatch[expressions.KindCeil] = (*Generator).ceilFloorSQL
+	dispatch[expressions.KindFloor] = (*Generator).ceilFloorSQL
+	dispatch[expressions.KindUnnest] = (*Generator).unnestSQL
+	dispatch[expressions.KindBracket] = (*Generator).bracketSQL
+	dispatch[expressions.KindLock] = (*Generator).lockSQL
+	dispatch[expressions.KindPreWhere] = (*Generator).preWhereSQL
+	dispatch[expressions.KindCluster] = (*Generator).clusterSQL
+	dispatch[expressions.KindDistribute] = (*Generator).distributeSQL
+	dispatch[expressions.KindSort] = (*Generator).sortSQL
+	dispatch[expressions.KindWithinGroup] = (*Generator).withinGroupSQL
+	dispatch[expressions.KindIgnoreNulls] = (*Generator).ignoreNullsSQL
+	dispatch[expressions.KindRespectNulls] = (*Generator).respectNullsSQL
+	dispatch[expressions.KindPivotAny] = func(g *Generator, e expressions.Expression) string {
+		return "ANY" + g.sqlKey(e, "this")
 	}
+	dispatch[expressions.KindPivotAlias] = (*Generator).pivotAliasSQL
+	dispatch[expressions.KindInterval] = (*Generator).intervalSQL
+	dispatch[expressions.KindIntervalSpan] = func(g *Generator, e expressions.Expression) string {
+		return g.sqlKey(e, "this") + " TO " + g.sqlKey(e, "expression")
+	}
+	dispatch[expressions.KindJSONCast] = (*Generator).jsonCastSQL
+	dispatch[expressions.KindJSONTable] = (*Generator).jsonTableSQL
+	dispatch[expressions.KindJSONColumnDef] = (*Generator).jsonColumnDefSQL
+	dispatch[expressions.KindJSONSchema] = (*Generator).jsonSchemaSQL
+	dispatch[expressions.KindFormatJson] = (*Generator).formatJSONSQL
+	dispatch[expressions.KindArrayAgg] = (*Generator).arrayAggSQL
+	dispatch[expressions.KindArraySize] = (*Generator).arraySizeSQL
+	dispatch[expressions.KindInitcap] = (*Generator).initcapSQL
+	dispatch[expressions.KindHex] = (*Generator).hexSQL
+	dispatch[expressions.KindDateAdd] = (*Generator).dateAddSQL
+	dispatch[expressions.KindPartition] = (*Generator).partitionSQL
+	dispatch[expressions.KindPragma] = (*Generator).pragmaSQL
+	dispatch[expressions.KindParameter] = (*Generator).parameterSQL
+	dispatch[expressions.KindRawString] = (*Generator).rawStringSQL
+	dispatch[expressions.KindFileFormatProperty] = (*Generator).fileFormatPropertySQL
 }

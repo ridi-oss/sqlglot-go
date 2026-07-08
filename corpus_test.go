@@ -225,9 +225,9 @@ func writeGaps(fails map[gapKey]string) error {
 // never lower them to mask a regression. A drop below any floor fails the build
 // even if the regressing case is also (illegitimately) added to parity_gaps.txt.
 const (
-	minPassBase     = 745
-	minPassMySQL    = 85
-	minPassPostgres = 223
+	minPassBase     = 803
+	minPassMySQL    = 247
+	minPassPostgres = 297
 )
 
 // Minimum record counts per corpus, from the committed fixtures (identity.sql:

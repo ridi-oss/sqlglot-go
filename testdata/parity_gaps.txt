@@ -1,11 +1,8 @@
 {"dialect":"","category":"gen: cast/type","sql":"SELECT CAST(x AS INT) /* comment */ FROM foo"}
 {"dialect":"","category":"gen: mismatch","sql":"CREATE TABLE z (a INT, PRIMARY KEY (a))"}
-{"dialect":"","category":"gen: mismatch","sql":"DESCRIBE x"}
 {"dialect":"","category":"gen: mismatch","sql":"FILTER(a, x -> FOO(x.a.b.c.d.e.f.g) + x.a.b.c.d.e.f.g)"}
 {"dialect":"","category":"gen: mismatch","sql":"FILTER(a, x -> x.a.b.c.d.e.f.g)"}
 {"dialect":"","category":"gen: mismatch","sql":"INTERVAL '-1' CURRENT_DATE"}
-{"dialect":"","category":"gen: mismatch","sql":"KILL '123'"}
-{"dialect":"","category":"gen: mismatch","sql":"PRAGMA quick_check"}
 {"dialect":"","category":"gen: mismatch","sql":"REGEXP_REPLACE('new york', '(\\w)(\\w*)', x -> UPPER(x[1]) || LOWER(x[2]))"}
 {"dialect":"","category":"gen: mismatch","sql":"REPLACE('new york', ' ')"}
 {"dialect":"","category":"gen: mismatch","sql":"REPLACE('new york', ' ', '_')"}
@@ -16,7 +13,6 @@
 {"dialect":"","category":"gen: mismatch","sql":"SELECT TRANSFORM(a, b -> b) AS x"}
 {"dialect":"","category":"gen: mismatch","sql":"SELECT X((a, b) -> a + b, z -> z) AS x"}
 {"dialect":"","category":"gen: mismatch","sql":"SELECT X(a -> a + (\"z\" - 1))"}
-{"dialect":"","category":"gen: mismatch","sql":"USE db"}
 {"dialect":"","category":"parse: Expected END after CASE","sql":"CASE WHEN TRUE THEN 1 ELSE interval END"}
 {"dialect":"","category":"parse: Expected ]","sql":"x[-4:-1]"}
 {"dialect":"","category":"parse: Expected ]","sql":"x[1:2]"}
@@ -32,8 +28,6 @@
 {"dialect":"","category":"parse: Expecting )","sql":"JSON_OBJECT('x': NULL, 'y': 1 WITH UNIQUE KEYS)"}
 {"dialect":"","category":"parse: Expecting )","sql":"SELECT * FROM (x CROSS JOIN foo LATERAL VIEW EXPLODE(y))"}
 {"dialect":"","category":"parse: Expecting )","sql":"SELECT ARRAY_AGG(STRUCT(x, x AS y) ORDER BY z DESC) AS x"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"@\"x\""}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"@x"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"ALTER TABLE \"schema\".\"tablename\" ADD CONSTRAINT \"CHK_Name\" CHECK (NOT \"IdDwh\" IS NULL AND \"IdDwh\" <> (0))"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"ALTER TABLE IF EXISTS integers ADD COLUMN k INT"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"ALTER TABLE a ADD FOREIGN KEY (x, y) REFERENCES bla"}
@@ -84,17 +78,9 @@
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CACHE TABLE x AS (SELECT 1 AS y)"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CACHE TABLE x AS WITH a AS (SELECT 1) SELECT a.* FROM a"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CAST('2025-11-20 00:00:00+00' AS TIMESTAMP) AT TIME ZONE 'Africa/Cairo'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON COLUMN my_schema.my_table.my_column IS 'Employee ID number'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON DATABASE my_database IS 'Development Database'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON PROCEDURE my_proc(integer, integer) IS 'Runs a report'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON TABLE my_schema.my_table IS 'Employee Information'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON TABLE my_schema.my_table IS N'National String'"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CURRENT_DATE AT TIME ZONE 'UTC'"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CURRENT_DATE AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokio'"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CURRENT_DATE AT TIME ZONE zone_column"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DESCRIBE EXTENDED a.b"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DESCRIBE FORMATTED a.b"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DESCRIBE SELECT 1"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DROP FUNCTION a.b.c (INT)"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DROP INDEX a.b.c"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DROP MATERIALIZED VIEW x.y.z"}
@@ -110,11 +96,6 @@
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DROP VIEW IF EXISTS a.b"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DROP VIEW a"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"DROP VIEW a.b"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"GRANT DELETE ON SCHEMA finance TO bob"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT ON TABLE tbl TO user"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT ON nation TO alice WITH GRANT OPTION"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT ON orders TO ROLE PUBLIC"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT, INSERT ON FUNCTION tbl TO user"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"INSERT INTO a.b PARTITION(DAY = '2024-04-14') (col1, col2) SELECT x FROM y"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"INSERT OVERWRITE DIRECTORY 'x' SELECT 1"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"INSERT OVERWRITE LOCAL DIRECTORY 'x' ROW FORMAT DELIMITED FIELDS TERMINATED BY '1' COLLECTION ITEMS TERMINATED BY '2' MAP KEYS TERMINATED BY '3' LINES TERMINATED BY '4' NULL DEFINED AS '5' SELECT 1"}
@@ -123,39 +104,11 @@
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"INSERT OVERWRITE TABLE a.b PARTITION(ds = 'YYYY-MM-DD', hour = 'hh') SELECT x FROM y"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"INSERT OVERWRITE TABLE a.b PARTITION(ds) SELECT x FROM y"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"INSERT OVERWRITE TABLE a.b PARTITION(ds, hour) SELECT x FROM y"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"KILL CONNECTION 123"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"KILL QUERY '123'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INPATH 'x' INTO TABLE y INPUTFORMAT 'y' SERDE 'z'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INPATH 'x' INTO TABLE y PARTITION(ds = 'yyyy')"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INPATH 'x' INTO TABLE y.b INPUTFORMAT 'y' SERDE 'z'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA LOCAL INPATH 'x' INTO TABLE y PARTITION(ds = 'yyyy')"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA LOCAL INPATH 'x' INTO TABLE y PARTITION(ds = 'yyyy') INPUTFORMAT 'y'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA LOCAL INPATH 'x' INTO TABLE y PARTITION(ds = 'yyyy') INPUTFORMAT 'y' SERDE 'z'"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"N'abc'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA QUICK_CHECK('sqlite_master')"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA QUICK_CHECK(0)"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA memory_limit = '1GB'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA schema.QUICK_CHECK('sqlite_master')"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA schema.QUICK_CHECK(0)"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA schema.memory_limit = '1GB'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA schema.quick_check"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA schema.synchronous = 2"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA schema.synchronous = FULL"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA synchronous = 2"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"PRAGMA synchronous = FULL"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE DELETE ON SCHEMA finance FROM bob CASCADE"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE GRANT OPTION FOR SELECT ON nation FROM alice"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE INSERT ON TABLE orders FROM user RESTRICT"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT ON TABLE tbl FROM user"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT ON orders FROM ROLE PUBLIC"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT, INSERT ON FUNCTION tbl FROM user"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"ROLLBACK"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"ROLLBACK TO b"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT 'Ac' ILIKE 'a%c' ESCAPE NULL"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT (LEAD(foo1, 1, 0)) OVER (PARTITION BY foo2 ORDER BY foo3) FROM t"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM a JOIN b JOIN c USING (id) USING (id)"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM a STRAIGHT_JOIN b"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM x OFFSET @skip FETCH NEXT @take ROWS ONLY"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT /*+ REBALANCE */ * FROM foo"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT /*+ SOME_HINT(foo) */ 1"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT 1 FROM a JOIN b JOIN c ON b.id = c.id ON a.id = b.id"}
@@ -177,19 +130,9 @@
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT tf.* FROM (SELECT 0) AS t LATERAL VIEW STACK(1, 2) tf AS col0, col1, col2"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT values"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SELECT values AS values FROM t WHERE values + 1 > 3"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SET GLOBAL variable = value"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SET LOCAL variable = value"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SET variable = value"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SET x = ';'"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"SET x = 1"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"STRUCT<int INT>"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"UNCACHE TABLE IF EXISTS x"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"UNCACHE TABLE x"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"USE CATALOG abc"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"USE DATABASE x"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"USE ROLE x"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"USE SCHEMA x.y"}
-{"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"USE WAREHOUSE x"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"a OVERLAPS b"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"f1 AT TIME ZONE INTERVAL '-10:00' AS f1"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"x AT TIME ZONE 'UTC'"}
@@ -272,7 +215,6 @@
 {"dialect":"mysql","category":"gen: mismatch","sql":"DATE_ADD(base_date, INTERVAL day_interval SECOND_MICROSECOND)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"DATE_ADD(base_date, INTERVAL day_interval YEAR_MONTH)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"DATE_ADD(x, INTERVAL '1' YEAR)"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"LOCK TABLES `app_fields` WRITE"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT * FROM t1 PARTITION(p0)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT * FROM t1, t2 FOR SHARE OF t1, t2 SKIP LOCKED"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT * FROM t1, t2, t3 FOR SHARE OF t1 NOWAIT FOR UPDATE OF t2, t3 SKIP LOCKED"}
@@ -291,23 +233,6 @@
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT UCASE('foo')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT WEEK_OF_YEAR('2023-01-01')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT name FROM temp WHERE name = ? FOR UPDATE"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW COLLATION"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW DATABASES"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW ENGINES"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW ERRORS"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW EVENTS"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW PLUGINS"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW PRIVILEGES"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW PROCESSLIST"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW PROFILE"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW PROFILES"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW REPLICAS"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW SCHEMAS"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW STATUS"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW TABLES"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW TRIGGERS"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW VARIABLES"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SHOW WARNINGS"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"TIME_STR_TO_UNIX(x)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"TRUNC(3.14159, 2)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"x ->> '$.name'"}
@@ -325,7 +250,6 @@
 {"dialect":"mysql","category":"parse: Expecting )","sql":"SELECT JSON_VALUE('{\"item\": \"shoes\", \"price\": \"49.95\"}', '$.price' RETURNING DECIMAL(4, 2) NULL ON EMPTY NULL ON ERROR) AS price"}
 {"dialect":"mysql","category":"parse: Expecting )","sql":"SELECT JSON_VALUE('{\"item\": \"shoes\", \"price\": \"49.95\"}', '$.price' RETURNING DECIMAL(4, 2))"}
 {"dialect":"mysql","category":"parse: Expecting )","sql":"SELECT SUBSTR(1 FROM 2 FOR 3)"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"/*left*/ EXPLAIN SELECT /*hint*/ col FROM t1 /*right*/"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"@@GLOBAL.max_connections"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ALTER ALGORITHM = MERGE VIEW v AS SELECT * FROM foo"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ALTER DEFINER = 'admin'@'localhost' VIEW v AS SELECT * FROM foo"}
@@ -366,33 +290,7 @@
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ALTER TABLE test_table MODIFY COLUMN test_column LONGTEXT"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ALTER VIEW v AS SELECT * FROM foo WHERE c > 100"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ALTER VIEW v AS SELECT a, b, c, d FROM foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE LOCAL TABLE tbl"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE NO_WRITE_TO_BINLOG TABLE tbl"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE tbl DROP HISTOGRAM ON col1"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE tbl UPDATE HISTOGRAM ON col1"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE tbl UPDATE HISTOGRAM ON col1 USING DATA 'json_data'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE tbl UPDATE HISTOGRAM ON col1 WITH 5 BUCKETS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE tbl UPDATE HISTOGRAM ON col1 WITH 5 BUCKETS AUTO UPDATE"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE tbl UPDATE HISTOGRAM ON col1 WITH 5 BUCKETS MANUAL UPDATE"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"DELETE FROM t FORCE INDEX (idx) WHERE a > 5 ORDER BY id"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"DESCRIBE FORMAT=JSON UPDATE test SET test_col = 'abc'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"DESCRIBE FORMAT=TRADITIONAL UPDATE test SET test_col = 'abc'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"DESCRIBE FORMAT=TREE UPDATE test SET test_col = 'abc'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"EXPLAIN ANALYZE SELECT * FROM t"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"GRANT 'role1', 'role2' TO 'user1'@'localhost', 'user2'@'localhost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"GRANT ALL ON test.* TO ''@'localhost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"GRANT INSERT ON `d%`.* TO u"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT (col1), INSERT (col1, col2) ON mydb.mytbl TO 'someuser'@'somehost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT ON db2.invoice TO 'jeffrey'@'localhost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT ON world.* TO 'role3'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT, INSERT, UPDATE ON *.* TO u2"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE 'role1', 'role2' FROM 'user1'@'localhost', 'user2'@'localhost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE ALL ON test.* FROM ''@'localhost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE INSERT ON `d%`.* FROM u"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT (col1), INSERT (col1, col2) ON mydb.mytbl FROM 'someuser'@'somehost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT ON db2.invoice FROM 'jeffrey'@'localhost'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT ON world.* FROM 'role3'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT, INSERT, UPDATE ON *.* FROM u2"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SELECT 'ab' MEMBER OF('[23, \"abc\", 17, \"ab\", 10]')"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SELECT 'foo' NOT SOUNDS LIKE 'bar'"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SELECT 'foo' SOUNDS LIKE 'bar'"}
@@ -422,123 +320,6 @@
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SELECT a || b"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SELECT e.* FROM e STRAIGHT_JOIN p ON e.x = p.y"}
 {"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SELECT foo AT TIME ZONE 'UTC'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@GLOBAL.max_connections = 1000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@GLOBAL.sort_buffer_size = 1000000, @@LOCAL.sort_buffer_size = 1000000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@GLOBAL.sort_buffer_size = 50000, sort_buffer_size = 1000000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@LOCAL.sql_mode = 'TRADITIONAL'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@PERSIST.max_connections = 1000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@PERSIST_ONLY.back_log = 100"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@SESSION.max_join_size = @@GLOBAL.max_join_size"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@SESSION.max_join_size = DEFAULT"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@SESSION.sql_mode = 'TRADITIONAL'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @@sql_mode = 'TRADITIONAL'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @name = 43"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @total_tax = (SELECT SUM(tax) FROM taxable_transactions)"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @var1 := 1"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @var_name = expr"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET @x = 1, SESSION sql_mode = ''"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET CHARACTER SET 'utf8'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET CHARACTER SET DEFAULT"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET CHARACTER SET utf8"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET GLOBAL TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ WRITE"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET GLOBAL TRANSACTION ISOLATION LEVEL SERIALIZABLE"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET GLOBAL max_connections = 1000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET GLOBAL max_connections = 1000, sort_buffer_size = 1000000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET GLOBAL sort_buffer_size = 1000000, SESSION sort_buffer_size = 1000000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET LOCAL sql_mode = 'TRADITIONAL'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET NAMES 'utf8'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET NAMES 'utf8' COLLATE 'utf8_unicode_ci'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET NAMES DEFAULT"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET NAMES utf8 COLLATE utf8_unicode_ci"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET PERSIST max_connections = 1000"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET PERSIST_ONLY back_log = 100"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET SESSION sql_mode = 'TRADITIONAL'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET TRANSACTION READ ONLY"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET autocommit = ON"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SET sql_mode = 'TRADITIONAL'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW BINARY LOGS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW BINLOG EVENTS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW BINLOG EVENTS IN 'log' FROM 1 LIMIT 2, 3"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW BINLOG EVENTS LIMIT 1"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CHARACTER SET"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CHARACTER SET LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CHARACTER SET WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CHARSET"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CHARSET LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CHARSET WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW COLLATION LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW COLLATION WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW COLUMNS FROM tbl_name"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CREATE DATABASE foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CREATE EVENT foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CREATE FUNCTION foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CREATE PROCEDURE foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CREATE TABLE foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CREATE TRIGGER foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW CREATE VIEW foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW DATABASES LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW DATABASES WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW ENGINE foo MUTEX"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW ENGINE foo STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW ERRORS LIMIT 2, 3"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FULL COLUMNS FROM tbl_name FROM db_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FULL PROCESSLIST"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FULL TABLES FROM db_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FULL TABLES IN test"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FUNCTION CODE foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FUNCTION STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FUNCTION STATUS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW FUNCTION STATUS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW GLOBAL STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW GLOBAL STATUS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW GLOBAL STATUS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW GLOBAL VARIABLES"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW GLOBAL VARIABLES LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW GLOBAL VARIABLES WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW GRANTS FOR foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW INDEX FROM foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW INDEX FROM foo FROM bar"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW MASTER LOGS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW MASTER STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW OPEN TABLES"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW OPEN TABLES FROM db_name"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW OPEN TABLES LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW OPEN TABLES WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW PROCEDURE CODE foo"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW PROCEDURE STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW PROCEDURE STATUS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW PROCEDURE STATUS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW PROFILE BLOCK IO"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW PROFILE BLOCK IO, PAGE FAULTS FOR QUERY 1 OFFSET 2 LIMIT 3"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW RELAYLOG EVENTS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW RELAYLOG EVENTS IN 'log' FROM 1 LIMIT 2, 3"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW RELAYLOG EVENTS LIMIT 1"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW REPLICA STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW REPLICA STATUS FOR CHANNEL channel_name"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SCHEMAS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SCHEMAS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SESSION STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SESSION STATUS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SESSION STATUS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SESSION VARIABLES"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SESSION VARIABLES LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SESSION VARIABLES WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SLAVE HOSTS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW SLAVE STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW STATUS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW STATUS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW STORAGE ENGINES"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TABLE STATUS"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TABLE STATUS FROM db_name"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TABLE STATUS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TABLE STATUS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TABLES IN test"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TRIGGERS FROM db_name"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TRIGGERS LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW TRIGGERS WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW VARIABLES LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW VARIABLES WHERE Column_name LIKE '%foo%'"}
-{"dialect":"mysql","category":"parse: Invalid expression / Unexpected token","sql":"SHOW WARNINGS LIMIT 2, 3"}
 {"dialect":"mysql","category":"parse: Required keyword","sql":"CONVERT('a' USING binary)"}
 {"dialect":"mysql","category":"parse: Required keyword","sql":"DATABASE()"}
 {"dialect":"mysql","category":"parse: Required keyword","sql":"MOD(x, y)"}
@@ -549,12 +330,12 @@
 {"dialect":"postgres","category":"gen: cast/type","sql":"CREATE OR REPLACE FUNCTION function_name (input_a character varying DEFAULT NULL::character varying)"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"ROUND(CAST(x AS DOUBLE PRECISION))"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"SELECT JSON_ARRAY_ELEMENTS((foo->'sections')::JSON) AS sections"}
+{"dialect":"postgres","category":"gen: cast/type","sql":"SELECT x FROM t WHERE CAST($1 AS TEXT) = 'ok'"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"cast(a as FLOAT)"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"cast(a as FLOAT4)"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"cast(a as FLOAT8)"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"x::JSON -> 'duration' ->> -1"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"\n        CREATE TABLE IF NOT EXISTS public.rental\n        (\n            inventory_id INT NOT NULL,\n            CONSTRAINT rental_customer_id_fkey FOREIGN KEY (customer_id)\n                REFERENCES public.customer (customer_id) MATCH FULL\n                ON UPDATE CASCADE\n                ON DELETE RESTRICT,\n            CONSTRAINT rental_inventory_id_fkey FOREIGN KEY (inventory_id)\n                REFERENCES public.inventory (inventory_id) MATCH PARTIAL\n                ON UPDATE CASCADE\n                ON DELETE RESTRICT,\n            CONSTRAINT rental_staff_id_fkey FOREIGN KEY (staff_id)\n                REFERENCES public.staff (staff_id) MATCH SIMPLE\n                ON UPDATE CASCADE\n                ON DELETE RESTRICT,\n            INITIALLY IMMEDIATE\n        )\n        "}
-{"dialect":"postgres","category":"gen: mismatch","sql":"ANALYZE TBL"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"ARRAY[x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x]"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"CHARACTER_LENGTH(x)"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"CHAR_LENGTH(x)"}
@@ -569,8 +350,7 @@
 {"dialect":"postgres","category":"gen: mismatch","sql":"CREATE TABLE test (foo VARCHAR(64)[])"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"CREATE TABLE test (x TIMESTAMP WITHOUT TIME ZONE[][])"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"CREATE TRIGGER proc_trigger BEFORE INSERT ON users FOR EACH ROW EXECUTE PROCEDURE LOG_CHANGES()"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"END AND CHAIN"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"EXEC AS myfunc @id = 123"}
+{"dialect":"postgres","category":"gen: mismatch","sql":"INSERT INTO book (isbn, title) VALUES ($1, $2) ON CONFLICT(isbn) WHERE deleted_at IS NULL DO UPDATE SET title = EXCLUDED.title RETURNING id, isbn"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"LAST_VALUE(\"col1\") OVER (ORDER BY \"col2\" RANGE BETWEEN INTERVAL '1 DAY' PRECEDING AND '1 month' FOLLOWING)"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"MERGE INTO x USING (SELECT id) AS y ON a = b WHEN MATCHED THEN UPDATE SET x.a = y.b WHEN NOT MATCHED THEN INSERT (a, b) VALUES (y.a, y.b)"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"SELECT * FROM \"x\" WHERE SUBSTRING(\"x\".\"foo\" FROM 1 FOR 2) IN ('mas')"}
@@ -610,7 +390,6 @@
 {"dialect":"postgres","category":"gen: mismatch","sql":"select count() OVER(partition by a order by a range offset preceding exclude current row)"}
 {"dialect":"postgres","category":"generate: error","sql":"WITH t(c) AS (SELECT 1) SELECT * INTO UNLOGGED foo FROM (SELECT c AS c FROM t) AS temp"}
 {"dialect":"postgres","category":"parse: Expected AS after CAST","sql":"SELECT CAST(e'\\176' AS BYTEA)"}
-{"dialect":"postgres","category":"parse: Expected AS after CAST","sql":"SELECT x FROM t WHERE CAST($1 AS TEXT) = 'ok'"}
 {"dialect":"postgres","category":"parse: Expected TYPE after CAST","sql":"CAST(5 AS \"MyCatalog\".\"MySchema\".\"MyType\")"}
 {"dialect":"postgres","category":"parse: Expected TYPE after CAST","sql":"CAST(5 AS \"MySchema\".\"MyType\")"}
 {"dialect":"postgres","category":"parse: Expected TYPE after CAST","sql":"CAST(5 AS \"MyType\")"}
@@ -631,7 +410,6 @@
 {"dialect":"postgres","category":"parse: Expected type","sql":"x::regrole"}
 {"dialect":"postgres","category":"parse: Expected type","sql":"x::regtype"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"\n            WITH\n              json_data AS (SELECT '{\"field_id\": [1, 2, 3]}'::JSON AS data),\n              field_ids AS (SELECT 'field_id' AS field_id)\n\n            SELECT\n                JSON_ARRAY_ELEMENTS(json_data.data -> field_ids.field_id) AS element\n            FROM json_data, field_ids\n            "}
-{"dialect":"postgres","category":"parse: Expecting )","sql":"INSERT INTO book (isbn, title) VALUES ($1, $2) ON CONFLICT(isbn) WHERE deleted_at IS NULL DO UPDATE SET title = EXCLUDED.title RETURNING id, isbn"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT * FROM schema_name.table_name st WHERE JSON_EXTRACT_PATH_TEXT((st.data)::json, variadic array['test'::text]) = 'test'::text"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT 1 FROM ((VALUES (1)) AS vals(id) LEFT OUTER JOIN tbl ON vals.id = tbl.id)"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT DATE_PART('isodow'::varchar(6), current_date)"}
@@ -674,76 +452,13 @@
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"ALTER TABLE t1 SET WITHOUT CLUSTER"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"ALTER TABLE t1 SET WITHOUT OIDS"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"ALTER TABLE tested_table ADD CONSTRAINT unique_example UNIQUE (column_name) NOT VALID"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE BUFFER_USAGE_LIMIT 1337 TBL"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE TBL(col1, col2)"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"ANALYZE VERBOSE SKIP_LOCKED TBL(col1, col2)"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"ARRAY[1, 2, 3] && ARRAY[1, 2]"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN TRANSACTION DEFERRABLE, DEFERRABLE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED, ISOLATION LEVEL READ COMMITTED"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE, ISOLATION LEVEL SERIALIZABLE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN TRANSACTION NOT DEFFERABLE, NOT DEFFERABLE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN TRANSACTION READ WRITE, READ WRITE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN WORK DEFERRABLE, DEFERRABLE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN WORK ISOLATION LEVEL READ COMMITTED, ISOLATION LEVEL READ COMMITTED"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN WORK ISOLATION LEVEL SERIALIZABLE, ISOLATION LEVEL SERIALIZABLE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN WORK NOT DEFFERABLE, NOT DEFFERABLE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"BEGIN WORK READ WRITE, READ WRITE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON INDEX public.idx IS 'x'"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON MATERIALIZED VIEW foo.my_view IS 'x'"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON MATERIALIZED VIEW my_view IS 'this'"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON SEQUENCE public.seq IS 'x'"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON TABLE mytable IS $$doc this$$"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON TABLE mytable IS 'this'"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON TYPE foo.mood IS 'x'"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON TYPE mood IS 'x'"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COMMENT ON VIEW foo.bat IS 'x'"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COPY tbl (col1, col2) FROM 'file' WITH (FORMAT format, HEADER MATCH, FREEZE TRUE)"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"COPY tbl (col1, col2) TO 'file' WITH (FORMAT format, HEADER MATCH, FREEZE TRUE)"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"DROP INDEX CONCURRENTLY IF EXISTS ix_table_id"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"DROP INDEX CONCURRENTLY ix_table_id"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"DROP INDEX IF EXISTS ix_table_id"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"DROP INDEX ix_table_id"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"END WORK AND NO CHAIN"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT ALL PRIVILEGES ON DATABASE mydb TO PUBLIC"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT CONNECT ON DATABASE testdb TO readonly_user"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT CREATE ON SCHEMA public TO developer"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT EXECUTE ON FUNCTION calculate_bonus(integer) TO analyst"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT INSERT, DELETE ON ALL TABLES IN SCHEMA myschema TO user1"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT INSERT, DELETE ON TABLE orders TO user1"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT REFERENCES ON products TO foreign_key_user"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT ON TABLE users TO role1"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT ON employees TO manager WITH GRANT OPTION"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT SELECT(id, name), UPDATE(email) ON customers TO customer_service"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT TEMPORARY ON DATABASE testdb TO temp_user"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT TRIGGER ON orders TO audit_role"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT TRUNCATE ON logs TO admin_role"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT UPDATE(salary) ON employees TO hr_manager"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT USAGE ON SCHEMA finance TO user2"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT admin_role TO mary WITH ADMIN OPTION"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"GRANT developer_role TO john"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE ALL PRIVILEGES ON DATABASE mydb FROM PUBLIC"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE CONNECT ON DATABASE testdb FROM readonly_user"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE CREATE ON SCHEMA public FROM developer"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE EXECUTE ON FUNCTION calculate_bonus(integer) FROM analyst"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE GRANT OPTION FOR SELECT ON employees FROM manager"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE GRANT OPTION FOR SELECT ON employees FROM manager RESTRICT"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE INSERT, DELETE ON ALL TABLES IN SCHEMA myschema FROM user1"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE INSERT, DELETE ON TABLE orders FROM user1"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE REFERENCES ON products FROM foreign_key_user"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT ON TABLE orders FROM user1 RESTRICT"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT ON TABLE users FROM role1"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE SELECT(id, name), UPDATE(email) ON customers FROM customer_service"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE TEMPORARY ON DATABASE testdb FROM temp_user"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE TRIGGER ON orders FROM audit_role"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE TRUNCATE ON logs FROM admin_role"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE UPDATE(salary) ON employees FROM hr_manager"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE USAGE ON SCHEMA finance FROM user2"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE USAGE ON SCHEMA finance FROM user2 CASCADE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE admin_role FROM mary"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"REVOKE developer_role FROM john"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT $$Dianne's horse$$"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT $$The price is $9.95$$ AS msg"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT $$a$$"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT '[\"a\", \"b\"]'::jsonb ?& array['a', 'b']"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT '[\"a\", {\"b\":1}]'::jsonb #- '{1,b}'"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT '{\"a\":1, \"b\":2, \"c\":3}'::jsonb ?| array['b', 'c']"}
@@ -751,7 +466,6 @@
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM ROWS FROM (FUNC1(col1, col2))"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM events WHERE doc @? '$.a[*] ? (@ > 2)'"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM t TABLESAMPLE SYSTEM (50) REPEATABLE (55)"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM t1*"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM table1, ROWS FROM (FUNC1(col1) AS alias1(\"col1\" TEXT)) WITH ORDINALITY AS alias3(\"col3\" INT, \"col4\" TEXT)"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT ARRAY[1, 2, 3] <@ ARRAY[1, 2]"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT NUMRANGE(1.1, 2.2) -|- NUMRANGE(2.2, 3.3)"}
@@ -768,13 +482,6 @@
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT js, js IS JSON ARRAY WITH UNIQUE KEYS AS \"array w. UK?\", js IS JSON ARRAY WITHOUT UNIQUE KEYS AS \"array w/o UK?\", js IS JSON ARRAY UNIQUE KEYS AS \"array w UK 2?\" FROM t"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT js, js IS JSON AS \"json?\", js IS JSON VALUE AS \"scalar?\", js IS JSON SCALAR AS \"scalar?\", js IS JSON OBJECT AS \"object?\", js IS JSON ARRAY AS \"array?\" FROM t"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"SELECT ~x"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"TRUNCATE TABLE ONLY t1, t2*, ONLY t3, t4, t5* RESTART IDENTITY CASCADE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"TRUNCATE TABLE t1 CASCADE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"TRUNCATE TABLE t1 CONTINUE IDENTITY"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"TRUNCATE TABLE t1 CONTINUE IDENTITY CASCADE"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"TRUNCATE TABLE t1 RESTART IDENTITY"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"TRUNCATE TABLE t1 RESTART IDENTITY RESTRICT"}
-{"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"TRUNCATE TABLE t1 RESTRICT"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"a #- b"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"a ?& b"}
 {"dialect":"postgres","category":"parse: Invalid expression / Unexpected token","sql":"a ?| b"}
