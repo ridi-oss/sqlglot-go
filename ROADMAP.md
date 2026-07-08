@@ -1,11 +1,16 @@
-# sqlglot-go — Milestone 1 roadmap
+# sqlglot-go — roadmap
 
-M1 goal: the API surface proxy-monster/probe.py uses — sqlglot.parse(sql, dialect=),
-the exp AST, optimizer.qualify.qualify(...), optimizer.scope.traverse_scope + Scope.
-Dialects: MySQL + Postgres ONLY. Closure ≈ 46k LOC / ~54 Python files. Port 1:1 from
-.reference/sqlglot-v30.12.0/ file-by-file; port the matching tests as the oracle.
+Goal: a faithful Go port of sqlglot v30.12.0 with behavioral parity for base + MySQL + Postgres —
+tokenizer, AST, parser, generator, schema, and the qualify/scope optimizer passes. Anything upstream
+sqlglot parses should parse here. Port 1:1 from .reference/sqlglot-v30.12.0/ file-by-file; port the
+matching upstream tests as the oracle.
 
-Slices (ordered; each must land `go test ./...` green before the next):
+The initial slices below were sequenced to first stand up a working parse→qualify→scope pipeline
+(that ordering was driven by an external consumer's needs); the CURRENT focus is closing parser/
+feature parity with upstream — see "Remaining work" after the slice ledger. Slices 0–5 are done and
+committed; each landed `go test ./...` green.
+
+Slices (historical ledger; each landed `go test ./...` green before the next):
 
 0. FOUNDATION (this run) — DONE when green:
    errors, trie, tokens (TokenType/Token/TokenizerCore/Tokenizer), expressions core
@@ -85,22 +90,31 @@ Slices (ordered; each must land `go test ./...` green before the next):
      misparse), MySQL CAST(x AS TIMESTAMP/BLOB) round-trip, and the cross-dialect
      transpilation test cases (need the other 32 dialects — out of M1 scope).
 
-6. PROBE END-TO-END — DONE (branch sjcho/sqlglot-go/probe; 122 tests green). probe.py ported
-   1:1 → probe/probe.go (prober struct; col2scope via Go pointer identity). Pulled SELECT..INTO
-   parsing in-scope. PARITY: 94/94 SQL×dialect cases exact-match the REAL Python sqlglot 30.12.0
-   probe.py on all enforcement-driving fields (resolved/failedStage/isWrite/origins/references/
-   outputColumns/tracedColumns), run live via PYTHONPATH=<pinned reference> python3
-   (TestProbeParity, ratcheted at 94). Committed golden files + hermetic TestProbeGolden (94/94)
-   guard the enforcement output with NO python3 needed. detail matches 88/94 (the 6 differ only
-   in Go-panic vs CPython-exception wording — by policy). ===> MILESTONE 1 COMPLETE: probe.py's
-   entire API surface (parse, exp AST, optimizer.qualify.qualify, optimizer.scope.traverse_scope)
-   is served by the Go port on MySQL + Postgres, verified at parity.
+(An external consumer's lineage analyzer was ported and parity-tested against Python during the
+initial slices to drive/validate the API surface; it has since been removed — this repo is the SQL
+engine only. That validation confirmed the qualify/scope pipeline matches upstream on ~94 real
+queries across MySQL/Postgres.)
 
-   Deferred parser gaps are FAIL-CLOSED (representative, not exhaustive — also e.g. Postgres
-   `FROM ONLY`): where a construct isn't parsed yet (TVF-as-FROM [4c], MySQL ON DUPLICATE KEY
-   UPDATE VALUES() [5b], SIMILAR TO [1d]), the Go probe PARSE-fails → DENY, which is the SAFE
-   direction for a security probe (Python resolves; Go is strictly more conservative). Closing
-   these is 1d/4c/5b, not a correctness regression.
+## Remaining work — parser/feature parity with upstream
+
+Anything upstream sqlglot parses should parse here. Known gaps to close (port 1:1 from `.reference/`,
+port the matching upstream tests, differential-check `.sql()` against the pinned Python):
+
+- PARSER TAIL: table-valued function sources (`generate_series(...)`, `JSON_TABLE(...)`, `FOO(bar)`)
+  as FROM/JOIN sources; `ARRAY[...]` literals + `UNNEST(ARRAY[...])`; `SIMILAR TO`; `FROM ONLY`
+  (Postgres); `CONNECT BY` / `START WITH`; MySQL `ON DUPLICATE KEY UPDATE ... VALUES(col)`; the long
+  `FUNCTIONS` / `FUNCTION_PARSERS` registry tail; DDL detail (properties, column + table
+  CONSTRAINT_PARSERS, indexes, clone/sequence).
+- FULL annotate_types (coercion tables + per-node type rules) — currently a minimal constructible
+  stub; not yet a faithful port.
+- Per-dialect parser/generator override tables (function + type-name remaps must land paired to
+  avoid round-trip regressions), MySQL `||`/`&&`/`XOR` logical operators, MySQL
+  `CAST(x AS TIMESTAMP/BLOB)` round-trip.
+- Optional/larger: dialects beyond base + MySQL + Postgres; canonicalize/normalize/simplify beyond
+  the pieces qualify needs.
+
+Historical note: earlier entries below tagged items "off probe's critical path" / "fail-closed" —
+that framing referred to the removed consumer. For this repo they are simply parser-parity gaps.
 
 Cross-cutting deferred from foundation (tracked as TODOs in code):
 - Expr→SQL (generator) — blocks all .sql() asserts.

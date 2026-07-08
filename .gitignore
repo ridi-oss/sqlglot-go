@@ -13,10 +13,3 @@ coverage.txt
 .DS_Store
 .idea/
 .vscode/
-
-# JVM binding build output
-/jvm/.gradle/
-/jvm/build/
-*.dylib
-*.so
-cmd/libsqlglot/*.h

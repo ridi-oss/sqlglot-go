@@ -7,22 +7,21 @@ This is not a wrapper or a reimagining: it mirrors sqlglot's architecture (token
 generator → optimizer passes) file-by-file, so behavior tracks the Python original and upstream tests
 port across directly. It has **zero third-party dependencies** (Go stdlib only).
 
-> **Status: Milestone 1 complete.** The port targets exactly the sqlglot API surface used by a SQL
-> **column-lineage probe** (`parse` → `qualify` → `traverse_scope`), on **MySQL** and **Postgres**,
-> and is verified at **94/94 parity** against the real Python `probe.py` running on sqlglot 30.12.0.
-> Broader dialect/feature coverage is in progress — see [ROADMAP.md](./ROADMAP.md).
+> **Status: in progress.** The tokenizer, AST, generator, schema, and the `qualify`/`scope` optimizer
+> passes work for **base + MySQL + Postgres**, validated against the ported upstream test suite. The
+> parser is being brought to full upstream parity — some tail constructs are not parsed yet (tracked
+> in [ROADMAP.md](./ROADMAP.md)). Dialect coverage beyond base/MySQL/Postgres is future work.
 
 ## What works today
 
 | Capability | Package | Notes |
 |---|---|---|
 | Tokenize | `tokens`, `trie` | full base tokenizer |
-| Parse → AST | `parser`, `expressions` | SELECT/set-ops/CTE/subqueries, all query clauses, predicates, functions, DML + DDL roots (INSERT/UPDATE/DELETE/MERGE/CREATE), CAST/DataType, PIVOT/LATERAL/VALUES, INTERVAL, JSON ops |
+| Parse → AST | `parser`, `expressions` | SELECT/set-ops/CTE/subqueries, all query clauses, predicates, functions, DML + DDL roots (INSERT/UPDATE/DELETE/MERGE/CREATE), CAST/DataType, PIVOT/LATERAL/VALUES, INTERVAL, JSON ops. Parser tail in progress — see ROADMAP. |
 | Generate (AST → SQL) | `generator` | base dialect; 732/955 `identity.sql` lines round-trip |
 | Schema | `schema` | `MappingSchema`, `DataType.build`, type category sets |
 | Optimize | `optimizer` | `qualify` (qualify_tables, normalize_identifiers, qualify_columns, quote_identifiers, validate), `traverse_scope` + full `Scope` API |
 | Dialects | `dialects` | MySQL + Postgres (tokenizer, normalization, quoting) |
-| Lineage probe | `probe` | ported end-to-end, with a Python-parity harness |
 
 ## Quick start
 
@@ -65,36 +64,17 @@ func main() {
 }
 ```
 
-## Use from the JVM (Kotlin/Java)
-
-An in-process **JVM binding** lives in [`jvm/`](./jvm) — it calls the Go lineage probe through the
-Java Foreign Function & Memory API (`java.lang.foreign`), one call, JSON out:
-
-```kotlin
-val json = io.github.sjincho.sqlglot.Sqlglot.probeJson(sql, /* "mysql"|"postgres" */ dialect, schemaJson)
-```
-
-The output is the same **ProbeResult** JSON as the Python probe (verified at 94/94 parity). The
-recommended way to consume it — `git subtree` + a Gradle composite build, no publishing — is in
-**[docs/USING_FROM_JVM.md](./docs/USING_FROM_JVM.md)**. Requires JDK 22+ to consume and the Go
-toolchain to build the native library.
-
 ## Development
 
 ```bash
-go test ./...          # ~122 tests, green
+go test ./...          # green
 gofmt -l . && go vet ./...
 ```
 
-**Parity harness.** The `probe` package proves the port faithfully reproduces the Python lineage
-analyzer. `probe/golden_test.go` runs hermetically against committed golden results
-(`probe/testdata/golden.json`) — no Python needed. To re-verify against *live* Python and refresh the
-goldens:
-
-```bash
-scripts/fetch-reference.sh                                   # fetch pinned sqlglot 30.12.0 into .reference/
-PROBE_REGEN=1 go test ./probe/ -run TestProbeParity          # run the real probe.py + regenerate goldens
-```
+The upstream test suite is ported alongside the code (`*_test.go` + `testdata/*.sql` fixtures reused
+verbatim) and is the correctness oracle. For a live differential check against the pinned Python
+source, `scripts/fetch-reference.sh` fetches sqlglot 30.12.0 into `.reference/`, then e.g.
+`PYTHONPATH=.reference/sqlglot-v30.12.0 python3 -c "import sqlglot; print(sqlglot.parse_one('…','postgres').sql())"`.
 
 ## Continuing the port
 
