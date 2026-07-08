@@ -133,3 +133,95 @@ func (p *Parser) parseStringAgg() exp.Expression {
 	p.matchLParen(nil)
 	return p.expression(exp.GroupConcat(exp.Args{"this": p.parseOrder(seqGet(args, 0), false), "separator": seqGet(args, 1)}), nil, nil)
 }
+
+// parseFormatJson ports _parse_format_json (parser.py:8054-8058): wraps `this` in
+// exp.FormatJson if followed by the literal "FORMAT JSON" text sequence.
+func (p *Parser) parseFormatJson(this exp.Expression) exp.Expression {
+	if this == nil || !p.matchTextSeq("FORMAT", "JSON") {
+		return this
+	}
+	return p.expression(exp.FormatJson(exp.Args{"this": this}), nil, nil)
+}
+
+// parseOnHandling ports _parse_on_handling (parser.py:8076-8090): parses the
+// "<value> ON <on>" or "DEFAULT <expr> ON <on>" syntax (e.g. "NULL ON NULL",
+// "ERROR ON ERROR"). Returns a string, an exp.Expression (the DEFAULT case), or nil.
+func (p *Parser) parseOnHandling(on string, values ...string) any {
+	for _, value := range values {
+		if p.matchTextSeq(value, "ON", on) {
+			return value + " ON " + on
+		}
+	}
+	index := p.index
+	if p.match(tokens.DEFAULT) {
+		defaultValue := p.parseBitwise()
+		if p.matchTextSeq("ON", on) {
+			return defaultValue
+		}
+		p.retreat(index)
+	}
+	return nil
+}
+
+// parseJSONColumnDef ports _parse_json_column_def (parser.py:8131-8156). Note: like
+// upstream, this only implements the "JSON_value_column" part of the grammar.
+func (p *Parser) parseJSONColumnDef() exp.Expression {
+	var this, kind, nestedSchema exp.Expression
+	var ordinality any
+	nested := false
+	if !p.matchTextSeq("NESTED") {
+		// any_token=true mirrors upstream _parse_json_column_def's _parse_id_var()
+		// (parser.py:8131), so keyword-like column names are accepted.
+		this = p.parseIdVar(true, nil)
+		ordinality = p.matchPair(tokens.FOR, tokens.ORDINALITY, true)
+		kind = p.parseTypes(false, false, false, false)
+	} else {
+		nested = true
+	}
+	formatJSON := p.matchTextSeq("FORMAT", "JSON")
+	var path exp.Expression
+	if p.matchTextSeq("PATH") {
+		path = p.parseString()
+	}
+	if nested {
+		nestedSchema = p.parseJSONSchema()
+	}
+	return p.expression(exp.JSONColumnDef(exp.Args{
+		"this":          this,
+		"kind":          kind,
+		"path":          path,
+		"nested_schema": nestedSchema,
+		"ordinality":    ordinality,
+		"format_json":   formatJSON,
+	}), nil, nil)
+}
+
+// parseJSONSchema ports _parse_json_schema (parser.py:8158-8164): `[COLUMNS] (col_def, ...)`.
+func (p *Parser) parseJSONSchema() exp.Expression {
+	p.matchTextSeq("COLUMNS")
+	return p.expression(exp.JSONSchema(exp.Args{
+		"expressions": p.parseWrappedCsv(p.parseJSONColumnDef, true),
+	}), nil, nil)
+}
+
+// parseJSONTable ports _parse_json_table (parser.py:8166-8179):
+// JSON_TABLE(<doc> [FORMAT JSON], <path> [<on-error>] [<on-empty>] <schema>).
+// Mirrors upstream in returning the raw exp.JSONTable node (not wrapped via
+// p.expression), so it isn't parser-node-count/error-message validated here.
+func (p *Parser) parseJSONTable() exp.Expression {
+	this := p.parseFormatJson(p.parseBitwise())
+	var path exp.Expression
+	if p.match(tokens.COMMA) {
+		path = p.parseString()
+	}
+	errorHandling := p.parseOnHandling("ERROR", "ERROR", "NULL")
+	emptyHandling := p.parseOnHandling("EMPTY", "ERROR", "NULL")
+	schema := p.parseJSONSchema()
+	return exp.JSONTable(exp.Args{
+		"this":           this,
+		"schema":         schema,
+		"path":           path,
+		"error_handling": errorHandling,
+		"empty_handling": emptyHandling,
+	})
+}

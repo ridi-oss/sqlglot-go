@@ -1343,6 +1343,8 @@ func Between(args Args) Expression     { return newNode(KindBetween, args) }
 func Is(args Args) Expression          { return newNode(KindIs, args) }
 func Like(args Args) Expression        { return newNode(KindLike, args) }
 func ILike(args Args) Expression       { return newNode(KindILike, args) }
+func SimilarTo(args Args) Expression   { return newNode(KindSimilarTo, args) }
+func Escape(args Args) Expression      { return newNode(KindEscape, args) }
 func In(args Args) Expression          { return newNode(KindIn, args) }
 func Case(args Args) Expression        { return newNode(KindCase, args) }
 func If(args Args) Expression          { return newNode(KindIf, args) }

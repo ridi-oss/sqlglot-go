@@ -42,6 +42,8 @@ func init() {
 		expressions.KindIs:                  (*Generator).isSQL,
 		expressions.KindLike:                (*Generator).likeSQL,
 		expressions.KindILike:               (*Generator).ilikeSQL,
+		expressions.KindSimilarTo:           (*Generator).similarToSQL,
+		expressions.KindEscape:              (*Generator).escapeSQL,
 		expressions.KindIn:                  (*Generator).inSQL,
 		expressions.KindSelect:              (*Generator).selectSQL,
 		expressions.KindFrom:                (*Generator).fromSQL,
@@ -126,11 +128,15 @@ func init() {
 		expressions.KindIntervalSpan: func(g *Generator, e expressions.Expression) string {
 			return g.sqlKey(e, "this") + " TO " + g.sqlKey(e, "expression")
 		},
-		expressions.KindJSONCast:  (*Generator).jsonCastSQL,
-		expressions.KindArrayAgg:  (*Generator).arrayAggSQL,
-		expressions.KindArraySize: (*Generator).arraySizeSQL,
-		expressions.KindInitcap:   (*Generator).initcapSQL,
-		expressions.KindHex:       (*Generator).hexSQL,
-		expressions.KindDateAdd:   (*Generator).dateAddSQL,
+		expressions.KindJSONCast:      (*Generator).jsonCastSQL,
+		expressions.KindJSONTable:     (*Generator).jsonTableSQL,
+		expressions.KindJSONColumnDef: (*Generator).jsonColumnDefSQL,
+		expressions.KindJSONSchema:    (*Generator).jsonSchemaSQL,
+		expressions.KindFormatJson:    (*Generator).formatJSONSQL,
+		expressions.KindArrayAgg:      (*Generator).arrayAggSQL,
+		expressions.KindArraySize:     (*Generator).arraySizeSQL,
+		expressions.KindInitcap:       (*Generator).initcapSQL,
+		expressions.KindHex:           (*Generator).hexSQL,
+		expressions.KindDateAdd:       (*Generator).dateAddSQL,
 	}
 }

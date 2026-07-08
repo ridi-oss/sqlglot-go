@@ -662,9 +662,16 @@ func (p *Parser) parseTable(schema bool, joins bool, aliasTokens map[tokens.Toke
 			return subquery
 		}
 	}
+	// Postgres FROM ONLY <table> (parser.py:4876-4888): only relevant when the ONLY
+	// token isn't schema/db-reference position; excludes the table's descendant
+	// partitions from the scan. Set on the resulting Table below.
+	only := p.match(tokens.ONLY)
 	this := p.parseTableParts(schema, isDBReference, false, false)
 	if this == nil {
 		return nil
+	}
+	if only {
+		this.Set("only", only)
 	}
 	if schema {
 		return p.parseSchema(this)
@@ -684,6 +691,15 @@ func (p *Parser) parseTable(schema bool, joins bool, aliasTokens map[tokens.Toke
 				break
 			}
 			this.Append("joins", join)
+		}
+	}
+	// WITH ORDINALITY numbers the rows of a set-returning function source, e.g.
+	// `FROM JSON_ARRAY_ELEMENTS(...) WITH ORDINALITY AS t(a, b)` (parser.py:4935-4937).
+	// It carries its own alias, parsed after the keyword.
+	if p.matchPair(tokens.WITH, tokens.ORDINALITY, true) {
+		this.Set("ordinality", true)
+		if alias := p.parseTableAlias(aliasTokens); alias != nil {
+			this.Set("alias", alias)
 		}
 	}
 	return this
@@ -720,6 +736,14 @@ func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool,
 }
 
 func (p *Parser) parseTablePart(schema bool) exp.Expression {
+	// Table-valued function sources (parser.py:4664-4670), e.g. `FROM generate_series(1, 10)`
+	// or `FROM JSON_TABLE(...)`: outside schema position, a function call takes priority over
+	// a plain identifier so the parsed Func node becomes exp.Table's "this" arg.
+	if !schema {
+		if expression := p.parseFunction(nil, false, false, false); expression != nil {
+			return expression
+		}
+	}
 	if expression := p.parseIdVar(false, nil); expression != nil {
 		return expression
 	}
@@ -748,7 +772,12 @@ func (p *Parser) parseTableAlias(aliasTokensArg map[tokens.TokenType]bool) exp.E
 	var columns []exp.Expression
 	idx := p.index
 	if p.match(tokens.L_PAREN) {
-		columns = p.parseCsv(func() exp.Expression { return p.parseIdVar(false, nil) })
+		// Column aliases are parsed as column defs so typed forms like `AS y("rank" INT)`
+		// (JSON_TO_RECORDSET etc.) are supported; parseColumnDef returns the bare id_var
+		// unchanged when no type follows (_parse_function_parameter, parser.py:7111-7112).
+		// any_token=true mirrors _parse_id_var's default (parser.py:8507), so keyword-like
+		// alias columns such as `AS y(from INT)` are accepted.
+		columns = p.parseCsv(func() exp.Expression { return p.parseColumnDef(p.parseIdVar(true, nil)) })
 		if len(columns) > 0 {
 			p.matchRParen(nil)
 		} else {
@@ -987,6 +1016,12 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 		}
 		this = p.expression(exp.ILike(args), nil, nil)
 		negate = false
+	case tokens.SIMILAR_TO:
+		// binary_range_parser(exp.SimilarTo) (parser.py:62-71): unlike LIKE/ILIKE above,
+		// SimilarTo has no "negate" arg, so `negate` stays set and the generic
+		// `Not`-wrapping below (_negate_range's fallback) applies to `NOT ... SIMILAR TO`.
+		p.advance()
+		this = p.parseEscape(p.expression(exp.SimilarTo(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
 	case tokens.ISNULL:
 		p.advance()
 		this = p.expression(exp.Is(exp.Args{"this": this, "expression": exp.Null()}), nil, nil)
@@ -1002,6 +1037,18 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 		this = p.expression(exp.Not(exp.Args{"this": this}), nil, nil)
 	}
 	return this
+}
+
+// parseEscape ports _parse_escape (parser.py:5966-5971): `<this> ESCAPE <string|NULL>`.
+func (p *Parser) parseEscape(this exp.Expression) exp.Expression {
+	if !p.match(tokens.ESCAPE) {
+		return this
+	}
+	expression := p.parseString()
+	if expression == nil {
+		expression = p.parseNull()
+	}
+	return p.expression(exp.Escape(exp.Args{"this": this, "expression": expression}), nil, nil)
 }
 
 func (p *Parser) parseIs(this exp.Expression) exp.Expression {
@@ -1699,15 +1746,27 @@ func (p *Parser) parseWrappedCsv(parseMethod func() exp.Expression, optional ...
 
 func (p *Parser) parseValue(values bool) exp.Expression {
 	if p.match(tokens.L_PAREN) {
-		expressions := p.parseCsv(p.parseExpression)
+		expressions := p.parseCsv(p.parseValueExpression)
 		p.matchRParen(nil)
 		return p.expression(exp.Tuple(exp.Args{"expressions": expressions}), nil, nil)
 	}
+	// In some dialects VALUES 1, 2 results in 1 column & 2 rows (parser.py:3794): the
+	// no-parens branch stays plain _parse_expression (no SUPPORTS_VALUES_DEFAULT).
 	expression := p.parseExpression()
 	if expression != nil {
 		return p.expression(exp.Tuple(exp.Args{"expressions": []exp.Expression{expression}}), nil, nil)
 	}
 	return nil
+}
+
+// parseValueExpression ports _parse_value's local _parse_value_expression closure
+// (parser.py:3784-3787): MySQL/Postgres (SUPPORTS_VALUES_DEFAULT=True, the base default;
+// dialect.py:670) accept `VALUES (DEFAULT)`, parsed as exp.var("DEFAULT").
+func (p *Parser) parseValueExpression() exp.Expression {
+	if p.dialect.SupportsValuesDefault && p.match(tokens.DEFAULT) {
+		return exp.Var(exp.Args{"this": stringsUpper(p.prev.Text)})
+	}
+	return p.parseExpression()
 }
 
 func (p *Parser) parseWrappedSelect(table bool) exp.Expression {
@@ -1759,12 +1818,22 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 		if reservedTokens[tokenType] {
 			return nil
 		}
-	} else if !funcTokens[tokenType] {
+		// MySQL FUNC_TOKENS += TokenType.VALUES (parsers/mysql.py:63-70): see
+		// dialects.Dialect.ValuesIsFunction.
+	} else if !funcTokens[tokenType] && !(tokenType == tokens.VALUES && p.dialect.ValuesIsFunction) {
 		return nil
 	}
 	p.advance(2)
 	var result exp.Expression
-	if parser := functionParsers[upper]; parser != nil && !anonymous {
+	parser := functionParsers[upper]
+	// Upstream FUNCTION_PARSERS is per-dialect and "VALUES" lives only in MySQL's map
+	// (parsers/mysql.py:158-160). This port keeps one shared map, so gate the VALUES entry
+	// by the dialect flag: otherwise a quoted identifier like `"VALUES"(a)` in base/Postgres
+	// would wrongly parse as the MySQL VALUES function instead of an Anonymous call.
+	if upper == "VALUES" && !p.dialect.ValuesIsFunction {
+		parser = nil
+	}
+	if parser != nil && !anonymous {
 		result = parser(p)
 	} else {
 		if subqueryPredicate := subqueryPredicates[tokenType]; subqueryPredicate != nil {
@@ -2278,6 +2347,13 @@ func init() {
 		"SUBSTRING":   func(p *Parser) exp.Expression { return p.parseSubstring() },
 		"TRIM":        func(p *Parser) exp.Expression { return p.parseTrim() },
 		"STRING_AGG":  func(p *Parser) exp.Expression { return p.parseStringAgg() },
+		"JSON_TABLE":  func(p *Parser) exp.Expression { return p.parseJSONTable() },
+		// MySQL-only in practice: only reachable when ValuesIsFunction gates TokenType.VALUES
+		// into the function-call path (parsers/mysql.py:158-160). `VALUES(col)` inside
+		// `ON DUPLICATE KEY UPDATE` refers to the row that would have been inserted.
+		"VALUES": func(p *Parser) exp.Expression {
+			return p.expression(exp.Anonymous(exp.Args{"this": "VALUES", "expressions": []exp.Expression{p.parseIdVar(true, nil)}}), nil, nil)
+		},
 	}
 	queryModifierParsers = map[tokens.TokenType]func(*Parser) (string, any){
 		tokens.WHERE:    func(p *Parser) (string, any) { return "where", p.parseWhere(false) },

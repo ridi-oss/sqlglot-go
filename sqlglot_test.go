@@ -69,7 +69,7 @@ func TestIdentity(t *testing.T) {
 	// the pass floor, lower the mismatch ceiling); never loosen them to mask a
 	// regression. A drop in pass or a rise in gen-mismatch fails the build.
 	const (
-		minPass        = 732
+		minPass        = 745
 		maxGenMismatch = 20
 	)
 	if pass < minPass {

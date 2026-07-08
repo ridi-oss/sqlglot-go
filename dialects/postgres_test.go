@@ -109,9 +109,23 @@ func TestPostgresIdentityRoundTrips(t *testing.T) {
 		{name: "dollar heredoc literal", deferredReason: "heredoc literal parser and generator rendering — slice 5b", category: "param/literal rendering"},
 		{name: "positional parameter", deferredReason: "Postgres parameter rendering — slice 5b", category: "param/literal rendering"},
 		{name: "json path operator", deferredReason: "Postgres operator parser/generator wiring — slice 5b", category: "parser operator"},
-		{name: "only table source", deferredReason: "ONLY table-source parser/generator support — slice 5b", category: "SHOW/ALTER/DDL"},
+		{name: "only table source", dialect: "postgres", sql: "SELECT * FROM ONLY t1"},
+		{name: "similar to escape", dialect: "postgres", sql: "SELECT '%' SIMILAR TO '^%' ESCAPE '^'"},
 		{name: "interval phrase", deferredReason: "Postgres interval rendering override — slice 5b", category: "generator TRANSFORM/TYPE_MAPPING"},
-		{name: "json_to_recordset", deferredReason: "function table-source needs FUNCTIONS override — slice 5b", category: "parser FUNCTIONS/generator TRANSFORM"},
+		{name: "json_to_recordset", dialect: "postgres", sql: `SELECT * FROM JSON_TO_RECORDSET(z) AS y("rank" INT)`},
+		// Keyword-like alias column: the alias column list uses parseIdVar(any_token=true),
+		// mirroring _parse_function_parameter -> _parse_id_var() (parser.py:7111-7112,8507).
+		{name: "json_to_recordset keyword column", dialect: "postgres", sql: `SELECT * FROM JSON_TO_RECORDSET(z) AS y(from INT)`},
+		// Table-valued function sources (test_postgres.py:742-775): a function call is a
+		// valid FROM/JOIN source, becoming exp.Table's "this".
+		{name: "generate_series source", dialect: "postgres", sql: "SELECT * FROM GENERATE_SERIES(a, b)"},
+		{name: "generate_series cross join", dialect: "postgres", sql: "SELECT * FROM t CROSS JOIN GENERATE_SERIES(2, 4)"},
+		{name: "generate_series cross join alias", dialect: "postgres", sql: "SELECT * FROM t CROSS JOIN GENERATE_SERIES(2, 4) AS s"},
+		// WITH ORDINALITY on a function source (test_postgres.py:143-151); the alias
+		// (if any) binds after the keyword.
+		{name: "with ordinality", dialect: "postgres", sql: "SELECT * FROM JSON_ARRAY_ELEMENTS('[1,true, [2,false]]') WITH ORDINALITY"},
+		{name: "with ordinality alias", dialect: "postgres", sql: "SELECT * FROM JSON_ARRAY_ELEMENTS('[1,true, [2,false]]') WITH ORDINALITY AS kv_json"},
+		{name: "with ordinality alias columns", dialect: "postgres", sql: "SELECT * FROM JSON_ARRAY_ELEMENTS('[1,true, [2,false]]') WITH ORDINALITY AS kv_json(a, b)"},
 	}
 	runIdentityCases(t, "test_postgres validate_identity", cases)
 }

@@ -13,6 +13,15 @@ func MySQL() *Dialect {
 	d.DPipeIsStringConcat = false
 	d.SupportsUserDefinedTypes = false
 	d.SafeDivision = true
+	// parsers/mysql.py:68 FUNC_TOKENS adds TokenType.VALUES (see ValuesIsFunction doc).
+	d.ValuesIsFunction = true
+	// generators/mysql.py:137 DUPLICATE_KEY_UPDATE_WITH_SET = False.
+	d.DuplicateKeyUpdateWithSet = false
+	// generators/mysql.py:148 WRAP_DERIVED_VALUES = False: aliased VALUES is emitted bare.
+	d.WrapDerivedValues = false
+	// generators/mysql.py:139 VALUES_AS_TABLE = False: a table-source VALUES is rewritten
+	// into `(SELECT ... UNION ALL ...) AS t` instead of a bare VALUES constructor.
+	d.ValuesAsTable = false
 
 	for _, unit := range []string{
 		"SECOND_MICROSECOND",

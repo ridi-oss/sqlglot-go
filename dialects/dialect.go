@@ -20,27 +20,49 @@ const (
 )
 
 type Dialect struct {
-	Name                               string
-	QuoteStart                         string
-	QuoteEnd                           string
-	IdentifierStart                    string
-	IdentifierEnd                      string
-	TokenizerConfig                    tokens.TokenizerConfig
-	NormalizationStrategy              NormalizationStrategy
-	DPipeIsStringConcat                bool
-	StrictStringConcat                 bool
-	TypedDivision                      bool
-	SafeDivision                       bool
-	SupportsColumnJoinMarks            bool
-	ColonIsVariantExtract              bool
-	NullOrdering                       string
-	SupportsOrderByAll                 bool
-	TryCastRequiresString              *bool
-	DatePartMapping                    map[string]string
-	ValidIntervalUnits                 map[string]bool
-	SupportsUserDefinedTypes           bool
-	SupportsFixedSizeArrays            bool
-	SupportsLimitAll                   bool
+	Name                     string
+	QuoteStart               string
+	QuoteEnd                 string
+	IdentifierStart          string
+	IdentifierEnd            string
+	TokenizerConfig          tokens.TokenizerConfig
+	NormalizationStrategy    NormalizationStrategy
+	DPipeIsStringConcat      bool
+	StrictStringConcat       bool
+	TypedDivision            bool
+	SafeDivision             bool
+	SupportsColumnJoinMarks  bool
+	ColonIsVariantExtract    bool
+	NullOrdering             string
+	SupportsOrderByAll       bool
+	TryCastRequiresString    *bool
+	DatePartMapping          map[string]string
+	ValidIntervalUnits       map[string]bool
+	SupportsUserDefinedTypes bool
+	SupportsFixedSizeArrays  bool
+	SupportsLimitAll         bool
+	SupportsValuesDefault    bool
+	// ValuesIsFunction ports the MySQL parser's FUNC_TOKENS addition of TokenType.VALUES
+	// (parsers/mysql.py:63-70) paired with its FUNCTION_PARSERS["VALUES"] override
+	// (parsers/mysql.py:158-160): `VALUES(col)` in `ON DUPLICATE KEY UPDATE` is an
+	// Anonymous function call, not the VALUES table-constructor keyword. Divergence: this
+	// port has no per-dialect FUNC_TOKENS/FUNCTION_PARSERS table (deferred to slice 5b), so
+	// a single dialect flag gates the shared parseFunctionCall/functionParsers["VALUES"]
+	// entry instead of a real per-dialect override.
+	ValuesIsFunction bool
+	// DuplicateKeyUpdateWithSet ports the generator flag of the same name
+	// (generator.py:374, generators/mysql.py:137): base emits `ON DUPLICATE KEY UPDATE SET
+	// ...`, MySQL's own generator omits the SET keyword (`ON DUPLICATE KEY UPDATE ...`).
+	DuplicateKeyUpdateWithSet bool
+	// WrapDerivedValues ports the generator flag of the same name (generator.py:320,
+	// generators/mysql.py:148): base wraps an aliased/derived VALUES table constructor in
+	// parentheses (`(VALUES (1, 2)) AS t`), MySQL emits it bare (`VALUES (1, 2) AS t`).
+	WrapDerivedValues bool
+	// ValuesAsTable ports the generator flag of the same name (generator.py:397,
+	// generators/mysql.py:139): base renders a table-source VALUES as a VALUES constructor,
+	// MySQL rewrites it into a series of SELECT unions (`(SELECT 1 AS a, ...) AS t`). A VALUES
+	// used as an INSERT source (not under FROM/JOIN) is unaffected by this flag.
+	ValuesAsTable                      bool
 	IntervalSpans                      bool
 	NormalizeFunctions                 string
 	DefaultFunctionsColumnNames        map[exp.Kind][]string
@@ -80,13 +102,25 @@ func Base() *Dialect {
 		SupportsUserDefinedTypes: true,
 		SupportsFixedSizeArrays:  false,
 		SupportsLimitAll:         false,
-		IntervalSpans:            true,
-		NormalizeFunctions:       "upper",
-		AliasPostTablesample:     false,
-		AliasPostVersion:         true,
-		UnnestColumnOnly:         false,
-		Pseudocolumns:            map[string]bool{},
-		IndexOffset:              0,
+		// dialect.py:670 SUPPORTS_VALUES_DEFAULT = True (base); Presto/Dremio override to
+		// False (out of scope: only base/mysql/postgres are ported).
+		SupportsValuesDefault: true,
+		// generator.py:374 DUPLICATE_KEY_UPDATE_WITH_SET = True (base); MySQL overrides to
+		// False (generators/mysql.py:137).
+		DuplicateKeyUpdateWithSet: true,
+		// generator.py:320 WRAP_DERIVED_VALUES = True (base); MySQL overrides to False
+		// (generators/mysql.py:148).
+		WrapDerivedValues: true,
+		// generator.py:397 VALUES_AS_TABLE = True (base); MySQL overrides to False
+		// (generators/mysql.py:139), rewriting table-source VALUES into SELECT unions.
+		ValuesAsTable:        true,
+		IntervalSpans:        true,
+		NormalizeFunctions:   "upper",
+		AliasPostTablesample: false,
+		AliasPostVersion:     true,
+		UnnestColumnOnly:     false,
+		Pseudocolumns:        map[string]bool{},
+		IndexOffset:          0,
 	}
 }
 

@@ -263,6 +263,15 @@ func (g *Generator) likeSQLWithOp(e expressions.Expression, op string) string {
 	return g.binary(e, op)
 }
 
+// similarToSQL ports generator.py:4496 similarto_sql. Unlike Like/ILike, SimilarTo has no
+// "negate" arg (expressions/core.py:2226): `NOT x SIMILAR TO y` is represented as
+// Not(SimilarTo(...)) by parseRange, so notSQL renders the NOT prefix instead.
+func (g *Generator) similarToSQL(e expressions.Expression) string { return g.binary(e, "SIMILAR TO") }
+
+// escapeSQL ports generator.py:4411 escape_sql, minus the LIKE-ANY/ALL-quantifier special
+// case (SUPPORTS_LIKE_QUANTIFIERS is not modeled in this port).
+func (g *Generator) escapeSQL(e expressions.Expression) string { return g.binary(e, "ESCAPE") }
+
 func (g *Generator) andSQL(e expressions.Expression) string { return g.connectorSQL(e, "AND", nil) }
 func (g *Generator) orSQL(e expressions.Expression) string  { return g.connectorSQL(e, "OR", nil) }
 
@@ -1167,7 +1176,13 @@ func (g *Generator) onConflictSQL(e expressions.Expression) string {
 	action := g.sqlKey(e, "action")
 	expressionsSQL := g.expressions(exprsOptions{expression: e, flat: true})
 	if expressionsSQL != "" {
-		expressionsSQL = " SET " + expressionsSQL
+		// generator.py:2339 DUPLICATE_KEY_UPDATE_WITH_SET (True by default; MySQL's own
+		// generator omits SET, since real MySQL syntax is `ON DUPLICATE KEY UPDATE col = ...`).
+		setKeyword := ""
+		if g.dialect.DuplicateKeyUpdateWithSet {
+			setKeyword = "SET "
+		}
+		expressionsSQL = " " + setKeyword + expressionsSQL
 	}
 	where := g.sqlKey(e, "where")
 	return conflict + constraint + conflictKeys + action + expressionsSQL + where
@@ -1340,6 +1355,64 @@ func (g *Generator) tryCastSQL(e expressions.Expression) string {
 }
 func (g *Generator) jsonCastSQL(e expressions.Expression) string { return g.castSQLWithPrefix(e, "") }
 
+// formatJSONSQL ports generator.py:3778 formatjson_sql.
+func (g *Generator) formatJSONSQL(e expressions.Expression) string {
+	return g.sqlKey(e, "this") + " FORMAT JSON"
+}
+
+// jsonColumnDefSQL ports generator.py:3838 jsoncolumndef_sql.
+func (g *Generator) jsonColumnDefSQL(e expressions.Expression) string {
+	path := g.sqlKey(e, "path")
+	if path != "" {
+		path = " PATH " + path
+	}
+	nestedSchema := g.sqlKey(e, "nested_schema")
+	if nestedSchema != "" {
+		return "NESTED" + path + " " + nestedSchema
+	}
+	this := g.sqlKey(e, "this")
+	kind := g.sqlKey(e, "kind")
+	if kind != "" {
+		kind = " " + kind
+	}
+	formatJSON := ""
+	if boolValue(e.Arg("format_json")) {
+		formatJSON = " FORMAT JSON"
+	}
+	ordinality := ""
+	if boolValue(e.Arg("ordinality")) {
+		ordinality = " FOR ORDINALITY"
+	}
+	return this + kind + formatJSON + path + ordinality
+}
+
+// jsonSchemaSQL ports generator.py:3854 jsonschema_sql.
+func (g *Generator) jsonSchemaSQL(e expressions.Expression) string {
+	return g.funcCall("COLUMNS", listFromValue(e.Arg("expressions")), "(", ")", true)
+}
+
+// jsonTableSQL ports generator.py:3857 jsontable_sql. error_handling/empty_handling are
+// rendered via sqlKey (rather than upstream's raw f-string) so they work whether
+// parseOnHandling produced a literal string ("ERROR ON ERROR") or a DEFAULT <expr> node.
+func (g *Generator) jsonTableSQL(e expressions.Expression) string {
+	this := g.sqlKey(e, "this")
+	path := g.sqlKey(e, "path")
+	if path != "" {
+		path = ", " + path
+	}
+	errorHandling := g.sqlKey(e, "error_handling")
+	if errorHandling != "" {
+		errorHandling = " " + errorHandling
+	}
+	emptyHandling := g.sqlKey(e, "empty_handling")
+	if emptyHandling != "" {
+		emptyHandling = " " + emptyHandling
+	}
+	schema := g.sqlKey(e, "schema")
+	suffix := path + errorHandling + emptyHandling + " " + schema + ")"
+	return g.funcCall("JSON_TABLE", []any{this}, "(", suffix, true)
+}
+
 func (g *Generator) extractSQL(e expressions.Expression) string {
 	this := g.gen(e.Arg("this"))
 	expressionSQL := g.sqlKey(e, "expression")
@@ -1509,18 +1582,72 @@ func (g *Generator) lateralSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) valuesSQL(e expressions.Expression) string {
-	args := g.expressions(exprsOptions{expression: e})
-	alias := g.sqlKey(e, "alias")
-	values := "VALUES" + g.seg("") + args
-	parent := e.Parent()
-	if alias != "" || (parent != nil && (parent.Kind() == expressions.KindFrom || parent.Kind() == expressions.KindTable)) {
-		values = "(" + values + ")"
+	// generator.py:2676-2718 values_sql. A VALUES node stays a table constructor when the
+	// dialect sets VALUES_AS_TABLE, or when it is an INSERT source (not under FROM/JOIN);
+	// otherwise (MySQL, generators/mysql.py:139) it is rewritten into SELECT unions.
+	if g.dialect.ValuesAsTable || e.FindAncestor(expressions.KindFrom, expressions.KindJoin) == nil {
+		args := g.expressions(exprsOptions{expression: e})
+		alias := g.sqlKey(e, "alias")
+		values := "VALUES" + g.seg("") + args
+		parent := e.Parent()
+		// generator.py:2684-2689 wraps a derived VALUES only when WRAP_DERIVED_VALUES is set
+		// (MySQL clears it, so `VALUES (1, 2) AS t` stays bare — generators/mysql.py:148).
+		if g.dialect.WrapDerivedValues && (alias != "" || (parent != nil && (parent.Kind() == expressions.KindFrom || parent.Kind() == expressions.KindTable))) {
+			values = "(" + values + ")"
+		}
+		values = g.queryModifiers(e, values)
+		if alias != "" {
+			return values + " AS " + alias
+		}
+		return values
 	}
-	values = g.queryModifiers(e, values)
-	if alias != "" {
-		return values + " AS " + alias
+
+	// generator.py:2693-2718 — convert `VALUES (...), (...)` under FROM/JOIN into a series of
+	// SELECT unions, aliasing the first row's values from the table alias's column list.
+	aliasNode := asExpression(e.Arg("alias"))
+	var columnNames []any
+	if aliasNode != nil {
+		columnNames = listFromValue(aliasNode.Arg("columns"))
 	}
-	return values
+
+	tuples := listFromValue(e.Arg("expressions"))
+	selects := make([]expressions.Expression, 0, len(tuples))
+	for i, tupleValue := range tuples {
+		rowValues := listFromValue(asExpression(tupleValue).Arg("expressions"))
+		row := make([]expressions.Expression, len(rowValues))
+		for j, value := range rowValues {
+			row[j] = asExpression(value)
+			if i == 0 && j < len(columnNames) {
+				row[j] = expressions.AliasExpr(row[j], columnNames[j], false)
+			}
+		}
+		selects = append(selects, expressions.Select(expressions.Args{"expressions": row}))
+	}
+
+	if g.pretty && len(selects) > 0 {
+		// Fold into an exp.Union tree so the pretty-printer can format the branches
+		// (generator.py:2709-2714).
+		query := selects[0]
+		for _, sel := range selects[1:] {
+			query = expressions.Union(expressions.Args{"this": query, "expression": sel, "distinct": false})
+		}
+		sub := expressions.Args{"this": query}
+		if aliasNode != nil {
+			sub["alias"] = expressions.TableAlias(expressions.Args{"this": aliasNode.Arg("this")})
+		}
+		return g.subquerySQL(expressions.Subquery(sub))
+	}
+
+	// generator.py:2716-2718 non-pretty path: join the SELECT branches with UNION ALL.
+	alias := ""
+	if aliasNode != nil {
+		alias = " AS " + g.sqlKey(aliasNode, "this")
+	}
+	unions := make([]string, len(selects))
+	for i, sel := range selects {
+		unions[i] = g.gen(sel)
+	}
+	return "(" + strings.Join(unions, " UNION ALL ") + ")" + alias
 }
 
 func (g *Generator) unnestSQL(e expressions.Expression) string {
