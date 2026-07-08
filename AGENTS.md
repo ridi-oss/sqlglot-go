@@ -1,58 +1,72 @@
 # sqlglot-go — agent guide
 
-A Go port of **[tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.12.0** (Python).
-Goal: a faithful, near-1:1 reimplementation so RIDI's `proxy-monster` lineage probe can run
-natively on Go instead of sqlglot-on-GraalPy.
+A faithful, near-1:1 Go port of **[tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.12.0**
+(a pure-Python SQL parser/transpiler). It exists so a SQL **column-lineage probe** can run natively
+on Go instead of Python-on-a-JVM; Milestone 1 targets exactly the sqlglot API surface that probe
+uses, on **MySQL + Postgres**.
 
 ## Source of truth (READ THIS FIRST, always)
 
-- The pinned Python source lives at **`.reference/sqlglot-v30.12.0/`** (gitignored, not part of the
-  module). This is the **exact** upstream version proxy-monster pins (`sqlglot==30.12.0`), git SHA in
-  `.reference/sqlglot-v30.12.0/GIT_SHA.txt`.
-- Port from this reference, file by file, **as 1:1 as possible** — same file layout, same function/
-  method names (Go-cased), same structure, same comments where they carry intent. When Go forces a
-  divergence (static typing, no metaclasses, error returns), keep it minimal and note *why* in a
-  comment.
+- The pinned Python source is fetched to **`.reference/sqlglot-v30.12.0/`** (gitignored — run
+  `scripts/fetch-reference.sh` once). It is the **exact** upstream version being ported
+  (`sqlglot==30.12.0`, git SHA in `.reference/sqlglot-v30.12.0/GIT_SHA.txt`).
+- Port from this reference, file by file, **as 1:1 as possible** — same file layout, same
+  function/method names (Go-cased), same structure, same comments where they carry intent. When Go
+  forces a divergence (static typing, no metaclasses, error/panic instead of exceptions), keep it
+  minimal and note *why* in a comment that cites the reference line.
 - **Port the corresponding unit tests too**, 1:1, from `.reference/sqlglot-v30.12.0/tests/`. The
-  upstream tests (and `tests/fixtures/*.sql`) are the correctness oracle. Fixture `.sql` files can be
-  reused verbatim; loader/assertions get reimplemented in Go test form.
+  upstream tests and `tests/fixtures/*.sql` are the correctness oracle — reuse the `.sql` fixtures
+  verbatim (they live under each package's `testdata/`), reimplement the loader/assertions in Go.
 
-## Milestone 1 — scope (what proxy-monster's `probe.py` needs)
+## Current status (Milestone 1)
 
-Target file: `~/repos/proxy-monster/engine/src/main/resources/py/probe.py`. It imports exactly:
+**COMPLETE.** `go test ./...` is green (~122 tests). The probe's full API surface works on MySQL +
+Postgres and is verified at **94/94 parity** against the real Python `probe.py` on sqlglot 30.12.0.
+See `ROADMAP.md` for the slice-by-slice ledger, every known divergence, and what's deferred.
 
-- `sqlglot.parse(sql, dialect=)` and the `sqlglot.expressions` (`exp`) AST.
-- `sqlglot.optimizer.qualify.qualify(root, schema, dialect, qualify_columns,
-  validate_qualify_columns, expand_stars, infer_schema)`.
-- `sqlglot.optimizer.scope.traverse_scope(root)` + the `Scope` API
-  (`.expression / .sources / .parent / .is_union / .union_scopes / .columns`).
-
-**Dialects: MySQL and Postgres only** for M1. proxy-monster only ever passes `"mysql"` or
-`"postgres"` (see `proxy-monster/.../probe/Sqlglot.kt`). Do **not** port the other 32 dialects.
-Both extend the base classes directly, no fan-out into other dialects.
-
-The transitive closure (base + mysql + postgres) is ~46k LOC of Python across ~54 files:
-tokenizer + parser, the `expressions/` package, generator (+ mysql/postgres generators), the probe-path
-optimizer passes (`qualify`, `qualify_columns`, `qualify_tables`, `normalize_identifiers`,
-`isolate_table_selects`, `annotate_types`, `resolver`, `scope`, `simplify`, `canonicalize`, `normalize`),
-`schema`, `helper`, `time`, `errors`, `jsonpath`, `serde`, and the mysql/postgres dialect wiring.
-Note: `qualify_columns` **always** runs `TypeAnnotator.annotate_scope` and `quote_identifiers`, so
-`annotate_types` and the generator are on the critical path — not optional.
+The probe API that M1 targets (all working):
+- `sqlglot.Parse(sql, dialect)` / `ParseOne` and the `expressions` (`exp`) AST.
+- `optimizer.Qualify(root, opts)` — the `qualify()` driver (normalize_identifiers → qualify_tables →
+  qualify_columns → quote_identifiers → validate_qualify_columns).
+- `optimizer.TraverseScope(root)` + the `Scope` API (`.Expression / .Sources / .Parent / .IsUnion /
+  .UnionScopes / .Columns`).
+- `generator` (`Expression → SQL`), `schema.MappingSchema`, dialect normalization/quoting.
+- The lineage probe itself is ported to `probe/probe.go` with a Python-parity harness
+  (`probe/parity_test.go` runs the real `probe.py` under the pinned reference; `probe/golden_test.go`
+  guards the same output hermetically via committed `probe/testdata/golden.json`).
 
 ## Central design decision — the AST node model
 
-Upstream `Expression` is dynamically typed: an `args: dict[str, Any]` of children (node | list | str |
-bool | None), a per-class `arg_types` map, a metaclass-driven dialect registry, and heavy reflection
-(`node.key`, `find_all(*types)` via isinstance). The parser (~10k LOC) and generator (~6k LOC) are
-written against that dynamic model. The Go port needs an equivalent: an `Expression` interface + an
-embedded base carrying `Args map[string]any` and a node `Kind`, with node types derived from
-`arg_types`. Nail this model down before building much on top of it — everything depends on it.
+Upstream `Expression` is dynamically typed: an `args: dict[str, Any]` of children
+(node | list | str | bool | None), a per-class `arg_types` map, a metaclass dialect registry, and
+heavy reflection (`node.key`, `find_all(*types)` via isinstance). The parser (~10k LOC) and generator
+(~6k LOC) manipulate every node generically through `args`. The Go port mirrors this with a **single
+`*Node` struct** behind an `Expression` interface, discriminated by a `Kind` enum, with per-Kind
+metadata *tables* in `expressions/kinds.go` (ordered arg keys / traits / class name). Adding a node
+type = one `Kind` const + one row in each table + a one-line builder — nodes are **data**, not ~300
+structs. This keeps the generic parser/generator/optimizer code a close 1:1 of the Python.
+
+## How to continue the port
+
+1. `scripts/fetch-reference.sh` to get the pinned Python source (needed for parity + as the oracle).
+2. Read `ROADMAP.md` — it lists the remaining slices (**1d** parser tail, **4c** full
+   `annotate_types`, **5b** per-dialect parser/generator override tables) and, crucially, the
+   **known divergences** + **resolved-findings** ledger so you don't re-litigate settled decisions.
+3. Pick a slice, port from `.reference/` 1:1, port its tests, keep `go test ./...` green.
+4. For anything touching the probe path, re-run the parity harness:
+   `go test ./probe/` (hermetic) and, with Python available,
+   `PROBE_REGEN=1 go test ./probe/ -run TestProbeParity` to re-verify against live Python and refresh
+   the goldens. Deferred parser gaps must stay **fail-closed** (an unparseable construct → the probe
+   DENYs; never silently resolve).
+
+This port was built with a multi-model review pipeline (plan → implement → integrate → adversarial
+review), verifying every review finding against the pinned source before acting. Keep that rigor:
+confirm a claimed bug against `.reference/` before "fixing" it — some findings are phantom.
 
 ## Conventions
 
-- Go 1.23. Module: `github.com/sjincho/sqlglot-go`.
+- Go 1.23. Module `github.com/sjincho/sqlglot-go`. Zero third-party deps (stdlib + `testing` only).
 - Comments in **English**, US spelling (`canceled`, `color`, `catalog`).
-- Author/commit attribution: **Seongjin / 성진** (never a title).
-- `gofmt` + `go vet` clean; `go test ./...` green before any push.
-- Keep package layout mirroring the Python module layout where sensible
-  (`expressions/`, `optimizer/`, `dialects/`, etc.).
+- `gofmt` + `go vet` clean; `go test ./...` green before any commit/push.
+- Package layout mirrors the Python module layout (`expressions/`, `optimizer/`, `dialects/`,
+  `generator/`, `parser/`, `tokens/`, `schema/`, …).
