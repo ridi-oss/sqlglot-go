@@ -293,6 +293,51 @@ const (
 	// AS STRUCT<a INT, b TEXT>). Renders through the generic TraitFunc fallback
 	// (STRUCT(...)), matching upstream struct_sql for non-named-field constructors.
 	KindStruct
+	// KindJSONObject/KindJSONObjectAgg/KindJSONKeyValue/KindOnCondition/KindJSONValue port
+	// the JSON_OBJECT/JSON_OBJECTAGG/JSON_VALUE function family: exp.JSONObject/
+	// exp.JSONObjectAgg (expressions/json.py:160-177, both Func subclasses - JSONObjectAgg is
+	// also an AggFunc), exp.JSONKeyValue/exp.OnCondition/exp.JSONValue (expressions/query.py:
+	// 2026,577,2045 - all three are plain Expression subclasses with no Func/Condition mixin,
+	// so none of them get a traitsOf row below; JSONObject/JSONObjectAgg do).
+	KindJSONObject
+	KindJSONObjectAgg
+	KindJSONKeyValue
+	KindOnCondition
+	KindJSONValue
+	// KindChr ports exp.Chr (string.py:23-26, `class Chr(Expression, Func)`,
+	// arg_types={"expressions": True, "charset": False}, is_var_len_args=True,
+	// _sql_names=["CHR", "CHAR"]): CHR(...)/CHAR(...) with an optional trailing
+	// `USING <charset>` clause. Parsed via functionParsers (parseChar), not
+	// FromArgList, since the trailing USING clause needs special grammar.
+	KindChr
+	// The six Kinds below port the STR_TO_*/TIME_STR_TO_* temporal family (expressions/
+	// temporal.py:452-473): all are `class X(Expression, Func)`, so each gets a
+	// TraitCondition|TraitFunc row below (none is a bare `pass` Expression). TimeStrToDate
+	// and TimeStrToUnix are themselves `pass` bodies (temporal.py:464,472), i.e. they inherit
+	// arg_types={"this": True} from Expression (core.py:85) rather than declaring their own
+	// dict, unlike their four siblings.
+	KindStrToDate
+	KindStrToTime
+	KindStrToUnix
+	KindTimeStrToDate
+	KindTimeStrToTime
+	KindTimeStrToUnix
+	// KindXMLElement/KindXMLTable port exp.XMLElement/exp.XMLTable (Expression, Func)
+	// (functions.py:439,453). KindXMLNamespace ports exp.XMLNamespace (query.py:2081-2082),
+	// a plain Expression (no Func/Condition mixin), so it gets no traitsOf row below
+	// (mirroring e.g. KindTableAlias/KindLambda).
+	KindXMLElement
+	KindXMLTable
+	KindXMLNamespace
+	// KindPathColumnConstraint ports exp.PathColumnConstraint (constraints.py:185,
+	// `class PathColumnConstraint(Expression, ColumnConstraintKind): pass`), the `PATH '<p>'`
+	// column constraint XMLTABLE's COLUMNS clause uses. Like upstream (parser.py:1391), "PATH"
+	// is registered in the single shared constraintParsers map (parser/parser_constraints.go),
+	// so it is reached generically through parseColumnConstraint's loop and composes with any
+	// following constraints. Like ColumnConstraintKind's other `pass` subclasses (e.g.
+	// KindCollateColumnConstraint), it has no Func/Condition mixin, so it gets no traitsOf
+	// row below.
+	KindPathColumnConstraint
 )
 
 type Trait uint32
@@ -476,7 +521,7 @@ var argTypes = map[Kind][]argSpec{
 	KindPivot:               {{"this", false}, {"alias", false}, {"expressions", false}, {"fields", false}, {"unpivot", false}, {"using", false}, {"group", false}, {"columns", false}, {"include_nulls", false}, {"default_on_null", false}, {"into", false}, {"with_", false}, {"identify_pivot_strings", false}, {"prefixed_pivot_columns", false}, {"pivot_column_naming", false}},
 	KindLateral:             {{"this", true}, {"view", false}, {"outer", false}, {"alias", false}, {"cross_apply", false}, {"ordinality", false}},
 	KindValues:              {{"expressions", true}, {"alias", false}, {"order", false}, {"limit", false}, {"offset", false}},
-	KindColumnDef:           {{"this", true}, {"kind", false}, {"constraints", false}, {"exists", false}, {"position", false}, {"default", false}, {"output", false}},
+	KindColumnDef:           {{"this", true}, {"kind", false}, {"constraints", false}, {"exists", false}, {"position", false}, {"default", false}, {"output", false}, {"ordinality", false}},
 	KindDataType:            {{"this", true}, {"expressions", false}, {"nested", false}, {"values", false}, {"kind", false}, {"nullable", false}, {"collate", false}},
 	KindDataTypeParam:       {{"this", true}, {"expression", false}},
 	KindCast:                {{"this", true}, {"to", true}, {"format", false}, {"safe", false}, {"action", false}, {"default", false}},
@@ -511,10 +556,18 @@ var argTypes = map[Kind][]argSpec{
 	KindJSONCast:            {{"this", true}, {"to", true}, {"format", false}, {"safe", false}, {"action", false}, {"default", false}},
 	// JSONTable/JSONColumnDef/JSONSchema/FormatJson port JSON_TABLE(...) (parser.py:8166;
 	// expressions/json.py:206, expressions/query.py:2022-2042).
-	KindJSONTable:      {{"this", true}, {"schema", true}, {"path", false}, {"error_handling", false}, {"empty_handling", false}},
-	KindJSONColumnDef:  {{"this", false}, {"kind", false}, {"path", false}, {"nested_schema", false}, {"ordinality", false}, {"format_json", false}},
-	KindJSONSchema:     {{"expressions", true}},
-	KindFormatJson:     defaultArgTypes,
+	KindJSONTable:     {{"this", true}, {"schema", true}, {"path", false}, {"error_handling", false}, {"empty_handling", false}},
+	KindJSONColumnDef: {{"this", false}, {"kind", false}, {"path", false}, {"nested_schema", false}, {"ordinality", false}, {"format_json", false}},
+	KindJSONSchema:    {{"expressions", true}},
+	KindFormatJson:    defaultArgTypes,
+	// JSONObject/JSONObjectAgg/JSONKeyValue/OnCondition/JSONValue port the JSON_OBJECT/
+	// JSON_OBJECTAGG/JSON_VALUE family (expressions/json.py:160-177, expressions/query.py:
+	// 577,2026,2045).
+	KindJSONObject:     {{"expressions", false}, {"null_handling", false}, {"unique_keys", false}, {"return_type", false}, {"encoding", false}},
+	KindJSONObjectAgg:  {{"expressions", false}, {"null_handling", false}, {"unique_keys", false}, {"return_type", false}, {"encoding", false}},
+	KindJSONKeyValue:   {{"this", true}, {"expression", true}},
+	KindOnCondition:    {{"error", false}, {"empty", false}, {"null", false}},
+	KindJSONValue:      {{"this", true}, {"path", true}, {"returning", false}, {"on_condition", false}},
 	KindArrayAgg:       {{"this", true}, {"nulls_excluded", false}},
 	KindArraySize:      {{"this", true}, {"expression", false}},
 	KindArrayContains:  {{"this", true}, {"expression", true}, {"ensure_variant", false}, {"check_null", false}},
@@ -630,6 +683,26 @@ var argTypes = map[Kind][]argSpec{
 	KindObjectIdentifier: defaultArgTypes,
 	// Struct (array.py:356): arg_types = {"expressions": False}.
 	KindStruct: {{"expressions", false}},
+	// Chr (string.py:24): arg_types = {"expressions": True, "charset": False}.
+	KindChr: {{"expressions", true}, {"charset", false}},
+	// StrToDate/StrToTime/StrToUnix/TimeStrToTime declare their own arg_types dicts
+	// (temporal.py:452-469, key order preserved); TimeStrToDate/TimeStrToUnix are `pass`
+	// (temporal.py:464,472) and so fall back to Expression's default {"this": True} - spelled
+	// out explicitly here (defaultArgTypes) rather than omitted, matching e.g. KindPragma above.
+	KindStrToDate:     {{"this", true}, {"format", false}, {"safe", false}},
+	KindStrToTime:     {{"this", true}, {"format", true}, {"zone", false}, {"safe", false}, {"target_type", false}},
+	KindStrToUnix:     {{"this", false}, {"format", false}},
+	KindTimeStrToDate: defaultArgTypes,
+	KindTimeStrToTime: {{"this", true}, {"zone", false}},
+	KindTimeStrToUnix: defaultArgTypes,
+	// XMLElement/XMLTable (functions.py:439,453) and XMLNamespace (query.py:2081-2082,
+	// `pass` -> inherits Expression's default {"this": True}, mirroring e.g. KindLambda's
+	// sibling KindReplace comment style above).
+	KindXMLElement:   {{"this", true}, {"expressions", false}, {"evalname", false}},
+	KindXMLTable:     {{"this", true}, {"namespaces", false}, {"passing", false}, {"columns", false}, {"by_ref", false}},
+	KindXMLNamespace: defaultArgTypes,
+	// PathColumnConstraint (constraints.py:185): `pass` -> inherits {"this": True}.
+	KindPathColumnConstraint: defaultArgTypes,
 }
 
 var traitsOf = map[Kind]Trait{
@@ -731,7 +804,13 @@ var traitsOf = map[Kind]Trait{
 	// JSONTable(Expression, Func) (expressions/json.py:206); JSONColumnDef/JSONSchema/
 	// FormatJson are plain Expression subclasses with no Func/Condition mixin, so they
 	// get no trait bits (omitted below, matching e.g. KindTableAlias/KindSchema).
-	KindJSONTable:      TraitCondition | TraitFunc,
+	KindJSONTable: TraitCondition | TraitFunc,
+	// JSONObject(Expression, Func) and JSONObjectAgg(Expression, AggFunc)
+	// (expressions/json.py:160,171); JSONKeyValue/OnCondition/JSONValue are plain Expression
+	// subclasses with no Func/Condition mixin, so they get no trait bits (omitted below,
+	// matching the JSONTable comment above).
+	KindJSONObject:     TraitCondition | TraitFunc,
+	KindJSONObjectAgg:  TraitCondition | TraitFunc | TraitAggFunc,
 	KindArrayAgg:       TraitCondition | TraitFunc | TraitAggFunc,
 	KindArraySize:      TraitCondition | TraitFunc,
 	KindArrayContains:  TraitCondition | TraitBinary | TraitFunc,
@@ -765,6 +844,23 @@ var traitsOf = map[Kind]Trait{
 	// Struct is `class Struct(Expression, Func)` and Func(Condition) (core.py:1641),
 	// so it carries both mixins - same as KindArray above.
 	KindStruct: TraitCondition | TraitFunc,
+	// Chr is `class Chr(Expression, Func)` (string.py:23), same mixins as KindStruct above.
+	KindChr: TraitCondition | TraitFunc,
+	// StrToDate/StrToTime/StrToUnix/TimeStrToDate/TimeStrToTime/TimeStrToUnix are all
+	// `class X(Expression, Func)` (temporal.py:452-473), so every one gets both mixins - this
+	// also covers TimeStrToDate/TimeStrToUnix, whose `pass` bodies affect only arg_types
+	// (above), not the class bases.
+	KindStrToDate:     TraitCondition | TraitFunc,
+	KindStrToTime:     TraitCondition | TraitFunc,
+	KindStrToUnix:     TraitCondition | TraitFunc,
+	KindTimeStrToDate: TraitCondition | TraitFunc,
+	KindTimeStrToTime: TraitCondition | TraitFunc,
+	KindTimeStrToUnix: TraitCondition | TraitFunc,
+	// XMLElement/XMLTable are `class X(Expression, Func)` (functions.py:439,453), so both
+	// carry TraitFunc like KindStruct above. XMLNamespace has no row (see the Kind block
+	// comment above).
+	KindXMLElement: TraitCondition | TraitFunc,
+	KindXMLTable:   TraitCondition | TraitFunc,
 }
 
 var primitive = map[Kind]bool{
@@ -1029,6 +1125,22 @@ var className = map[Kind]string{
 	KindPseudoType:                          "PseudoType",
 	KindObjectIdentifier:                    "ObjectIdentifier",
 	KindStruct:                              "Struct",
+	KindJSONObject:                          "JSONObject",
+	KindJSONObjectAgg:                       "JSONObjectAgg",
+	KindJSONKeyValue:                        "JSONKeyValue",
+	KindOnCondition:                         "OnCondition",
+	KindJSONValue:                           "JSONValue",
+	KindChr:                                 "Chr",
+	KindStrToDate:                           "StrToDate",
+	KindStrToTime:                           "StrToTime",
+	KindStrToUnix:                           "StrToUnix",
+	KindTimeStrToDate:                       "TimeStrToDate",
+	KindTimeStrToTime:                       "TimeStrToTime",
+	KindTimeStrToUnix:                       "TimeStrToUnix",
+	KindXMLElement:                          "XMLElement",
+	KindXMLTable:                            "XMLTable",
+	KindXMLNamespace:                        "XMLNamespace",
+	KindPathColumnConstraint:                "PathColumnConstraint",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func
@@ -1050,6 +1162,7 @@ var varLenArgs = map[Kind]bool{
 	KindJSONExtract:       true,
 	KindJSONExtractScalar: true,
 	KindDate:              true,
+	KindChr:               true,
 }
 
 // ArgKeys returns the arg keys of a Kind in class-declaration order (mirrors

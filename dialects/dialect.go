@@ -138,6 +138,19 @@ type Dialect struct {
 	// Parameter's name with (base/mysql use "@", postgres uses "$" for its positional $1/$2/...
 	// placeholders).
 	ParameterToken string
+	// JSONArrowsRequireJSONType ports the parser flag JSON_ARROWS_REQUIRE_JSON_TYPE
+	// (parsers/postgres.py:191); base/mysql leave it False. When set, a JSON `->`/`->>` RHS
+	// that is a literal marks the built JSONExtract/JSONExtractScalar node's only_json_types
+	// arg (mirroring build_json_extract_path's arrow_req_json_type branch, dialect.py:
+	// 2092-2124), which the generator uses to choose operator-form (`->`/`->>`) over
+	// function-form (JSON_EXTRACT_PATH/JSON_EXTRACT_PATH_TEXT) rendering.
+	JSONArrowsRequireJSONType bool
+	// JSONTypeRequiredForExtraction ports the generator flag JSON_TYPE_REQUIRED_FOR_EXTRACTION
+	// (generator.py:488); mysql (generators/mysql.py:142) and postgres (generators/postgres.py:
+	// 245) both override to True. Consumed by arrow_json_extract_sql (dialect.py:1210-1215):
+	// when set, a string-literal `this` is wrapped in `CAST(... AS JSON)` before rendering the
+	// JSON_EXTRACT_SCALAR arrow form.
+	JSONTypeRequiredForExtraction bool
 }
 
 func Base() *Dialect {
@@ -215,6 +228,13 @@ func Base() *Dialect {
 		// generator.py:667 PARAMETER_TOKEN = "@" (base); postgres overrides to "$"
 		// (generators/postgres.py:240).
 		ParameterToken: "@",
+		// parsers/postgres.py:191 JSON_ARROWS_REQUIRE_JSON_TYPE = False (base/mysql); postgres
+		// overrides to True.
+		JSONArrowsRequireJSONType: false,
+		// generator.py:488 JSON_TYPE_REQUIRED_FOR_EXTRACTION = False (base); mysql
+		// (generators/mysql.py:142) and postgres (generators/postgres.py:245) both override to
+		// True.
+		JSONTypeRequiredForExtraction: false,
 	}
 }
 

@@ -104,6 +104,13 @@ func (p *Parser) parseColumnDef(this exp.Expression) exp.Expression {
 	// fixed-size-array form (e.g. `col INT[3]`) in column definitions.
 	kind := p.parseTypes(false, true, true, false)
 
+	// `<name> FOR ORDINALITY` (parser.py:7257): an XMLTABLE/column-def ordinality marker. The
+	// flag isn't rendered by columndef_sql (generator.py:1169), so it round-trips lossily to just
+	// `<name>`, matching upstream.
+	if p.matchPair(tokens.FOR, tokens.ORDINALITY, true) {
+		return p.expression(exp.ColumnDef(exp.Args{"this": this, "ordinality": true}), nil, nil)
+	}
+
 	constraints := []exp.Expression{}
 
 	// `<kind> AS (<expr>) [STORED|VIRTUAL]`: the computed-column branch at parser.py:

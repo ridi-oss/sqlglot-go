@@ -220,8 +220,8 @@ func writeGaps(fails map[gapKey]string) error {
 }
 
 // Pass counts observed from a full local run over Scope A (identity.sql) plus
-// Scope B (dialect_identity.jsonl): base 880/955, mysql 336/424, postgres
-// 385/468 (after the TYPE/CAST/`::`/AT TIME ZONE parity slice: faithful ports of
+// Scope B (dialect_identity.jsonl): base 887/955, mysql 358/424, postgres
+// 402/468 (after the TYPE/CAST/`::`/AT TIME ZONE parity slice: faithful ports of
 // upstream _parse_type/_parse_types/_parse_at_time_zone/_parse_atom close `1::int`-style
 // literal casts, bare `ARRAY<...>`/`STRUCT<...>` type expressions, `x AT TIME ZONE zone`
 // (chainable, any dialect), postgres PSEUDO_TYPE/OBJECT_IDENTIFIER round-trips
@@ -230,14 +230,22 @@ func writeGaps(fails map[gapKey]string) error {
 // `CHAR CHARACTER SET <cs>` charset suffix; mysql's attimezone_sql override drops the zone and
 // flags the query unsupported, matching upstream). LENGTH/CHAR_LENGTH canonicalization is
 // deliberately deferred (ROADMAP 5b per-dialect FUNCTIONS; see expressions/functions.go),
-// so postgres CHAR_LENGTH/CHARACTER_LENGTH stay in parity_gaps.txt. These are monotonic
+// so postgres CHAR_LENGTH/CHARACTER_LENGTH stay in parity_gaps.txt.
+//
+// Raised again after the FUNCTION + JSON-operator parity slices (base 880->887,
+// mysql 336->358, postgres 385->402): JSON_OBJECT/JSON_OBJECTAGG/JSON_VALUE (with
+// OnCondition/JSONKeyValue), CHR/CHAR + `CONVERT ... USING <charset>`, the
+// STR_TO_*/TIME_STR_TO_* temporal family, XMLELEMENT/XMLTABLE/XMLNAMESPACE, and the
+// JSON arrow operators (-> ->> #> #>>) with the only_json_types gate that renders the
+// operator vs. JSON_EXTRACT_PATH[_TEXT] function form for postgres (mysql/base emit
+// JSON_EXTRACT). These are monotonic
 // pass floors — raise them as coverage improves, never lower them to mask a
 // regression. A drop below any floor fails the build even if the regressing
 // case is also (illegitimately) added to parity_gaps.txt.
 const (
-	minPassBase     = 880
-	minPassMySQL    = 336
-	minPassPostgres = 385
+	minPassBase     = 887
+	minPassMySQL    = 358
+	minPassPostgres = 402
 )
 
 // Minimum record counts per corpus, from the committed fixtures (identity.sql:

@@ -29,6 +29,8 @@ func MySQL() *Dialect {
 	d.VarcharRequiresSize = true
 	// generators/mysql.py:132 INTERVAL_ALLOWS_PLURAL_FORM = False.
 	d.IntervalAllowsPluralForm = false
+	// generators/mysql.py:142 JSON_TYPE_REQUIRED_FOR_EXTRACTION = True.
+	d.JSONTypeRequiredForExtraction = true
 
 	for _, unit := range []string{
 		"SECOND_MICROSECOND",
