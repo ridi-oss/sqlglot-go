@@ -1453,6 +1453,22 @@ func (p *Parser) parseColumnReference() exp.Expression {
 
 type columnOpFunc func(p *Parser, this, field exp.Expression) exp.Expression
 
+// arrowJSONExtractArgs builds the args for a JSON `->`/`->>` operator node (exp.JSONExtract/
+// JSONExtractScalar). build_json_extract_path (dialect.py:2092-2124) is not ported: this port
+// keeps the raw literal RHS instead of converting it to a JSONPath (see ROADMAP - JSONPath
+// deferral). The only signal that decision needs from that upstream builder is its
+// arrow_req_json_type branch, which sets only_json_types when the dialect requires it (postgres
+// only, JSONArrowsRequireJSONType) and the RHS is a bare Literal (so e.g. `x -> -1`'s Neg RHS
+// does NOT set only_json_types - only a bare literal does). The generator reads only_json_types
+// to choose operator-form (`->`/`->>`) over function-form (JSON_EXTRACT_PATH[_TEXT]) rendering.
+func arrowJSONExtractArgs(p *Parser, this, path exp.Expression) exp.Args {
+	args := exp.Args{"this": this, "expression": path}
+	if p.dialect.JSONArrowsRequireJSONType && path != nil && path.Kind() == exp.KindLiteral {
+		args["only_json_types"] = true
+	}
+	return args
+}
+
 var columnOperators = map[tokens.TokenType]columnOpFunc{
 	tokens.DOT: nil,
 	tokens.DCOLON: func(p *Parser, this, to exp.Expression) exp.Expression {
@@ -1461,12 +1477,13 @@ var columnOperators = map[tokens.TokenType]columnOpFunc{
 	tokens.DOTCOLON: func(p *Parser, this, to exp.Expression) exp.Expression {
 		return p.expression(exp.JSONCast(exp.Args{"this": this, "to": to}), nil, nil)
 	},
-	// TODO(slice 6): convert -> and ->> RHS expressions to JSONPath.
+	// ARROW/DARROW keep the raw literal RHS and gate only_json_types via arrowJSONExtractArgs
+	// (see its doc for the JSONPath-deferral rationale).
 	tokens.ARROW: func(p *Parser, this, path exp.Expression) exp.Expression {
-		return p.expression(exp.JSONExtract(exp.Args{"this": this, "expression": path}), nil, nil)
+		return p.expression(exp.JSONExtract(arrowJSONExtractArgs(p, this, path)), nil, nil)
 	},
 	tokens.DARROW: func(p *Parser, this, path exp.Expression) exp.Expression {
-		return p.expression(exp.JSONExtractScalar(exp.Args{"this": this, "expression": path}), nil, nil)
+		return p.expression(exp.JSONExtractScalar(arrowJSONExtractArgs(p, this, path)), nil, nil)
 	},
 	tokens.HASH_ARROW: func(p *Parser, this, path exp.Expression) exp.Expression {
 		return p.expression(exp.JSONBExtract(exp.Args{"this": this, "expression": path}), nil, nil)
@@ -2008,6 +2025,12 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 	// by the dialect flag: otherwise a quoted identifier like `"VALUES"(a)` in base/Postgres
 	// would wrongly parse as the MySQL VALUES function instead of an Anonymous call.
 	if upper == "VALUES" && !p.dialect.ValuesIsFunction {
+		parser = nil
+	}
+	// JSON_VALUE's FUNCTION_PARSERS entry is only registered by MySQL (parsers/mysql.py:161)
+	// among base/MySQL/Postgres; base and Postgres have no _parse_json_value entry at all, so
+	// `JSON_VALUE(...)` there falls through to a plain Anonymous call like any other function.
+	if upper == "JSON_VALUE" && p.dialect.Name != "mysql" {
 		parser = nil
 	}
 	if parser != nil && !anonymous {
@@ -2591,14 +2614,29 @@ func init() {
 		"SAFE_CAST":   func(p *Parser) exp.Expression { return p.parseCast(false, true) },
 		"CONVERT":     func(p *Parser) exp.Expression { return p.parseConvert(p.strictCast, nil) },
 		"TRY_CONVERT": func(p *Parser) exp.Expression { return p.parseConvert(false, true) },
-		"CEIL":        func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindCeil) },
-		"FLOOR":       func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindFloor) },
-		"EXTRACT":     func(p *Parser) exp.Expression { return p.parseExtract() },
-		"POSITION":    func(p *Parser) exp.Expression { return p.parsePosition() },
-		"SUBSTRING":   func(p *Parser) exp.Expression { return p.parseSubstring() },
-		"TRIM":        func(p *Parser) exp.Expression { return p.parseTrim() },
-		"STRING_AGG":  func(p *Parser) exp.Expression { return p.parseStringAgg() },
-		"JSON_TABLE":  func(p *Parser) exp.Expression { return p.parseJSONTable() },
+		// exp.Chr._sql_names = ["CHR", "CHAR"] (string.py:26): both spellings route to the
+		// same special-grammar parser (an optional trailing `USING <charset>` clause), not
+		// FunctionByName.
+		"CHAR":           func(p *Parser) exp.Expression { return p.parseChar() },
+		"CHR":            func(p *Parser) exp.Expression { return p.parseChar() },
+		"CEIL":           func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindCeil) },
+		"FLOOR":          func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindFloor) },
+		"EXTRACT":        func(p *Parser) exp.Expression { return p.parseExtract() },
+		"POSITION":       func(p *Parser) exp.Expression { return p.parsePosition() },
+		"SUBSTRING":      func(p *Parser) exp.Expression { return p.parseSubstring() },
+		"TRIM":           func(p *Parser) exp.Expression { return p.parseTrim() },
+		"STRING_AGG":     func(p *Parser) exp.Expression { return p.parseStringAgg() },
+		"JSON_TABLE":     func(p *Parser) exp.Expression { return p.parseJSONTable() },
+		"XMLELEMENT":     func(p *Parser) exp.Expression { return p.parseXMLElement() },
+		"XMLTABLE":       func(p *Parser) exp.Expression { return p.parseXMLTable() },
+		"JSON_OBJECT":    func(p *Parser) exp.Expression { return p.parseJSONObject(false) },
+		"JSON_OBJECTAGG": func(p *Parser) exp.Expression { return p.parseJSONObject(true) },
+		// Registered here unconditionally, but the dialect gate in parseFunctionCall (which
+		// consults this map) nils it out for anything but MySQL: among base/MySQL/Postgres,
+		// only MySQL's FUNCTION_PARSERS registers _parse_json_value (parsers/mysql.py:161) -
+		// base/Postgres have no JSON_VALUE entry at all, so JSON_VALUE(...) there parses as a
+		// plain Anonymous call.
+		"JSON_VALUE": func(p *Parser) exp.Expression { return p.parseJSONValue() },
 		// MySQL-only in practice: only reachable when ValuesIsFunction gates TokenType.VALUES
 		// into the function-call path (parsers/mysql.py:158-160). `VALUES(col)` inside
 		// `ON DUPLICATE KEY UPDATE` refers to the row that would have been inserted.

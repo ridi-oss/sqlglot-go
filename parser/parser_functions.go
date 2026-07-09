@@ -17,7 +17,10 @@ func (p *Parser) parseConvert(strict bool, safe any) exp.Expression {
 	this := p.parseBitwise()
 	var to exp.Expression
 	if p.match(tokens.USING) {
-		// TODO(1d): CONVERT charset form.
+		// parser.py:7969: CONVERT(x USING <charset>) -> CAST(x AS CHAR CHARACTER SET <charset>),
+		// captured via the synthetic CHARACTER_SET data type (mirrors the CAST(x AS CHAR
+		// CHARACTER SET ...) construction in parser_types.go's parseCast).
+		to = exp.DTypeCharacterSet.IntoExpr(exp.Args{"kind": p.parseCharsetName()})
 	} else if p.match(tokens.COMMA) {
 		to = p.parseTypes(false, false, true, false)
 	}
@@ -26,6 +29,37 @@ func (p *Parser) parseConvert(strict bool, safe any) exp.Expression {
 		args["safe"] = safe
 	}
 	return p.buildCast(strict, args)
+}
+
+// parseChar ports _parse_char (parser.py:7836-7842): CHR/CHAR(<expr>, ... [USING <charset>]).
+func (p *Parser) parseChar() exp.Expression {
+	expressions := p.parseCsv(p.parseAssignment)
+	var charset exp.Expression
+	if p.match(tokens.USING) {
+		charset = p.parseCharsetName()
+	}
+	return p.expression(exp.Chr(exp.Args{"expressions": expressions, "charset": charset}), nil, nil)
+}
+
+// parseCharsetName ports _parse_charset_name (parser.py:7844-7851) and MySQL's override
+// (parsers/mysql.py:523-535, mirrored inline below via the dialect check rather than a
+// separate dialect-flag/override table). MySQL parses a possibly-quoted identifier and
+// preserves quoting for charset names that need it (e.g. spaces, as allowed for custom
+// XML-registered charsets), unwrapping "safe" names to a bare Var so the common case
+// round-trips unquoted; other dialects just parse a VAR/BINARY/IDENTIFIER token as a bare
+// Var (quoting dropped, matching the base upstream behavior).
+func (p *Parser) parseCharsetName() exp.Expression {
+	if p.dialect.Name == "mysql" {
+		if identifier := p.parseIdentifier(); identifier != nil {
+			name := identifier.Name()
+			if exp.IsSafeIdentifier(name) {
+				return exp.Var(exp.Args{"this": name})
+			}
+			return identifier
+		}
+		return p.parseVar(false, map[tokens.TokenType]bool{tokens.BINARY: true}, false)
+	}
+	return p.parseVar(false, map[tokens.TokenType]bool{tokens.BINARY: true, tokens.IDENTIFIER: true}, false)
 }
 
 func (p *Parser) parseCeilFloor(kind exp.Kind) exp.Expression {

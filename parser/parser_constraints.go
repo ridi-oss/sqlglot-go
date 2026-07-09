@@ -21,9 +21,9 @@ var (
 	// + parsers/mysql.py:243-251. Only the keys actually reachable from the base/mysql/
 	// postgres corpus are ported: AUTOINCREMENT/AUTO_INCREMENT, CASESPECIFIC, CHARACTER SET,
 	// CHECK, COLLATE, COMMENT, DEFAULT, FOREIGN KEY, GENERATED, IDENTITY, NOT, NULL, ON,
-	// PRIMARY KEY, REFERENCES, UNIQUE, +mysql's FULLTEXT/INDEX/KEY/SPATIAL/ZEROFILL/INVISIBLE.
+	// PATH, PRIMARY KEY, REFERENCES, UNIQUE, +mysql's FULLTEXT/INDEX/KEY/SPATIAL/ZEROFILL/INVISIBLE.
 	// The remaining upstream base keys (COMPRESS/CLUSTERED/NONCLUSTERED/ENCODE/EPHEMERAL/
-	// EXCLUDE/FORMAT/INLINE/LIKE/PATH/PERIOD/TITLE/TTL/UPPERCASE/WITH/BUCKET/TRUNCATE) are
+	// EXCLUDE/FORMAT/INLINE/LIKE/PERIOD/TITLE/TTL/UPPERCASE/WITH/BUCKET/TRUNCATE) are
 	// exotic dialect-specific properties absent from that corpus and are omitted (documented
 	// 1:1 divergence, mirroring the pattern already used for e.g. SET_PARSERS' MySQL-only keys).
 	constraintParsers      map[string]func(*Parser) exp.Expression
@@ -92,6 +92,15 @@ func init() {
 			}
 			p.retreat(index)
 			return nil
+		},
+		// "PATH" ports parser.py:1391 (exp.PathColumnConstraint(this=_parse_string())). It is
+		// reached generically here — via parseColumnConstraint's loop — so it composes with any
+		// following constraints (e.g. XMLTABLE `COLUMNS id INT PATH '@id' NOT NULL`), matching
+		// upstream. The only base/mysql/postgres surface that uses it is XMLTABLE's COLUMNS list
+		// (parseXMLTable -> parseFieldDef), but registering it here rather than special-casing that
+		// call site keeps the constraint loop the single source of truth for column constraints.
+		"PATH": func(p *Parser) exp.Expression {
+			return p.expression(exp.PathColumnConstraint(exp.Args{"this": p.parseString()}), nil, nil)
 		},
 		"PRIMARY KEY": func(p *Parser) exp.Expression { return p.parsePrimaryKey(false, false) },
 		"REFERENCES":  func(p *Parser) exp.Expression { return p.parseReferences(false) },

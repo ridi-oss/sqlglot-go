@@ -219,33 +219,37 @@ func writeGaps(fails map[gapKey]string) error {
 	return os.WriteFile(parityGapsPath, []byte(b.String()), 0o644)
 }
 
-// Pass counts observed from a full local run over Scope A (identity.sql) plus
-// Scope B (dialect_identity.jsonl): base 905/955, mysql 340/424, postgres
-// 393/468 (after the FROM/TABLE-modifier/LOCK/STATEMENT parity slice, layered on the
-// earlier TYPE/CAST/`::`/AT TIME ZONE slice). This slice ports five self-contained
-// features 1:1 from upstream: TABLESAMPLE (`TABLESAMPLE (BUCKET .. OUT OF ..)`,
-// `(N ROWS)`, `(N PERCENT)`, postgres `SYSTEM (N) REPEATABLE (N)`); LATERAL VIEW attach
-// after the joins loop (`FROM t LATERAL VIEW EXPLODE(x) v AS y`); row-locking reads
-// FOR UPDATE / FOR SHARE / FOR KEY SHARE / FOR NO KEY UPDATE (with OF/NOWAIT/SKIP LOCKED/
-// WAIT, gated on the new LockingReadsSupported dialect flag; mysql `LOCK IN SHARE MODE`
-// canonicalizes to `FOR SHARE`); CACHE/UNCACHE TABLE (`CACHE [LAZY] TABLE x [OPTIONS(..)]
-// [AS <query>]`, `UNCACHE TABLE [IF EXISTS] x`); postgres COPY (`COPY tbl (..) FROM/TO
-// 'file' WITH (..)`, degrading to a raw Command for shapes upstream doesn't model); and
-// the STRAIGHT_JOIN-as-alias guard so `a STRAIGHT_JOIN b` parses as a join in any dialect.
-// The prior TYPE/CAST slice remains covered: `1::int`-style literal casts, bare
-// `ARRAY<...>`/`STRUCT<...>` type expressions, `x AT TIME ZONE zone`, postgres
-// PSEUDO_TYPE/OBJECT_IDENTIFIER round-trips, postgres UDT CAST targets, the mysql SET(...)
-// enum CAST target and `CHAR CHARACTER SET <cs>` suffix. LENGTH/CHAR_LENGTH canonicalization
-// is deliberately deferred (ROADMAP 5b per-dialect FUNCTIONS; see expressions/functions.go),
-// so postgres CHAR_LENGTH/CHARACTER_LENGTH stay in parity_gaps.txt; the Spark CACHE
-// `OPTIONS(N'..' = ..)` National-string key variant likewise stays a gap (unported node).
+// Scope B (dialect_identity.jsonl). These floors reflect the combined parity slices
+// merged into main: the TYPE/CAST/`::`/AT TIME ZONE slice, the FROM/TABLE-modifier/
+// LOCK/STATEMENT slice, and the FUNCTION + JSON-operator slice. Coverage now spans:
+//   - TYPE/CAST: `1::int`-style literal casts, bare `ARRAY<...>`/`STRUCT<...>` type
+//     expressions, `x AT TIME ZONE zone` (chainable), postgres PSEUDO_TYPE/
+//     OBJECT_IDENTIFIER round-trips, postgres UDT CAST targets, the mysql SET(...) enum
+//     CAST target and `CHAR CHARACTER SET <cs>` suffix (mysql attimezone_sql drops the
+//     zone + flags unsupported, matching upstream).
+//   - FROM/stmt/lock: TABLESAMPLE (`(BUCKET .. OUT OF ..)`, `(N ROWS)`, `(N PERCENT)`,
+//     postgres `SYSTEM (N) REPEATABLE (N)`); LATERAL VIEW attach; row-locking reads
+//     FOR UPDATE/SHARE/KEY SHARE/NO KEY UPDATE (with OF/NOWAIT/SKIP LOCKED/WAIT, gated
+//     on LockingReadsSupported; mysql `LOCK IN SHARE MODE` -> `FOR SHARE`); CACHE/UNCACHE
+//     TABLE; postgres COPY (degrading to a raw Command for shapes upstream doesn't model);
+//     the STRAIGHT_JOIN-as-alias guard.
+//   - functions/JSON: JSON_OBJECT/JSON_OBJECTAGG/JSON_VALUE (with OnCondition/JSONKeyValue),
+//     CHR/CHAR + `CONVERT ... USING <charset>`, the STR_TO_*/TIME_STR_TO_* temporal family,
+//     XMLELEMENT/XMLTABLE/XMLNAMESPACE, and the JSON arrow operators (-> ->> #> #>>) with
+//     the only_json_types gate choosing operator vs. JSON_EXTRACT_PATH[_TEXT] function form
+//     for postgres (mysql/base emit JSON_EXTRACT).
+//
+// LENGTH/CHAR_LENGTH canonicalization is deliberately deferred (ROADMAP 5b per-dialect
+// FUNCTIONS), so postgres CHAR_LENGTH/CHARACTER_LENGTH stay in parity_gaps.txt; the Spark
+// CACHE `OPTIONS(N'..' = ..)` National-string key variant likewise stays a gap.
 // These are monotonic pass floors — raise them as coverage improves, never lower them to
-// mask a regression. A drop below any floor fails the build even if the regressing
-// case is also (illegitimately) added to parity_gaps.txt.
+// mask a regression. A drop below any floor fails the build even if the regressing case is
+// also (illegitimately) added to parity_gaps.txt. Values below are reconciled by a full
+// SQLGLOT_CORPUS_UPDATE=1 run on the merged tree.
 const (
-	minPassBase     = 905
-	minPassMySQL    = 340
-	minPassPostgres = 393
+	minPassBase     = 912
+	minPassMySQL    = 362
+	minPassPostgres = 410
 )
 
 // Minimum record counts per corpus, from the committed fixtures (identity.sql:

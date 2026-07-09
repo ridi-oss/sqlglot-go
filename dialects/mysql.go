@@ -31,6 +31,8 @@ func MySQL() *Dialect {
 	d.IntervalAllowsPluralForm = false
 	// generators/mysql.py:133 LOCKING_READS_SUPPORTED = True.
 	d.LockingReadsSupported = true
+	// generators/mysql.py:142 JSON_TYPE_REQUIRED_FOR_EXTRACTION = True.
+	d.JSONTypeRequiredForExtraction = true
 
 	for _, unit := range []string{
 		"SECOND_MICROSECOND",

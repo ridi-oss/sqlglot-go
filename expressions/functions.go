@@ -143,6 +143,15 @@ var FunctionByName = map[string]func([]Expression) Expression{
 		}
 		return newNode(KindLeast, m)
 	},
+	// STR_TO_*/TIME_STR_TO_* (temporal.py:452-473): all six register generically here (no
+	// per-dialect FUNCTIONS override upstream), parsing for free via FromArgList/genericFunction
+	// since each Kind's argTypes row (kinds.go) already mirrors its arg_types dict key order.
+	"STR_TO_DATE":      genericFunction(KindStrToDate),
+	"STR_TO_TIME":      genericFunction(KindStrToTime),
+	"STR_TO_UNIX":      genericFunction(KindStrToUnix),
+	"TIME_STR_TO_DATE": genericFunction(KindTimeStrToDate),
+	"TIME_STR_TO_TIME": genericFunction(KindTimeStrToTime),
+	"TIME_STR_TO_UNIX": genericFunction(KindTimeStrToUnix),
 }
 
 func genericFunction(kind Kind) func([]Expression) Expression {
@@ -158,7 +167,10 @@ func jsonExtractFunction(kind Kind) func([]Expression) Expression {
 		if len(args) > 1 {
 			m["expression"] = args[1]
 		}
-		if len(args) > 2 {
+		// build_extract_json_with_path (parser.py:104-118) preserves the 3rd+ path arguments
+		// only for JSONExtract, not JSONExtractScalar (scalar keeps just this + expression), so
+		// e.g. JSON_EXTRACT_SCALAR(a, b, c) drops `c`.
+		if len(args) > 2 && kind == KindJSONExtract {
 			m["expressions"] = args[2:]
 		}
 		return newNode(kind, m)
