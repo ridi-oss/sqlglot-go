@@ -239,17 +239,20 @@ func writeGaps(fails map[gapKey]string) error {
 //     the only_json_types gate choosing operator vs. JSON_EXTRACT_PATH[_TEXT] function form
 //     for postgres (mysql/base emit JSON_EXTRACT).
 //
-// LENGTH/CHAR_LENGTH canonicalization is deliberately deferred (ROADMAP 5b per-dialect
-// FUNCTIONS), so postgres CHAR_LENGTH/CHARACTER_LENGTH stay in parity_gaps.txt; the Spark
-// CACHE `OPTIONS(N'..' = ..)` National-string key variant likewise stays a gap.
+// The residual parity tail (testdata/parity_gaps.txt's last 25/26 entries: byte/hex/bit
+// string literals + postgres e-strings, mysql session parameters/`:=` assignment/BINARY
+// cast/CHARSET(...)/CHAR(0x.. USING ..), postgres Distance operators/VALUES-join grouping/
+// DATE_PART/adjacent-string CONCAT/empty ARRAY[]::type[]/VARIADIC, the LEAD/LAG AggFunc
+// window-reparse gate, and matchRParen's dropped trailing-comment attachment) is now fully
+// closed - parity_gaps.txt is empty and every corpus record passes.
 // These are monotonic pass floors — raise them as coverage improves, never lower them to
 // mask a regression. A drop below any floor fails the build even if the regressing case is
 // also (illegitimately) added to parity_gaps.txt. Values below are reconciled by a full
 // SQLGLOT_CORPUS_UPDATE=1 run on the merged tree.
 const (
-	minPassBase     = 952
-	minPassMySQL    = 416
-	minPassPostgres = 454
+	minPassBase     = 955
+	minPassMySQL    = 424
+	minPassPostgres = 468
 )
 
 // Minimum record counts per corpus, from the committed fixtures (identity.sql:

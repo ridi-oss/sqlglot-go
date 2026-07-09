@@ -53,8 +53,8 @@ func TestParseSetBase(t *testing.T) {
 
 // TestParseSetMySQL ports the structural (non-@/@@) cases of test_mysql.py:1452
 // test_set_variable, plus the CHARACTER SET/CHARSET/NAMES corpus gaps
-// (testdata/parity_gaps.txt). The @/@@ user/system-variable forms aren't structurally
-// ported in this slice and close via the Command degrade instead (see parseSet).
+// (testdata/parity_gaps.txt). The @/@@ user/system-variable forms are covered by
+// TestParseSetMySQLCorpus below.
 func TestParseSetMySQL(t *testing.T) {
 	// SET SESSION x = 1 -> kind "SESSION", this = EQ(x, 1).
 	set := parseOneDialect(t, "SET SESSION x = 1", "mysql")
@@ -136,7 +136,7 @@ func TestParseSetMySQL(t *testing.T) {
 
 // TestParseSetMySQLCorpus round-trips the remaining structural mysql SET gaps from
 // testdata/parity_gaps.txt (PERSIST/PERSIST_ONLY/CHARACTER SET/NAMES unquoted forms/
-// TRANSACTION characteristics), plus the @/@@ Command-degrade cases.
+// TRANSACTION characteristics), plus the @@ SessionParameter forms.
 func TestParseSetMySQLCorpus(t *testing.T) {
 	structured := []string{
 		"SET CHARACTER SET 'utf8'",
@@ -172,19 +172,20 @@ func TestParseSetMySQLCorpus(t *testing.T) {
 		}
 	}
 
-	// @@ system-variable forms (SessionParameter) aren't structurally ported, so they
-	// degrade to a raw Command that round-trips byte-identically.
-	commandDegrade := []string{
+	// @@ system-variable forms build a structured SessionParameter (residual-tail cluster:
+	// primaryParsers[SESSION_PARAMETER] -> parseSessionParameter, parser.py:7168-7176) nested
+	// inside the ordinary SET/SetItem/EQ shape, verified against the pinned oracle.
+	sessionParameterForms := []string{
 		"SET @@GLOBAL.max_connections = 1000",
 		"SET @@GLOBAL.sort_buffer_size = 1000000, @@LOCAL.sort_buffer_size = 1000000",
 		"SET @@PERSIST.max_connections = 1000",
 	}
-	for _, sql := range commandDegrade {
-		cmd := parseOneDialect(t, sql, "mysql")
-		if cmd.Kind() != exp.KindCommand {
-			t.Fatalf("%q: kind = %v, want Command:\n%s", sql, cmd.Kind(), cmd.ToS())
+	for _, sql := range sessionParameterForms {
+		set := parseOneDialect(t, sql, "mysql")
+		if set.Kind() != exp.KindSet {
+			t.Fatalf("%q: kind = %v, want Set:\n%s", sql, set.Kind(), set.ToS())
 		}
-		got, err := generateSQL(t, cmd, "mysql")
+		got, err := generateSQL(t, set, "mysql")
 		if err != nil {
 			t.Fatalf("%q: Generate: %v", sql, err)
 		}

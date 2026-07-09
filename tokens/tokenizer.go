@@ -431,9 +431,42 @@ func BaseConfig() TokenizerConfig {
 	return compileConfig(cfg)
 }
 
+// defaultUnescapedSequences ports the module-level UNESCAPED_SEQUENCES table
+// (dialects/dialect.py:66-75): the two-character backslash escapes recognized while
+// SCANNING a string (as opposed to escapedSequences in package generator, which is this
+// table inverted and used while EMITTING one).
+var defaultUnescapedSequences = map[string]string{
+	`\a`: "\a",
+	`\b`: "\b",
+	`\f`: "\f",
+	`\n`: "\n",
+	`\r`: "\r",
+	`\t`: "\t",
+	`\v`: "\v",
+	`\\`: `\`,
+}
+
 func compileConfig(cfg TokenizerConfig) TokenizerConfig {
 	if cfg.FormatStrings == nil {
 		cfg.FormatStrings = map[string]FormatString{}
+	}
+	// Ports the Dialect metaclass hook (dialects/dialect.py:297-306): a dialect whose
+	// regular strings or byte strings support backslash escapes (StringEscapes['\\'] /
+	// ByteStringEscapes['\\'] - the Go analogues of STRINGS_SUPPORT_ESCAPED_SEQUENCES /
+	// BYTE_STRINGS_SUPPORT_ESCAPED_SEQUENCES) gets the default UNESCAPED_SEQUENCES table
+	// merged in, so e.g. mysql's `\\` collapses to one backslash and postgres's `e'\n'`
+	// scans to an actual newline. No dialect here (base/mysql/postgres) sets its own
+	// UnescapedSequences, so a plain copy (guarded by len==0, since this can run twice -
+	// once inside BaseConfig, again via the per-dialect CompileConfig call) suffices;
+	// a real per-dialect override table would need the same `{**default, **override}`
+	// merge dialect.py does, deferred until a dialect needs it.
+	if (cfg.StringEscapes['\\'] || cfg.ByteStringEscapes['\\']) && len(cfg.UnescapedSequences) == 0 {
+		if cfg.UnescapedSequences == nil {
+			cfg.UnescapedSequences = map[string]string{}
+		}
+		for k, v := range defaultUnescapedSequences {
+			cfg.UnescapedSequences[k] = v
+		}
 	}
 	for start, end := range cfg.Quotes {
 		cfg.FormatStrings["n"+start] = FormatString{End: end, TokenType: NATIONAL_STRING}

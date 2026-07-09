@@ -54,6 +54,12 @@ type Dialect struct {
 	// a single dialect flag gates the shared parseFunctionCall/functionParsers["VALUES"]
 	// entry instead of a real per-dialect override.
 	ValuesIsFunction bool
+	// CharsetIsFunction ports the MySQL parser's FUNC_TOKENS addition of
+	// TokenType.CHARACTER_SET (parsers/mysql.py:63-70): `CHARSET(...)`/`CHARACTER SET(...)`
+	// is an ordinary (Anonymous) function call, not the CHARACTER SET/CHARSET keyword.
+	// Same divergence rationale as ValuesIsFunction: this port has no per-dialect
+	// FUNC_TOKENS table, so a dedicated flag gates the shared parseFunctionCall instead.
+	CharsetIsFunction bool
 	// DuplicateKeyUpdateWithSet ports the generator flag of the same name
 	// (generator.py:374, generators/mysql.py:137): base emits `ON DUPLICATE KEY UPDATE SET
 	// ...`, MySQL's own generator omits the SET keyword (`ON DUPLICATE KEY UPDATE ...`).
@@ -222,6 +228,34 @@ type Dialect struct {
 	// lowercased name is in this set are quoted on generation (identifier_sql, generator.py:
 	// 1983). A nil/empty map (base's zero value) means "quote nothing extra".
 	ReservedKeywords map[string]bool
+	// BitStart/BitEnd, HexStart/HexEnd, ByteStart/ByteEnd port BIT_START/BIT_END,
+	// HEX_START/HEX_END, BYTE_START/BYTE_END (dialects/dialect.py:292-295): the
+	// bitstringSQL/hexstringSQL/bytestringSQL delimiters, derived upstream from the FIRST
+	// entry of the tokenizer's BIT_STRINGS/HEX_STRINGS/BYTE_STRINGS class attribute (e.g.
+	// mysql/postgres BIT_STRINGS=[("b'","'"),...] -> BIT_START="b'", BIT_END="'"). Unlike
+	// upstream's `_FORMAT_STRINGS` dict (Python dict insertion order), this port's
+	// TokenizerConfig.FormatStrings is a plain Go map with no reliable iteration order, so
+	// these are explicit per-dialect fields (set alongside QuoteStart/IdentifierStart above)
+	// rather than derived from FormatStrings at Dialect-construction time. Empty string
+	// (base's zero value) means "dialect has no such string family", matching upstream's
+	// None default.
+	BitStart, BitEnd   string
+	HexStart, HexEnd   string
+	ByteStart, ByteEnd string
+	// HexStringIsIntegerType ports HEX_STRING_IS_INTEGER_TYPE (dialects/dialect.py:676) and
+	// ByteStringIsBytesType ports BYTE_STRING_IS_BYTES_TYPE (dialects/dialect.py:724): neither
+	// base, mysql, nor postgres overrides either flag away from its False default, so both
+	// stay at the Go zero value for all three dialects here - present for 1:1 fidelity with
+	// hexstringSQL/bytestringSQL's upstream signature, not because any in-scope dialect sets
+	// them true.
+	HexStringIsIntegerType bool
+	ByteStringIsBytesType  bool
+	// ConcatCoalesce ports CONCAT_COALESCE (dialects/dialect.py:404, postgres.py:15): whether
+	// the dialect's native CONCAT function already coalesces NULL args to empty strings.
+	// Consumed by parsePrimary's adjacent-string-literal rewrite (`'a' 'b'` -> Concat) to set
+	// the built node's own "coalesce" arg to match; postgres is the only override (true) among
+	// base/mysql/postgres.
+	ConcatCoalesce bool
 }
 
 func Base() *Dialect {

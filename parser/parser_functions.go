@@ -114,6 +114,21 @@ func (p *Parser) parseExtract() exp.Expression {
 	return p.expression(exp.Extract(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil)
 }
 
+// parseDatePart ports postgres's FUNCTION_PARSERS["DATE_PART"] -> _parse_date_part
+// (parsers/postgres.py:303-311): `DATE_PART(<type-or-part>, <value>)` desugars to
+// `EXTRACT(<part> FROM <value>)`. A Column/Literal part (the common `DATE_PART('year', x)`
+// shape) is normalized to a bare Var so it renders unquoted like an EXTRACT part name; a
+// Cast (e.g. `'isodow'::varchar(6)`) is left as-is.
+func (p *Parser) parseDatePart() exp.Expression {
+	part := p.parseType(true, false)
+	p.match(tokens.COMMA)
+	value := p.parseBitwise()
+	if part != nil && (part.Kind() == exp.KindColumn || part.Kind() == exp.KindLiteral) {
+		part = exp.Var(exp.Args{"this": part.Name()})
+	}
+	return p.expression(exp.Extract(exp.Args{"this": part, "expression": value}), nil, nil)
+}
+
 func (p *Parser) parsePosition() exp.Expression {
 	args := p.parseCsv(p.parseBitwise)
 	if p.match(tokens.IN) {
@@ -164,6 +179,28 @@ func (p *Parser) parseSubstring() exp.Expression {
 		args = append(args, length)
 	}
 	return p.validateExpression(exp.FromArgList(exp.KindSubstring, args), exprArgs(args))
+}
+
+// parseConcat ports the FUNCTIONS "CONCAT" builder (parser.py:345-349):
+//
+//	"CONCAT": lambda args, dialect: exp.Concat(
+//	    expressions=args, safe=not dialect.STRICT_STRING_CONCAT, coalesce=dialect.CONCAT_COALESCE)
+//
+// The dialect-dependent safe/coalesce args are why this is a dialect-aware FUNCTION_PARSERS entry
+// rather than a plain FunctionByName builder. Building a real exp.Concat (not an Anonymous call)
+// is what lets it transpile across dialects, e.g. `CONCAT(a, b)` base->postgres -> `a || b` and
+// postgres->mysql wraps each arg in an empty-string COALESCE (see concatSQL/convertConcatArgs).
+// CONCAT_WS keeps round-tripping via Anonymous: it needs a distinct exp.ConcatWs node whose
+// concatws_sql wraps a NULL-coalescing dialect in a CASE, which is out of this port's scope; it
+// only diverges cross-dialect (never in the same-read==write corpus), so leaving it Anonymous is
+// no regression.
+func (p *Parser) parseConcat() exp.Expression {
+	args := p.parseFunctionArgs(false)
+	return p.validateExpression(exp.Concat(exp.Args{
+		"expressions": args,
+		"safe":        !p.dialect.StrictStringConcat,
+		"coalesce":    p.dialect.ConcatCoalesce,
+	}), exprArgs(args))
 }
 
 func (p *Parser) parseTrim() exp.Expression {
@@ -317,19 +354,17 @@ func init() {
 	// (parser.go, see the "Upstream FUNCTION_PARSERS is per-dialect" comment there) rather
 	// than here, since the gate lives alongside the sibling VALUES gate it mirrors.
 	functionParsers["SUBSTR"] = (*Parser).parseSubstring
+	// CONCAT is a base FUNCTIONS builder (parser.py:345-349), but unlike the FunctionByName
+	// builders it needs the dialect (safe/coalesce), so it lives here in the dialect-aware
+	// FUNCTION_PARSERS map instead. CONCAT_WS is left Anonymous - see parseConcat's note.
+	functionParsers["CONCAT"] = (*Parser).parseConcat
 
-	// VARIADIC is postgres-only (parsers/postgres.py:142 NO_PAREN_FUNCTION_PARSERS). This
-	// port has no per-dialect NO_PAREN_FUNCTION_PARSERS table (same deferred-to-5b caveat as
-	// FUNC_TOKENS/FUNCTION_PARSERS elsewhere), so the shared entry gates itself at call time:
-	// parseFunctionCall already advanced past the VARIADIC token before invoking this closure,
-	// so a non-postgres dialect retreats back over it and returns nil, falling through to
-	// whatever ordinary primary/var parsing would have done had this entry never matched (e.g.
-	// treating a bare `VARIADIC` identifier as a column reference in base/mysql).
+	// VARIADIC is postgres-only (parsers/postgres.py:142 NO_PAREN_FUNCTION_PARSERS). This port
+	// shares one global map (a per-dialect NO_PAREN_FUNCTION_PARSERS table is deferred to slice
+	// 5b, same caveat as FUNC_TOKENS/FUNCTION_PARSERS elsewhere) and filters by dialect at the
+	// lookup sites via noParenFunctionParserFor, so in base/mysql this entry is invisible and a
+	// bare `VARIADIC` stays a column while `VARIADIC(x)` parses as an ordinary function call.
 	noParenFunctionParsers["VARIADIC"] = func(p *Parser) exp.Expression {
-		if p.dialect.Name != "postgres" {
-			p.retreat(p.index - 1)
-			return nil
-		}
 		return p.expression(exp.Variadic(exp.Args{"this": p.parseBitwise()}), nil, nil)
 	}
 }

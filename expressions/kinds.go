@@ -516,6 +516,40 @@ const (
 	// parsers/mysql.py's RANGE_PARSERS[SOUNDS_LIKE] (there is no dedicated
 	// exp.SoundsLike class upstream).
 	KindSoundex
+
+	// residual-tail cluster: byte/hex/bit-string literals, session parameters, the `:=`
+	// assignment operator, and the postgres distance operators.
+	//
+	// KindBitString/KindHexString/KindByteString (query.py:471-491, all `Expression,
+	// Condition` with `is_primitive = True`): BIT_STRING/HEX_STRING/BYTE_STRING token
+	// literals (`b'101'`/`0b101`, `x'FF'`/`0xFF`, postgres `e'...'`). KindRawString
+	// already exists (slice-strings cluster) and covers HEREDOC_STRING/RAW_STRING.
+	KindBitString
+	KindHexString
+	KindByteString
+	// KindSessionParameter (core.py:1837, `class SessionParameter(Expression, Condition)`):
+	// mysql `@@GLOBAL.max_connections` / bare `@@x` session-variable reference.
+	KindSessionParameter
+	// KindPropertyEQ (core.py:2150, `class PropertyEQ(Expression, Binary)`): the ASSIGNMENT
+	// `:=` operator (parser.py:881-883), e.g. mysql `SELECT @var1 := 1`.
+	KindPropertyEQ
+	// KindDistance/KindDistanceNd (core.py:2154/2158, both `class X(Expression, Binary)`):
+	// the FACTOR-level postgres `<->`/`<<->>` distance operators (parser.py:917-918).
+	KindDistance
+	KindDistanceNd
+	// KindLag/KindLead (aggregate.py:150-163, both `class X(Expression, AggFunc)`): the
+	// LAG/LEAD window functions. Previously unregistered (fell through to Anonymous), which
+	// meant a parenthesized call like `(LEAD(x)) OVER (...)` never tripped parseParen's
+	// `this.This().Is(exp.TraitAggFunc)` window-reparse gate (Anonymous has no AggFunc
+	// trait) - registering them here is what actually closes that gap, not a parser change.
+	KindLag
+	KindLead
+	// KindConcat (string.py:29-31, `class Concat(Expression, Func)`, is_var_len_args=True):
+	// built by both _parse_primary's adjacent-string-literal rewrite (`'a' 'b'` -> Concat,
+	// parser.py:6871-6885) and the CONCAT(...) function builder (parser.py:345-349, ported as
+	// parser.parseConcat - dialect-aware, since safe/coalesce depend on the dialect). CONCAT_WS
+	// stays Anonymous: it needs a separate exp.ConcatWs node, out of scope here.
+	KindConcat
 )
 
 type Trait uint32
@@ -967,6 +1001,22 @@ var argTypes = map[Kind][]argSpec{
 	KindMatchAgainst:            {{"this", true}, {"expressions", true}, {"modifier", false}},
 	KindJSONArrayContains:       {{"this", true}, {"expression", true}, {"json_type", false}},
 	KindSoundex:                 defaultArgTypes,
+	// residual-tail cluster: see the KindBitString..KindDistanceNd const-block comment
+	// above. BitString has no arg_types override (defaultArgTypes); HexString/ByteString
+	// add their own optional flag (query.py:480-487); SessionParameter/PropertyEQ/
+	// Distance/DistanceNd transcribed from core.py:1837-1838, 2150-2159.
+	KindBitString:        defaultArgTypes,
+	KindHexString:        {{"this", true}, {"is_integer", false}},
+	KindByteString:       {{"this", true}, {"is_bytes", false}},
+	KindSessionParameter: {{"this", true}, {"kind", false}},
+	KindPropertyEQ:       {{"this", true}, {"expression", true}},
+	KindDistance:         {{"this", true}, {"expression", true}},
+	KindDistanceNd:       {{"this", true}, {"expression", true}},
+	// KindLag/KindLead (aggregate.py:150-163): {"this": True, "offset": False, "default": False}.
+	KindLag:  {{"this", true}, {"offset", false}, {"default", false}},
+	KindLead: {{"this", true}, {"offset", false}, {"default", false}},
+	// KindConcat (string.py:29-31): {"expressions": True, "safe": False, "coalesce": False}.
+	KindConcat: {{"expressions", true}, {"safe", false}, {"coalesce", false}},
 }
 
 var traitsOf = map[Kind]Trait{
@@ -1179,6 +1229,20 @@ var traitsOf = map[Kind]Trait{
 	KindMatchAgainst:            TraitCondition | TraitFunc,
 	KindJSONArrayContains:       TraitCondition | TraitBinary | TraitPredicate | TraitFunc,
 	KindSoundex:                 TraitCondition | TraitFunc,
+	// residual-tail cluster: BitString/HexString/ByteString are `Expression, Condition`
+	// (query.py:471-491); SessionParameter is `Expression, Condition` (core.py:1837);
+	// PropertyEQ/Distance/DistanceNd are `Expression, Binary` and Binary IS-A Condition
+	// (core.py:1623), so they get the same TraitCondition|TraitBinary combo as Add/Sub.
+	KindBitString:        TraitCondition,
+	KindHexString:        TraitCondition,
+	KindByteString:       TraitCondition,
+	KindSessionParameter: TraitCondition,
+	KindPropertyEQ:       TraitCondition | TraitBinary,
+	KindDistance:         TraitCondition | TraitBinary,
+	KindDistanceNd:       TraitCondition | TraitBinary,
+	KindLag:              TraitCondition | TraitFunc | TraitAggFunc,
+	KindLead:             TraitCondition | TraitFunc | TraitAggFunc,
+	KindConcat:           TraitCondition | TraitFunc,
 }
 
 var primitive = map[Kind]bool{
@@ -1188,6 +1252,11 @@ var primitive = map[Kind]bool{
 	KindBoolean:    true,
 	// slice-strings cluster: National is_primitive=True (query.py:585-586).
 	KindNational: true,
+	// residual-tail cluster: BitString/HexString/ByteString is_primitive=True (query.py:
+	// 471-487).
+	KindBitString:  true,
+	KindHexString:  true,
+	KindByteString: true,
 }
 
 var hashRaw = map[Kind]bool{
@@ -1529,6 +1598,16 @@ var className = map[Kind]string{
 	KindMatchAgainst:                        "MatchAgainst",
 	KindJSONArrayContains:                   "JSONArrayContains",
 	KindSoundex:                             "Soundex",
+	KindBitString:                           "BitString",
+	KindHexString:                           "HexString",
+	KindByteString:                          "ByteString",
+	KindSessionParameter:                    "SessionParameter",
+	KindPropertyEQ:                          "PropertyEQ",
+	KindDistance:                            "Distance",
+	KindDistanceNd:                          "DistanceNd",
+	KindLag:                                 "Lag",
+	KindLead:                                "Lead",
+	KindConcat:                              "Concat",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func
@@ -1551,6 +1630,7 @@ var varLenArgs = map[Kind]bool{
 	KindJSONExtractScalar: true,
 	KindDate:              true,
 	KindChr:               true,
+	KindConcat:            true,
 }
 
 // ArgKeys returns the arg keys of a Kind in class-declaration order (mirrors

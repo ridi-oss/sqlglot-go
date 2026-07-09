@@ -255,10 +255,11 @@ func TestParseAlterColumn(t *testing.T) {
 		})
 	}
 
-	// USING clause on SET DATA TYPE (dtype parsed before the trailing USING check).
+	// USING clause on SET DATA TYPE (dtype parsed before the trailing USING check). CONCAT is a
+	// registered function (parser.parseConcat), so the USING expression is a Concat node.
 	alter := parseOne(t, "ALTER TABLE integers ALTER COLUMN i SET DATA TYPE VARCHAR USING CONCAT(i, '_', j)")
 	actions := alterActions(t, alter)
-	if exprArg(t, actions[0], "using").Kind() != exp.KindAnonymous {
+	if exprArg(t, actions[0], "using").Kind() != exp.KindConcat {
 		t.Fatalf("SET DATA TYPE USING mismatch:\n%s", alter.ToS())
 	}
 }

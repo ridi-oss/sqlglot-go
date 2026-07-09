@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 	"unicode"
 
@@ -493,11 +494,11 @@ func (c *TokenizerCore) scanBits() {
 	if len(runes) >= 2 {
 		payload = string(runes[2:])
 	}
-	// Upstream validates the full value (e.g. int("0b101", 2)); Python's int()
-	// accepts the "0b" prefix for base 2 but requires at least one digit after it,
-	// so a bare "0b" falls back to an identifier. We validate the payload and reject
-	// an empty one to preserve that behavior (parseIntBase("") returns ok on an empty loop).
-	if _, ok := parseIntBase(payload, 2); ok && payload != "" {
+	// Upstream validates the full text with int(value, 2) (e.g. int("0b_101", 2)): CPython
+	// accepts the "0b" prefix and an underscore right after it but requires at least one digit,
+	// so a bare "0b" (or "0b_") falls back to an identifier. The stored payload keeps the
+	// post-prefix text, so `0b_101` -> b'_101', matching upstream's BIT_STRING token.
+	if _, ok := ParseIntPython(value, 2); ok {
 		c.add(BIT_STRING, payload)
 	} else {
 		c.add(IDENTIFIER)
@@ -512,9 +513,9 @@ func (c *TokenizerCore) scanHex() {
 	if len(runes) >= 2 {
 		payload = string(runes[2:])
 	}
-	// See _scanBits: validate the payload, rejecting an empty one so a bare "0x"
-	// falls back to an identifier, matching upstream int("0x", 16) raising ValueError.
-	if _, ok := parseIntBase(payload, 16); ok && payload != "" {
+	// See scanBits: validate the full int("0x...", 16), so a bare "0x" (empty payload) falls
+	// back to an identifier while "0x_FF" tokenizes (payload "_FF" -> x'_FF').
+	if _, ok := ParseIntPython(value, 16); ok {
 		c.add(HEX_STRING, payload)
 	} else {
 		c.add(IDENTIFIER)
@@ -574,8 +575,11 @@ func (c *TokenizerCore) scanString(start string) bool {
 	}
 	text := c.extractString(end, escapes, tokenType == RAW_STRING, true)
 
+	// The quoted forms validate the payload directly via int(payload, base): x'0xA'/x'+A' are
+	// accepted (int() honors a leading sign and matching base prefix), x'GG' is rejected. An
+	// empty x''/b'' is left as-is (upstream does not int()-validate an empty payload).
 	if base != 0 && text != "" {
-		if _, ok := parseIntBase(text, base); !ok {
+		if _, ok := ParseIntPython(text, base); !ok {
 			panic(&sqlerrors.TokenError{Msg: fmt.Sprintf("Numeric string contains invalid characters from %d:%d", c.line, c.start)})
 		}
 	}
@@ -753,26 +757,95 @@ func lastIndexRune(values []rune, needle rune) int {
 	return -1
 }
 
-func parseIntBase(value string, base int) (int64, bool) {
-	var n int64
-	for _, r := range value {
-		var digit int64
-		switch {
-		case r >= '0' && r <= '9':
-			digit = int64(r - '0')
-		case r >= 'a' && r <= 'f':
-			digit = int64(r-'a') + 10
-		case r >= 'A' && r <= 'F':
-			digit = int64(r-'A') + 10
-		default:
-			return 0, false
+// ParseIntPython parses value exactly the way CPython's int(value, base) does, for the bases
+// sqlglot uses to validate BIT_STRING/HEX_STRING literals (2, 8, 16). It returns the
+// arbitrary-precision value (a bit/hex literal can exceed 64 bits) and whether value is a valid
+// literal. CPython accepts, in order: surrounding whitespace, an optional single +/- sign, an
+// optional base prefix (0b/0o/0x matching the base), then one or more base digits with optional
+// single '_' separators - each underscore between two digits or immediately after the base
+// prefix, never leading, trailing, or doubled (int("A_B",16) and int("0x_FF",16) are valid;
+// "_A"/"A_"/"A__B"/"+_A" are not).
+//
+// The tokenizer validates the quoted forms (x'..'/b'..') by int(payload, base) and the bare
+// forms (0x../0b..) by int(fullText, base); the generator reuses it to fold a hex/bit literal to
+// its integer value on a dialect with no hex/bit family. Only the digit scan runs on invalid
+// input (no big.Int allocation until the literal is known valid).
+func ParseIntPython(value string, base int) (*big.Int, bool) {
+	s := strings.TrimSpace(value)
+	neg := false
+	if s != "" && (s[0] == '+' || s[0] == '-') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	afterPrefix := false
+	if len(s) >= 2 && s[0] == '0' {
+		switch lowerASCII(s[1]) {
+		case 'x':
+			afterPrefix = base == 16
+		case 'o':
+			afterPrefix = base == 8
+		case 'b':
+			afterPrefix = base == 2
 		}
-		if digit >= int64(base) {
-			return 0, false
+		if afterPrefix {
+			s = s[2:]
 		}
-		n = n*int64(base) + digit
+	}
+	if s == "" {
+		return nil, false
+	}
+	digits := make([]byte, 0, len(s))
+	prevUnderscore := false
+	seenDigit := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '_' {
+			// A '_' is valid only between two digits or immediately after the base prefix.
+			if prevUnderscore || (!seenDigit && !(i == 0 && afterPrefix)) {
+				return nil, false
+			}
+			prevUnderscore = true
+			continue
+		}
+		d := digitValue(ch)
+		if d < 0 || d >= base {
+			return nil, false
+		}
+		digits = append(digits, ch)
+		seenDigit = true
+		prevUnderscore = false
+	}
+	if prevUnderscore || len(digits) == 0 {
+		return nil, false
+	}
+	n := new(big.Int)
+	if _, ok := n.SetString(string(digits), base); !ok {
+		return nil, false
+	}
+	if neg {
+		n.Neg(n)
 	}
 	return n, true
+}
+
+// digitValue returns the value of an ASCII digit for bases up to 36, or -1 if ch is not a digit.
+func digitValue(ch byte) int {
+	switch {
+	case ch >= '0' && ch <= '9':
+		return int(ch - '0')
+	case ch >= 'a' && ch <= 'z':
+		return int(ch-'a') + 10
+	case ch >= 'A' && ch <= 'Z':
+		return int(ch-'A') + 10
+	}
+	return -1
+}
+
+func lowerASCII(ch byte) byte {
+	if ch >= 'A' && ch <= 'Z' {
+		return ch + ('a' - 'A')
+	}
+	return ch
 }
 
 func isAllDigits(s string) bool {

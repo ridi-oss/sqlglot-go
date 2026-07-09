@@ -264,18 +264,45 @@ func (g *Generator) literalSQL(e expressions.Expression) string {
 	return text
 }
 
+// escapeStr is the common-case entry point, equivalent to upstream escape_str's defaults
+// (escape_backslash=True, delimiter=None, escaped_delimiter=None, is_byte_string=False,
+// generator.py:2983-2989). By far the hottest caller (every string literal), so it stays a
+// plain single-arg function rather than requiring every call site to spell out defaults.
 func (g *Generator) escapeStr(text string) string {
-	if g.stringsSupportEscapedSequences {
+	return g.escapeStrOpts(text, escapeStrOptions{escapeBackslash: true})
+}
+
+// escapeStrOptions parameterizes escapeStrOpts, mirroring escape_str's non-default kwargs.
+// Go's bool zero value is false, NOT upstream's escape_backslash=True default - callers
+// that want that default must set EscapeBackslash explicitly (see escapeStr above); the
+// only current caller of a non-default value is bytestringSQL (escape_backslash=False).
+type escapeStrOptions struct {
+	escapeBackslash  bool
+	delimiter        string
+	escapedDelimiter string
+	isByteString     bool
+}
+
+// escapeStrOpts ports escape_str (generator.py:2983-3005) in full, parameterized form.
+func (g *Generator) escapeStrOpts(text string, opts escapeStrOptions) string {
+	supportsEscapeSequences := g.stringsSupportEscapedSequences
+	if opts.isByteString {
+		supportsEscapeSequences = g.byteStringsSupportEscapedSequences
+	}
+	if supportsEscapeSequences {
 		// Mirrors the default ESCAPED_SEQUENCES dialect table (dialects/dialect.py:66-90,
 		// 302-312): the inverse of UNESCAPED_SEQUENCES, filtered down to non-printable
 		// control characters plus backslash itself (printable characters round-trip as-is).
 		// No target dialect here overrides UNESCAPED_SEQUENCES (only clickhouse/snowflake
 		// do, out of scope), so the table is hardcoded rather than threading a new
-		// per-dialect field just for this. Only mysql sets StringEscapes['\\'], so this
-		// branch (and thus escapedSequences) is mysql-only among base/mysql/postgres.
+		// per-dialect field just for this.
 		var b strings.Builder
 		for i := 0; i < len(text); i++ {
 			c := text[i]
+			if !opts.escapeBackslash && c == '\\' {
+				b.WriteByte(c)
+				continue
+			}
 			if esc, ok := escapedSequences[c]; ok {
 				b.WriteString(esc)
 			} else {
@@ -284,7 +311,15 @@ func (g *Generator) escapeStr(text string) string {
 		}
 		text = b.String()
 	}
-	return strings.ReplaceAll(g.replaceLineBreaks(text), g.quoteEnd, g.escapedQuoteEnd)
+	delimiter := opts.delimiter
+	if delimiter == "" {
+		delimiter = g.quoteEnd
+	}
+	escapedDelimiter := opts.escapedDelimiter
+	if escapedDelimiter == "" {
+		escapedDelimiter = g.escapedQuoteEnd
+	}
+	return strings.ReplaceAll(g.replaceLineBreaks(text), delimiter, escapedDelimiter)
 }
 
 // escapedSequences is the default ESCAPED_SEQUENCES table (dialects/dialect.py:66-90,
@@ -301,20 +336,26 @@ var escapedSequences = map[byte]string{
 	'\\': `\\`,
 }
 
+// placeholderSQL ports placeholder_sql (generator.py:3417-3418) and postgres's override
+// (generators/postgres.py:541-546). Postgres's `?` placeholder parses with jdbc=True
+// (parsers/postgres.py:96) and always renders "?"; everything else there is its pyformat/
+// psycopg placeholder: bare "%s", or named "%(name)s" (parseQueryParameter).
 func (g *Generator) placeholderSQL(e expressions.Expression) string {
-	if truthy(e.Arg("this")) {
-		// A named placeholder (:name). Postgres renders it in pyformat (psycopg) style as
-		// %(name)s (dialects/postgres.py placeholder_sql); base/mysql keep :name
-		// (NAMED_PLACEHOLDER_TOKEN=":", generator.py:3417-3418).
-		if g.dialect.Name == "postgres" {
-			return "%(" + e.Name() + ")s"
+	if g.dialect.Name == "postgres" {
+		if truthy(e.Arg("jdbc")) {
+			return "?"
 		}
+		this := ""
+		if truthy(e.Arg("this")) {
+			this = "(" + e.Name() + ")"
+		}
+		return "%" + this + "s"
+	}
+	if truthy(e.Arg("this")) {
+		// A named placeholder (:name); base/mysql keep :name (NAMED_PLACEHOLDER_TOKEN=":").
 		return ":" + e.Name()
 	}
-	// A bare `?` placeholder. Upstream parses it with jdbc=True, so even postgres renders it
-	// as `?` (the jdbc short-circuit in postgres.placeholder_sql). This port doesn't model the
-	// pyformat `%s` positional form (it never parses one), so a this-less Placeholder always
-	// originated from `?` and round-trips as `?` for every dialect.
+	// A bare `?` placeholder.
 	return "?"
 }
 
@@ -2287,14 +2328,6 @@ func (g *Generator) unnestSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) bracketSQL(e expressions.Expression) string {
-	// Postgres's ARRAY[...] literal (parsed here as a Bracket subscripting a bare "ARRAY"
-	// column - see isArrayLiteralBracket) gets the same pretty dynamic line-wrap as
-	// upstream's inline_array_sql (dialects/dialect.py:1218-1219, generators/postgres.py:
-	// 502-509 array_sql), instead of the plain flat join every other Bracket use (real
-	// subscripting/slicing) gets.
-	if g.dialect.Name == "postgres" && isArrayLiteralBracket(e) {
-		return "ARRAY[" + g.expressions(exprsOptions{expression: e, dynamic: true, newLine: true, skipFirst: true, skipLast: true}) + "]"
-	}
 	// Base IndexOffset is 0, so apply_index_offset is unnecessary for slice 2.
 	exprs := listFromValue(e.Arg("expressions"))
 	sqls := make([]string, 0, len(exprs))
@@ -2304,30 +2337,13 @@ func (g *Generator) bracketSQL(e expressions.Expression) string {
 	return g.sqlKey(e, "this") + "[" + strings.Join(sqls, ", ") + "]"
 }
 
-// isArrayLiteralBracket reports whether e is really an `ARRAY[...]` literal rather than a
-// subscript/slice: this port's parser doesn't build a dedicated exp.Array node for bracket
-// syntax (unlike upstream's build_array_constructor, parser.py:139-148 - out of this file's
-// scope), so `ARRAY[...]` parses as an ordinary Bracket subscripting a bare, unquoted "ARRAY"
-// column. That shape is never produced by genuine indexing (a real column literally named
-// "array" would need to be quoted, since ARRAY is a reserved word), so checking the "this"
-// column's name is a safe, generator-only way to recover the distinction upstream's parser
-// makes structurally.
-func isArrayLiteralBracket(e expressions.Expression) bool {
-	this := asExpression(e.Arg("this"))
-	if this == nil || this.Kind() != expressions.KindColumn {
-		return false
-	}
-	if this.Arg("table") != nil || this.Arg("db") != nil || this.Arg("catalog") != nil {
-		return false
-	}
-	ident := asExpression(this.Arg("this"))
-	if ident == nil {
-		return false
-	}
-	if quoted, _ := ident.Arg("quoted").(bool); quoted {
-		return false
-	}
-	return strings.EqualFold(ident.Name(), "ARRAY")
+// inlineArraySQL ports inline_array_sql (dialects/dialect.py:1218-1219): the postgres
+// bracket-notation array body, e.g. `[1, 2, 3]`, with the same dynamic pretty line-wrap as
+// any other comma list. Consumed by arraySQL (generator/residual_tail.go); the postgres
+// ARRAY[...] literal now parses to a dedicated exp.Array node (parser _parse_bracket's
+// ARRAY_CONSTRUCTORS swap), so bracketSQL itself no longer special-cases it.
+func (g *Generator) inlineArraySQL(e expressions.Expression) string {
+	return "[" + g.expressions(exprsOptions{expression: e, dynamic: true, newLine: true, skipFirst: true, skipLast: true}) + "]"
 }
 
 // intervalSQL ports interval_sql (generator.py:3910-3930). unit_expression carries the

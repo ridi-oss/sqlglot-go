@@ -14,6 +14,8 @@ func Postgres() *Dialect {
 	d.IdentifierEnd = "\""
 	d.IndexOffset = 1
 	d.TypedDivision = true
+	// dialects/postgres.py:15 CONCAT_COALESCE = True.
+	d.ConcatCoalesce = true
 	d.NullOrdering = "nulls_are_large"
 	d.SupportsLimitAll = true
 	d.TablesReferenceableAsColumns = true
@@ -57,6 +59,11 @@ func Postgres() *Dialect {
 	}
 
 	cfg := tokens.BaseConfig()
+	// has_bit_strings/has_hex_strings = bool(BIT_STRINGS)/bool(HEX_STRINGS) (tokens.py:581-582);
+	// postgres BIT_STRINGS/HEX_STRINGS are non-empty (dialects/postgres.py:65-66), which also
+	// enables the number scanner's bare `0b`/`0x` forms (`SELECT 0xFF` -> `SELECT x'FF'`).
+	cfg.HasBitStrings = true
+	cfg.HasHexStrings = true
 	cfg.FormatStrings["b'"] = tokens.FormatString{End: "'", TokenType: tokens.BIT_STRING}
 	cfg.FormatStrings["B'"] = tokens.FormatString{End: "'", TokenType: tokens.BIT_STRING}
 	cfg.FormatStrings["x'"] = tokens.FormatString{End: "'", TokenType: tokens.HEX_STRING}
@@ -64,6 +71,12 @@ func Postgres() *Dialect {
 	cfg.FormatStrings["e'"] = tokens.FormatString{End: "'", TokenType: tokens.BYTE_STRING}
 	cfg.FormatStrings["E'"] = tokens.FormatString{End: "'", TokenType: tokens.BYTE_STRING}
 	cfg.ByteStringEscapes = map[rune]bool{'\'': true, '\\': true}
+	// dialects/postgres.py:65-67 BIT_STRINGS=[("b'","'"),("B'","'")] / HEX_STRINGS=
+	// [("x'","'"),("X'","'")] / BYTE_STRINGS=[("e'","'"),("E'","'")]; *_START take the
+	// FIRST tuple of each.
+	d.BitStart, d.BitEnd = "b'", "'"
+	d.HexStart, d.HexEnd = "x'", "'"
+	d.ByteStart, d.ByteEnd = "e'", "'"
 	cfg.FormatStrings["$"] = tokens.FormatString{End: "$", TokenType: tokens.HEREDOC_STRING}
 	cfg.SingleTokens['$'] = tokens.HEREDOC_STRING
 	cfg.VarSingleTokens['$'] = true

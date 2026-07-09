@@ -51,6 +51,14 @@ type Generator struct {
 	escapedQuoteEnd                string
 	escapedIdentifierEnd           string
 	stringsSupportEscapedSequences bool
+	// escapedByteQuoteEnd ports _escaped_byte_quote_end (generator.py:906-910): like
+	// escapedQuoteEnd, but built from the dialect's BYTE_END (empty when the dialect has no
+	// byte-string family, e.g. base/mysql).
+	escapedByteQuoteEnd string
+	// byteStringsSupportEscapedSequences ports BYTE_STRINGS_SUPPORT_ESCAPED_SEQUENCES
+	// (dialects/dialect.py:298-300, 434): "\\" in the dialect's BYTE_STRING_ESCAPES. Only
+	// postgres sets ByteStringEscapes['\\'] among base/mysql/postgres.
+	byteStringsSupportEscapedSequences bool
 
 	// singleStringInterval ports SINGLE_STRING_INTERVAL (generator.py:335, postgres.py:233):
 	// whether intervalSQL renders as a single quoted "<value> <unit>" string (postgres) rather
@@ -108,29 +116,38 @@ func New(d *dialects.Dialect, o Options) *Generator {
 		}
 	}
 
+	// _escaped_byte_quote_end (generator.py:906-910): empty when the dialect has no
+	// byte-string family (BYTE_END unset), else STRING_ESCAPES[0] + BYTE_END.
+	escapedByteQuoteEnd := ""
+	if d.ByteEnd != "" {
+		escapedByteQuoteEnd = stringEscape + d.ByteEnd
+	}
+
 	return &Generator{
-		pretty:                         o.Pretty,
-		identify:                       o.Identify,
-		normalize:                      o.Normalize,
-		pad:                            pad,
-		indentSize:                     indent,
-		normalizeFunctions:             normalizeFunctions,
-		unsupportedLevel:               unsupportedLevel,
-		maxUnsupported:                 maxUnsupported,
-		leadingComma:                   o.LeadingComma,
-		maxTextWidth:                   maxTextWidth,
-		comments:                       comments,
-		dialect:                        d,
-		identifierStart:                identifierStart,
-		identifierEnd:                  identifierEnd,
-		quoteStart:                     quoteStart,
-		quoteEnd:                       quoteEnd,
-		escapedQuoteEnd:                stringEscape + quoteEnd,
-		escapedIdentifierEnd:           identifierEnd + identifierEnd,
-		stringsSupportEscapedSequences: d.TokenizerConfig.StringEscapes['\\'],
-		singleStringInterval:           d.SingleStringInterval,
-		intervalAllowsPluralForm:       d.IntervalAllowsPluralForm,
-		parameterToken:                 d.ParameterToken,
+		pretty:                             o.Pretty,
+		identify:                           o.Identify,
+		normalize:                          o.Normalize,
+		pad:                                pad,
+		indentSize:                         indent,
+		normalizeFunctions:                 normalizeFunctions,
+		unsupportedLevel:                   unsupportedLevel,
+		maxUnsupported:                     maxUnsupported,
+		leadingComma:                       o.LeadingComma,
+		maxTextWidth:                       maxTextWidth,
+		comments:                           comments,
+		dialect:                            d,
+		identifierStart:                    identifierStart,
+		identifierEnd:                      identifierEnd,
+		quoteStart:                         quoteStart,
+		quoteEnd:                           quoteEnd,
+		escapedQuoteEnd:                    stringEscape + quoteEnd,
+		escapedIdentifierEnd:               identifierEnd + identifierEnd,
+		stringsSupportEscapedSequences:     d.TokenizerConfig.StringEscapes['\\'],
+		escapedByteQuoteEnd:                escapedByteQuoteEnd,
+		byteStringsSupportEscapedSequences: d.TokenizerConfig.ByteStringEscapes['\\'],
+		singleStringInterval:               d.SingleStringInterval,
+		intervalAllowsPluralForm:           d.IntervalAllowsPluralForm,
+		parameterToken:                     d.ParameterToken,
 	}
 }
 

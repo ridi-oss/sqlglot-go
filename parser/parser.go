@@ -1074,7 +1074,31 @@ func (p *Parser) parseSort(kind exp.Kind, tok tokens.TokenType) exp.Expression {
 
 func (p *Parser) parseExpression() exp.Expression { return p.parseAlias(p.parseAssignment(), false) }
 
-func (p *Parser) parseAssignment() exp.Expression { return p.parseDisjunction() }
+var assignmentTokens = map[tokens.TokenType]func(exp.Args) exp.Expression{
+	tokens.COLON_EQ: exp.PropertyEQ,
+}
+
+// parseAssignment ports _parse_assignment (parser.py:5790-5810): the ASSIGNMENT `:=`
+// operator, e.g. mysql `SELECT @var1 := 1, @var2 := COUNT(*)`.
+func (p *Parser) parseAssignment() exp.Expression {
+	this := p.parseDisjunction()
+	if this == nil && assignmentTokens[p.next.TokenType] != nil {
+		// `<non-identifier token> := <expr>` (parser.py:5793-5796): lets a token that
+		// otherwise fails to parse as a standalone expression still act as the LHS.
+		if tok := p.advanceAny(true); tok != nil {
+			this = exp.Column(exp.Args{"this": exp.ToIdentifier(tok.Text)})
+		}
+	}
+	for constructor, ok := assignmentTokens[p.curr.TokenType]; ok; constructor, ok = assignmentTokens[p.curr.TokenType] {
+		if this != nil && this.Kind() == exp.KindColumn && len(this.Parts()) == 1 {
+			this = this.This()
+		}
+		p.advance()
+		comments := p.prevComments
+		this = p.expression(constructor(exp.Args{"this": this, "expression": p.parseAssignment()}), nil, comments)
+	}
+	return this
+}
 
 // parseDisjunction ports _parse_disjunction (parser.py:5812-5822), matching the DISJUNCTION
 // token set. Upstream's DISJUNCTION is per-dialect: base has only OR (parser.py:885-887);
@@ -1471,9 +1495,11 @@ func (p *Parser) parseTerm() exp.Expression {
 }
 
 var factorTokens = map[tokens.TokenType]func(exp.Args) exp.Expression{
-	tokens.SLASH: exp.Div,
-	tokens.STAR:  exp.Mul,
-	tokens.DIV:   exp.Div,
+	tokens.SLASH:      exp.Div,
+	tokens.STAR:       exp.Mul,
+	tokens.DIV:        exp.Div,
+	tokens.LR_ARROW:   exp.Distance,
+	tokens.LLRR_ARROW: exp.DistanceNd,
 }
 
 func (p *Parser) parseFactor() exp.Expression {
@@ -1534,6 +1560,19 @@ func (p *Parser) parseUnary() exp.Expression {
 // `DECIMAL(38, 0)`) but isn't followed by a literal is itself the result; otherwise this
 // wasn't a type after all and falls back to a plain column/identifier reference.
 func (p *Parser) parseType(parseInterval, fallbackToIdentifier bool) exp.Expression {
+	// parsers/mysql.py:545-558 MySQLParser._parse_type: "mysql binary is special and can
+	// work anywhere, even in order by operations; it operates like a no paren func" - a bare
+	// BINARY keyword prefix casts whatever follows, e.g. `ORDER BY BINARY a` ->
+	// `ORDER BY CAST(a AS BINARY)`. Checked before the base logic below, matching upstream's
+	// override calling super()._parse_type() only when this doesn't match.
+	if p.dialect.Name == "mysql" && p.curr.TokenType == tokens.BINARY {
+		index := p.index
+		dataType := p.parseTypes(true, false, false, false)
+		if dataType != nil && dataType.Kind() == exp.KindDataType {
+			return p.expression(exp.Cast(exp.Args{"this": p.parseColumn(), "to": dataType}), nil, nil)
+		}
+		p.retreat(index)
+	}
 	if !fallbackToIdentifier {
 		if atom := p.parseAtom(); atom != nil {
 			return atom
@@ -1625,6 +1664,43 @@ func init() {
 	primaryParsers[tokens.STAR] = func(p *Parser, token tokens.Token) exp.Expression {
 		return p.parseStarOps(token)
 	}
+	// NUMERIC_PARSERS (parser.py:1143-1162) BIT_STRING/HEX_STRING/BYTE_STRING entries: the
+	// is_integer/is_bytes flags mirror `self.dialect.HEX_STRING_IS_INTEGER_TYPE or None` /
+	// `self.dialect.BYTE_STRING_IS_BYTES_TYPE or None` - always false for base/mysql/postgres
+	// (see dialects.Dialect.HexStringIsIntegerType's doc), so the arg is always the zero value
+	// here, kept only for 1:1 shape with hexstringSQL/bytestringSQL's upstream signature.
+	primaryParsers[tokens.BIT_STRING] = func(p *Parser, token tokens.Token) exp.Expression {
+		return p.expression(exp.BitString(exp.Args{"this": token.Text}), &token, nil)
+	}
+	primaryParsers[tokens.HEX_STRING] = func(p *Parser, token tokens.Token) exp.Expression {
+		return p.expression(exp.HexString(exp.Args{"this": token.Text, "is_integer": p.dialect.HexStringIsIntegerType}), &token, nil)
+	}
+	primaryParsers[tokens.BYTE_STRING] = func(p *Parser, token tokens.Token) exp.Expression {
+		return p.expression(exp.ByteString(exp.Args{"this": token.Text, "is_bytes": p.dialect.ByteStringIsBytesType}), &token, nil)
+	}
+	// PRIMARY_PARSERS (parser.py:1171): SESSION_PARAMETER -> _parse_session_parameter().
+	primaryParsers[tokens.SESSION_PARAMETER] = func(p *Parser, token tokens.Token) exp.Expression {
+		return p.parseSessionParameter()
+	}
+}
+
+// parseSessionParameter ports _parse_session_parameter (parser.py:7168-7176): mysql
+// `@@GLOBAL.max_connections` (kind="GLOBAL", this=Var(max_connections)) or bare `@@x`
+// (kind=nil, this=Var(x)/Identifier(x)).
+func (p *Parser) parseSessionParameter() exp.Expression {
+	this := p.parseIdVar(true, nil)
+	if this == nil {
+		this = p.parsePrimary()
+	}
+	var kind any
+	if this != nil && p.match(tokens.DOT) {
+		kind = this.Name()
+		this = p.parseVar(false, nil, false)
+		if this == nil {
+			this = p.parsePrimary()
+		}
+	}
+	return p.expression(exp.SessionParameter(exp.Args{"this": this, "kind": kind}), nil, nil)
 }
 
 // parseAtom ports _parse_atom (parser.py:6560-6583): a simple column reference, or a
@@ -1696,7 +1772,7 @@ func (p *Parser) parseColumnPartsFast() exp.Expression {
 	for p.matchSet(identifierTokens) {
 		token := p.prev
 		comments := p.prevComments
-		if len(parts) == 0 && noParenFunctionParsers[stringsUpper(token.Text)] != nil {
+		if len(parts) == 0 && p.noParenFunctionParserFor(stringsUpper(token.Text)) != nil {
 			p.retreat(index)
 			return nil
 		}
@@ -1910,7 +1986,22 @@ func (p *Parser) parsePrimary() exp.Expression {
 	// FALSE literals, HEREDOC_STRING/RAW_STRING -> RawString, STAR -> parseStarOps).
 	if primaryParser, ok := primaryParsers[token.TokenType]; ok {
 		p.advance()
-		return primaryParser(p, token)
+		primary := primaryParser(p, token)
+		if token.TokenType == tokens.STRING {
+			// _parse_primary's adjacent-string-literal rewrite (parser.py:6871-6885):
+			// 'a' 'b' 'c' -> Concat('a', 'b', 'c'). ADJACENT_STRINGS_CANNOT_BE_CONNECTED
+			// defaults false and isn't overridden by base/mysql/postgres, so the
+			// _is_connected() raise-error branch never fires and is omitted here.
+			concatExpressions := []exp.Expression{primary}
+			for p.curr.TokenType == tokens.STRING {
+				p.advance()
+				concatExpressions = append(concatExpressions, exp.LiteralString(p.prev.Text))
+			}
+			if len(concatExpressions) > 1 {
+				return p.expression(exp.Concat(exp.Args{"expressions": concatExpressions, "coalesce": p.dialect.ConcatCoalesce}), nil, nil)
+			}
+		}
+		return primary
 	}
 	if p.matchPair(tokens.DOT, tokens.NUMBER, true) {
 		return exp.LiteralNumber("0." + p.prev.Text)
@@ -2098,12 +2189,21 @@ func (p *Parser) parseStarOp(keywords ...string) []exp.Expression {
 // builds a named Placeholder from the following ID_VAR_TOKENS token (e.g. `:hello`),
 // retreating past the COLON if no such token follows (mirrors the generic
 // _parse_placeholder's `self._advance(-1)` on a falsy PLACEHOLDER_PARSERS result).
+// Postgres overrides both PLACEHOLDER (jdbc=True, so `?` round-trips as `?` even under
+// PARAMETER_TOKEN="%") and adds MOD ("%") -> parseQueryParameter for its pyformat/psycopg
+// `%s` / `%(name)s` placeholders (parsers/postgres.py:94-97).
 func (p *Parser) parsePlaceholder() exp.Expression {
 	if p.match(tokens.PLACEHOLDER) {
+		if p.dialect.Name == "postgres" {
+			return p.expression(exp.Placeholder(exp.Args{"jdbc": true}), &p.prev, nil)
+		}
 		return p.expression(exp.Placeholder(nil), &p.prev, nil)
 	}
 	if p.match(tokens.PARAMETER) {
 		return p.parseParameter()
+	}
+	if p.dialect.Name == "postgres" && p.match(tokens.MOD) {
+		return p.parseQueryParameter()
 	}
 	if p.match(tokens.COLON) {
 		if p.matchSet(idVarTokens) {
@@ -2112,6 +2212,20 @@ func (p *Parser) parsePlaceholder() exp.Expression {
 		p.retreat(p.index - 1)
 	}
 	return nil
+}
+
+// parseQueryParameter ports parsers/postgres.py:294-301 PostgresParser._parse_query_parameter:
+// the psycopg pyformat placeholder, either bare `%s` or named `%(name)s`. The leading `%`
+// (MOD token) is already consumed by parsePlaceholder.
+func (p *Parser) parseQueryParameter() exp.Expression {
+	var this exp.Expression
+	if p.curr.TokenType == tokens.L_PAREN {
+		// _parse_wrapped(self._parse_id_var): default any_token=True, so a non-reserved keyword
+		// or number is a valid pyformat name (`%(from)s`, `%(1)s`), not just a bare identifier.
+		this = p.parseWrapped(func() exp.Expression { return p.parseIdVar(true, nil) }, false)
+	}
+	p.matchTextSeq("S")
+	return p.expression(exp.Placeholder(exp.Args{"this": this}), nil, nil)
 }
 
 // parseParameter ports _parse_parameter (parser.py:8586-8588): the leading `@` is already
@@ -2285,6 +2399,15 @@ func (p *Parser) parseWrappedSelect(table bool) exp.Expression {
 	} else {
 		this = p.parseSelect(true, false, true, false)
 	}
+	// _parse_wrapped_select (parser.py:3828-3832): a bare VALUES(...) parsed as a table
+	// source gets rewrapped as an aliased exp.Table right before parseQueryModifiers, so
+	// e.g. a following JOIN can attach to it (`((VALUES (1)) AS v(id) LEFT JOIN t ON ...)`).
+	if table && this != nil && this.Kind() == exp.KindValues {
+		if aliasExpr, ok := this.Arg("alias").(exp.Expression); ok && aliasExpr != nil {
+			aliasExpr.Pop()
+			this = exp.Table(exp.Args{"this": this, "alias": aliasExpr})
+		}
+	}
 	return p.parseQueryModifiers(p.parseSetOperations(this))
 }
 
@@ -2310,6 +2433,19 @@ func (p *Parser) parseFunction(functions map[string]func([]exp.Expression) exp.E
 	return p.parseFunctionCall(functions, anonymous, optionalParens, anyToken)
 }
 
+// noParenFunctionParserFor returns the NO_PAREN_FUNCTION_PARSERS entry for name if it applies
+// to this dialect. Upstream keeps this table per-dialect (parser.py:1470); this port shares one
+// global map (per-dialect parser tables are deferred to slice 5b) and filters by dialect here.
+// VARIADIC is postgres-only (parsers/postgres.py:142); every other entry is base-scope and
+// applies to all dialects.
+func (p *Parser) noParenFunctionParserFor(name string) func(*Parser) exp.Expression {
+	parser := noParenFunctionParsers[name]
+	if parser == nil || (name == "VARIADIC" && p.dialect.Name != "postgres") {
+		return nil
+	}
+	return parser
+}
+
 func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) exp.Expression, anonymous bool, optionalParens bool, anyToken bool) exp.Expression {
 	if !p.curr.IsValid() {
 		return nil
@@ -2321,7 +2457,7 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 	this := token.Text
 	upper := stringsUpper(token.Text)
 	afterDot := prev.TokenType == tokens.DOT
-	if parser := noParenFunctionParsers[upper]; optionalParens && parser != nil && tokenType != tokens.IDENTIFIER && tokenType != tokens.STRING && !afterDot {
+	if parser := p.noParenFunctionParserFor(upper); optionalParens && parser != nil && tokenType != tokens.IDENTIFIER && tokenType != tokens.STRING && !afterDot {
 		p.advance()
 		return p.parseWindow(parser(p), false)
 	}
@@ -2356,6 +2492,7 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 		// (which includes VAR) already covers it, so this is a no-op for the vast majority of
 		// FunctionByName/Functions entries.
 	} else if !funcTokens[tokenType] && !(tokenType == tokens.VALUES && p.dialect.ValuesIsFunction) &&
+		!(tokenType == tokens.CHARACTER_SET && p.dialect.CharsetIsFunction) &&
 		p.dialect.Functions[upper] == nil && exp.FunctionByName[upper] == nil {
 		return nil
 	}
@@ -2377,6 +2514,9 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 	// among base/MySQL/Postgres; base and Postgres have no _parse_json_value entry at all, so
 	// `JSON_VALUE(...)` there falls through to a plain Anonymous call like any other function.
 	if upper == "JSON_VALUE" && p.dialect.Name != "mysql" {
+		parser = nil
+	}
+	if upper == "DATE_PART" && p.dialect.Name != "postgres" {
 		parser = nil
 	}
 	if parser != nil && !anonymous {
@@ -2993,11 +3133,15 @@ func init() {
 		// exp.Chr._sql_names = ["CHR", "CHAR"] (string.py:26): both spellings route to the
 		// same special-grammar parser (an optional trailing `USING <charset>` clause), not
 		// FunctionByName.
-		"CHAR":           func(p *Parser) exp.Expression { return p.parseChar() },
-		"CHR":            func(p *Parser) exp.Expression { return p.parseChar() },
-		"CEIL":           func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindCeil) },
-		"FLOOR":          func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindFloor) },
-		"EXTRACT":        func(p *Parser) exp.Expression { return p.parseExtract() },
+		"CHAR":    func(p *Parser) exp.Expression { return p.parseChar() },
+		"CHR":     func(p *Parser) exp.Expression { return p.parseChar() },
+		"CEIL":    func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindCeil) },
+		"FLOOR":   func(p *Parser) exp.Expression { return p.parseCeilFloor(exp.KindFloor) },
+		"EXTRACT": func(p *Parser) exp.Expression { return p.parseExtract() },
+		// Registered unconditionally, but nilled out below for anything but Postgres
+		// (parsers/postgres.py:156 FUNCTION_PARSERS - base/MySQL have no DATE_PART entry, so
+		// DATE_PART(...) there parses as a plain Anonymous call).
+		"DATE_PART":      func(p *Parser) exp.Expression { return p.parseDatePart() },
 		"POSITION":       func(p *Parser) exp.Expression { return p.parsePosition() },
 		"SUBSTRING":      func(p *Parser) exp.Expression { return p.parseSubstring() },
 		"TRIM":           func(p *Parser) exp.Expression { return p.parseTrim() },
@@ -3059,10 +3203,19 @@ func (p *Parser) matchLParen(expression exp.Expression) {
 	}
 }
 
+// matchRParen ports _match_r_paren (parser.py:9432-9434), which itself is
+// `_match(R_PAREN, expression=expression)`: on a successful match, a comment trailing the
+// just-consumed ")" on the same line (e.g. `CAST(x AS INT) /* c */`) is attached directly to
+// the caller-supplied expression - typically the node the parens just closed - instead of
+// lingering in p.prevComments to bubble up and land on whatever outer node happens to call
+// p.expression(...) next (e.g. the enclosing Select). expression may be nil, matching every
+// upstream call site that passes none.
 func (p *Parser) matchRParen(expression exp.Expression) {
 	if !p.match(tokens.R_PAREN) {
 		p.raiseError("Expecting )")
+		return
 	}
+	p.addComments(expression)
 }
 
 func isSetOperation(k exp.Kind) bool {

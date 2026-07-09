@@ -458,6 +458,16 @@ func (p *Parser) parseBracket(this exp.Expression) exp.Expression {
 	}
 	if this == nil {
 		this = exp.Array(exp.Args{"expressions": expressions})
+	} else if stringsUpper(this.Name()) == "ARRAY" {
+		// _parse_bracket's ARRAY_CONSTRUCTORS swap (parser.py:7713-7721, table at :787-790): a
+		// bracket subscripting a bare "ARRAY" reference (e.g. `ARRAY[1, 2, 3]`, tokenized as an
+		// ordinary column/var since ARRAY is ID_VAR_TOKENS-eligible) is really an array
+		// literal, not indexing - build exp.Array and discard `this`. Matches upstream's own
+		// name-based check exactly (no extra unquoted/no-table guard), including its
+		// limitation: a genuine column named "array" would be misread the same way upstream
+		// misreads it. duckdb's "LIST" ARRAY_CONSTRUCTORS entry isn't modeled (out of base/
+		// mysql/postgres scope).
+		this = exp.Array(exp.Args{"expressions": expressions})
 	} else {
 		this = p.expression(exp.Bracket(exp.Args{"this": this, "expressions": expressions}), nil, this.PopComments())
 	}

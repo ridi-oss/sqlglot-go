@@ -18,6 +18,8 @@ func MySQL() *Dialect {
 	d.SafeDivision = true
 	// parsers/mysql.py:68 FUNC_TOKENS adds TokenType.VALUES (see ValuesIsFunction doc).
 	d.ValuesIsFunction = true
+	// parsers/mysql.py:69 FUNC_TOKENS adds TokenType.CHARACTER_SET (see CharsetIsFunction doc).
+	d.CharsetIsFunction = true
 	// generators/mysql.py:137 DUPLICATE_KEY_UPDATE_WITH_SET = False.
 	d.DuplicateKeyUpdateWithSet = false
 	// generators/mysql.py:148 WRAP_DERIVED_VALUES = False: aliased VALUES is emitted bare.
@@ -94,6 +96,10 @@ func MySQL() *Dialect {
 	cfg.FormatStrings["B'"] = tokens.FormatString{End: "'", TokenType: tokens.BIT_STRING}
 	cfg.FormatStrings["x'"] = tokens.FormatString{End: "'", TokenType: tokens.HEX_STRING}
 	cfg.FormatStrings["X'"] = tokens.FormatString{End: "'", TokenType: tokens.HEX_STRING}
+	// dialects/mysql.py:71-72 BIT_STRINGS=[("b'","'"),("B'","'"),("0b","")] / HEX_STRINGS=
+	// [("x'","'"),("X'","'"),("0x","")]; BIT_START/HEX_START take the FIRST tuple.
+	d.BitStart, d.BitEnd = "b'", "'"
+	d.HexStart, d.HexEnd = "x'", "'"
 	cfg.NestedComments = false
 	cfg.IdentifiersCanStartWithDigit = true
 

@@ -79,11 +79,10 @@ func TestIntoUnlogged(t *testing.T) {
 	}
 }
 
-// TestArrayLiteralPrettyWrap covers bracketSQL's postgres ARRAY[...] line-wrap
-// (generator/sql.go isArrayLiteralBracket): a wide array literal wraps one element per
-// line in pretty mode, like upstream's inline_array_sql (dialects/dialect.py:1218-1219),
-// instead of the flat comma-join every other Bracket use (real subscripting) gets.
-// Confirmed against the pinned oracle:
+// TestArrayLiteralPrettyWrap covers arraySQL's postgres ARRAY[...] line-wrap
+// (generator/residual_tail.go arraySQL -> inlineArraySQL): a wide array literal wraps one
+// element per line in pretty mode, like upstream's inline_array_sql (dialects/dialect.py:
+// 1218-1219), instead of a flat comma-join. Confirmed against the pinned oracle:
 //
 //	PYTHONPATH=.reference/sqlglot-v30.12.0 python3 -c \
 //	  "import sqlglot; print(sqlglot.parse_one(
@@ -99,10 +98,9 @@ func TestArrayLiteralPrettyWrap(t *testing.T) {
 	}
 }
 
-// TestArrayLiteralFlatUnaffected guards the isArrayLiteralBracket heuristic against
-// regressing the many already-passing ARRAY[...] cases that don't need wrapping (few
-// elements, or non-pretty output): the special case must render identically to the plain
-// Bracket join whenever pretty line-wrap wouldn't kick in anyway.
+// TestArrayLiteralFlatUnaffected guards arraySQL against regressing the many already-passing
+// ARRAY[...] cases that don't need wrapping (few elements, or non-pretty output): they must
+// render as a flat `ARRAY[a, b, c]` whenever pretty line-wrap wouldn't kick in anyway.
 func TestArrayLiteralFlatUnaffected(t *testing.T) {
 	cases := []string{
 		"SELECT ARRAY[1, 2, 3]",
@@ -132,10 +130,18 @@ func TestArraySizeDimRequiredPostgres(t *testing.T) {
 }
 
 // TestArraySizeDimDroppedBase guards the base branch of the same code (dim=1 still drops
-// to the 1-arg form), confirming the postgres-only gate didn't change base's behavior.
+// to the 1-arg form), confirming the postgres-only gate didn't change base's behavior. Base
+// has no array_sql override upstream (only postgres does, generators/postgres.py:502-509),
+// so a base exp.Array renders via the generic function-fallback paren form, not bracket
+// notation - confirmed against the pinned oracle:
+//
+//	PYTHONPATH=.reference/sqlglot-v30.12.0 python3 -c \
+//	  "import sqlglot; print(sqlglot.parse_one('SELECT ARRAY_LENGTH(ARRAY[1, 2, 3], 1)',
+//	  read='').sql())"
+//	SELECT ARRAY_LENGTH(ARRAY(1, 2, 3))
 func TestArraySizeDimDroppedBase(t *testing.T) {
 	got := roundTrip(t, "", "SELECT ARRAY_LENGTH(ARRAY[1, 2, 3], 1)")
-	want := "SELECT ARRAY_LENGTH(ARRAY[1, 2, 3])"
+	want := "SELECT ARRAY_LENGTH(ARRAY(1, 2, 3))"
 	if got != want {
 		t.Errorf("base ARRAY_LENGTH dim ->\n  got  %q\n  want %q", got, want)
 	}

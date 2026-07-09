@@ -50,9 +50,10 @@ func setParserKeys(parsers map[string]func(*Parser) exp.Expression) []string {
 // parseSet ports _parse_set (parser.py:9265-9275). unset/tag are always false here: no
 // dialect in this port's base/mysql/postgres scope wires TokenType.UNSET or a `tag=true`
 // caller (those belong to other dialects' STATEMENT_PARSERS, out of scope). Degrades to a
-// raw Command whenever the structured Set leaves trailing tokens - e.g. mysql's `@`/`@@`
-// user/system variable forms (`SET @x = 1`, `SET @@GLOBAL.x = 1`) - which round-trip
-// byte-identically as Command since every in-scope corpus case here is an identity case.
+// raw Command whenever the structured Set leaves trailing tokens - now only a fallback for
+// shapes this port's parseSetItem/parseSetItemAssignment don't structurally model; mysql's
+// `@`/`@@` user/system variable forms (`SET @x = 1`, `SET @@GLOBAL.x = 1`) parse
+// structurally via Parameter/SessionParameter (residual-tail cluster).
 func (p *Parser) parseSet() exp.Expression {
 	start := p.prev
 	index := p.index
