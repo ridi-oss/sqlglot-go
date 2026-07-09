@@ -30,6 +30,7 @@ func Into(args Args) Expression                { return newNode(KindInto, args) 
 func Window(args Args) Expression              { return newNode(KindWindow, args) }
 func WindowSpec(args Args) Expression          { return newNode(KindWindowSpec, args) }
 func Filter(args Args) Expression              { return newNode(KindFilter, args) }
+func Lambda(args Args) Expression              { return newNode(KindLambda, args) }
 func LimitOptions(args Args) Expression        { return newNode(KindLimitOptions, args) }
 func Fetch(args Args) Expression               { return newNode(KindFetch, args) }
 func Schema(args Args) Expression              { return newNode(KindSchema, args) }

@@ -51,6 +51,18 @@ type Generator struct {
 	escapedQuoteEnd                string
 	escapedIdentifierEnd           string
 	stringsSupportEscapedSequences bool
+
+	// singleStringInterval ports SINGLE_STRING_INTERVAL (generator.py:335, postgres.py:233):
+	// whether intervalSQL renders as a single quoted "<value> <unit>" string (postgres) rather
+	// than the base's separate `INTERVAL <this> <unit>` tokens.
+	singleStringInterval bool
+	// intervalAllowsPluralForm ports INTERVAL_ALLOWS_PLURAL_FORM (generator.py:335, mysql.py:132):
+	// whether intervalSQL keeps a plural unit (e.g. "DAYS") as-is, or singularizes it via
+	// timePartSingulars first (mysql doesn't allow the plural form).
+	intervalAllowsPluralForm bool
+	// parameterToken ports PARAMETER_TOKEN (generator.py:667, postgres.py:240): the sigil
+	// parameterSQL prefixes a Parameter's name with ("@" base/mysql, "$" postgres).
+	parameterToken string
 }
 
 func New(d *dialects.Dialect, o Options) *Generator {
@@ -116,6 +128,9 @@ func New(d *dialects.Dialect, o Options) *Generator {
 		escapedQuoteEnd:                stringEscape + quoteEnd,
 		escapedIdentifierEnd:           identifierEnd + identifierEnd,
 		stringsSupportEscapedSequences: d.TokenizerConfig.StringEscapes['\\'],
+		singleStringInterval:           d.SingleStringInterval,
+		intervalAllowsPluralForm:       d.IntervalAllowsPluralForm,
+		parameterToken:                 d.ParameterToken,
 	}
 }
 
@@ -571,6 +586,16 @@ func (g *Generator) normalizeFunc(name string) string {
 }
 
 func (g *Generator) functionFallbackSQL(e expressions.Expression) string {
+	return g.funcCall(g.sqlName(e.Kind()), g.fallbackArgs(e), "(", ")", true)
+}
+
+// fallbackArgs gathers an expression's argument values in ArgKeys (declared) order,
+// flattening slice-valued args, so a function-style node can be rendered with the same
+// argument list functionFallbackSQL produces. Shared by the dialect rename handlers
+// (generator/rename.go varianceSQL/variancePopSQL, generator/aggregate.go logicalOrSQL) that
+// re-emit a Func under a different name, mirroring upstream rename_func's
+// flatten(expression.args.values()).
+func (g *Generator) fallbackArgs(e expressions.Expression) []any {
 	args := []any{}
 	for _, key := range expressions.ArgKeys(e.Kind()) {
 		argValue := e.Arg(key)
@@ -587,7 +612,7 @@ func (g *Generator) functionFallbackSQL(e expressions.Expression) string {
 			}
 		}
 	}
-	return g.funcCall(g.sqlName(e.Kind()), args, "(", ")", true)
+	return args
 }
 
 func (g *Generator) nextNameSQL() string {

@@ -16,6 +16,10 @@ func Postgres() *Dialect {
 	d.TablesReferenceableAsColumns = true
 	// generators/postgres.py:234 RENAME_TABLE_WITH_DB = False.
 	d.RenameTableWithDB = false
+	// generators/postgres.py:233 SINGLE_STRING_INTERVAL = True.
+	d.SingleStringInterval = true
+	// generators/postgres.py:240 PARAMETER_TOKEN = "$".
+	d.ParameterToken = "$"
 	// TODO(slice 5b): DEFAULT_FUNCTIONS_COLUMN_NAMES (needs KindExplodingGenerateSeries + FUNCTIONS override).
 	// TODO(slice 5b): typing/{mysql,postgres}.py EXPRESSION_METADATA — feeds annotate_types only, off probe's path (ROADMAP 4c).
 

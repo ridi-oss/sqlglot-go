@@ -1930,12 +1930,67 @@ func (p *Parser) parseFunctionArgs(alias bool) []exp.Expression {
 	return p.parseCsv(func() exp.Expression { return p.parseLambda(alias) })
 }
 
+// parseLambda ports _parse_lambda (parser.py:7181-7226). It is the per-argument parser
+// used by parseFunctionArgs, so `x -> body` / `(a, b) -> body` are recognized as an
+// exp.Lambda before falling through to the ordinary argument grammar below. ARROW stays
+// wired into columnOperators for JSON `->` OUTSIDE function-call args (parser.go:1341,
+// parseColumnOps) - this lambda handling only runs inside parseFunctionArgs, so a top-level
+// `a -> b` (and postgres `x::JSON -> 'd' ->> -1`) is unaffected and keeps parsing as
+// JSONExtract.
+//
+// LAMBDAS here only maps TokenType.ARROW (the base LAMBDAS entry that also matters for us);
+// FARROW/Kwarg (named-argument `=>`) isn't ported by this part, so the Go LAMBDAS table
+// mirrors only the exp.Lambda-producing half of upstream's map.
 func (p *Parser) parseLambda(alias bool) exp.Expression {
-	if p.match(tokens.DISTINCT) {
-		return p.expression(exp.Distinct(exp.Args{"expressions": p.parseCsv(p.parseDisjunction)}), nil, nil)
+	// Fast path: a simple atom (column, literal, null, bool) followed by , or ) is common
+	// and never a lambda head, so skip the L_PAREN/single-arg lambda probing below entirely
+	// (parser.py:7184-7189).
+	if lambdaArgTerminators[p.next.TokenType] {
+		if atom := p.parseAtom(); atom != nil {
+			return atom
+		}
 	}
-	p.match(tokens.ALL)
-	return p.parseSelectOrExpression(alias)
+
+	index := p.index
+
+	if p.match(tokens.L_PAREN) {
+		params := p.parseCsv(p.parseLambdaArg)
+		if !p.match(tokens.R_PAREN) {
+			p.retreat(index)
+		} else if builder, ok := lambdas[p.curr.TokenType]; ok {
+			p.advance()
+			return builder(p, params)
+		} else {
+			p.retreat(index)
+		}
+	} else if _, ok := lambdas[p.next.TokenType]; ok {
+		// TYPED_LAMBDA_ARGS (Snowflake/Materialize's `x INT -> ...`) is always false for the
+		// dialects in this part's scope, so the upstream `self.TYPED_LAMBDA_ARGS or` half of
+		// this condition is dropped.
+		params := []exp.Expression{p.parseLambdaArg()}
+		if builder, ok := lambdas[p.curr.TokenType]; ok {
+			p.advance()
+			return builder(p, params)
+		}
+		p.retreat(index)
+	}
+
+	var this exp.Expression
+	if p.match(tokens.DISTINCT) {
+		this = p.expression(exp.Distinct(exp.Args{"expressions": p.parseCsv(p.parseDisjunction)}), nil, nil)
+	} else {
+		p.match(tokens.ALL) // ALL is the default/no-op aggregate modifier (SQL-92).
+		this = p.parseSelectOrExpression(alias)
+	}
+
+	// Upstream also threads this through _parse_having_max (BigQuery's ARRAY_AGG(x HAVING
+	// MAX y)) between the two _parse_respect_or_ignore_nulls calls; that's out of this
+	// part's scope (no exp.HavingMax Kind ported), so it's omitted here - a no-op for every
+	// dialect that doesn't parse a HAVING MAX/MIN clause at this position anyway.
+	this = p.parseRespectOrIgnoreNulls(this)
+	this = p.parseOrder(this, false)
+	this = p.parseRespectOrIgnoreNulls(this)
+	return p.parseLimit(this, false, false)
 }
 
 func (p *Parser) parseSelectOrExpression(alias bool) exp.Expression {
@@ -2388,7 +2443,15 @@ func init() {
 	statementParsers[tokens.DELETE] = (*Parser).parseDelete
 	statementParsers[tokens.MERGE] = (*Parser).parseMerge
 	statementParsers[tokens.CREATE] = (*Parser).parseCreate
-	statementParsers[tokens.REPLACE] = (*Parser).parseCreate
+	// Upstream base STATEMENT_PARSERS has no TokenType.REPLACE entry (verified against
+	// parser.py): "CREATE OR REPLACE ..." is driven entirely by the CREATE token above (the
+	// OR REPLACE modifier is consumed inside parseCreate), and base's REPLACE(...) is a Func
+	// call (expressions/functions.go), not a statement. Registering REPLACE here (as an
+	// alias of parseCreate) was wrong: it intercepted base REPLACE(...) before expression
+	// parsing ever saw it, producing a Command('REPLACE (...)') instead of the function
+	// call. MySQL's own "REPLACE INTO ..." statement is unaffected by this removal - MySQL
+	// marks TokenType.REPLACE as a tokenizer Command (dialects/mysql.go), so it's caught by
+	// the Commands-set fallback in parseStatement below, never by this map.
 	statementParsers[tokens.PRAGMA] = (*Parser).parsePragma
 
 	noParenFunctionParsers = map[string]func(*Parser) exp.Expression{

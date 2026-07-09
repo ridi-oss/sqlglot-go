@@ -1,17 +1,6 @@
 {"dialect":"","category":"gen: cast/type","sql":"SELECT CAST(x AS INT) /* comment */ FROM foo"}
-{"dialect":"","category":"gen: mismatch","sql":"FILTER(a, x -> FOO(x.a.b.c.d.e.f.g) + x.a.b.c.d.e.f.g)"}
-{"dialect":"","category":"gen: mismatch","sql":"FILTER(a, x -> x.a.b.c.d.e.f.g)"}
 {"dialect":"","category":"gen: mismatch","sql":"INTERVAL '-1' CURRENT_DATE"}
-{"dialect":"","category":"gen: mismatch","sql":"REGEXP_REPLACE('new york', '(\\w)(\\w*)', x -> UPPER(x[1]) || LOWER(x[2]))"}
-{"dialect":"","category":"gen: mismatch","sql":"REPLACE('new york', ' ')"}
-{"dialect":"","category":"gen: mismatch","sql":"REPLACE('new york', ' ', '_')"}
-{"dialect":"","category":"gen: mismatch","sql":"SELECT AGGREGATE(a, (a, b) -> a + b) AS x"}
 {"dialect":"","category":"gen: mismatch","sql":"SELECT FOO(x /* c */) /* FOO */, b /* b */"}
-{"dialect":"","category":"gen: mismatch","sql":"SELECT LISTAGG(x) WITHIN GROUP (ORDER BY x DESC)"}
-{"dialect":"","category":"gen: mismatch","sql":"SELECT LISTAGG(x) WITHIN GROUP (ORDER BY x) AS y"}
-{"dialect":"","category":"gen: mismatch","sql":"SELECT TRANSFORM(a, b -> b) AS x"}
-{"dialect":"","category":"gen: mismatch","sql":"SELECT X((a, b) -> a + b, z -> z) AS x"}
-{"dialect":"","category":"gen: mismatch","sql":"SELECT X(a -> a + (\"z\" - 1))"}
 {"dialect":"","category":"parse: Expected END after CASE","sql":"CASE WHEN TRUE THEN 1 ELSE interval END"}
 {"dialect":"","category":"parse: Expected ]","sql":"x[-4:-1]"}
 {"dialect":"","category":"parse: Expected ]","sql":"x[1:2]"}
@@ -26,7 +15,6 @@
 {"dialect":"","category":"parse: Expecting )","sql":"JSON_OBJECT('x': NULL, 'y': 1 NULL ON NULL)"}
 {"dialect":"","category":"parse: Expecting )","sql":"JSON_OBJECT('x': NULL, 'y': 1 WITH UNIQUE KEYS)"}
 {"dialect":"","category":"parse: Expecting )","sql":"SELECT * FROM (x CROSS JOIN foo LATERAL VIEW EXPLODE(y))"}
-{"dialect":"","category":"parse: Expecting )","sql":"SELECT ARRAY_AGG(STRUCT(x, x AS y) ORDER BY z DESC) AS x"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"ARRAY<STRUCT<INT, DOUBLE, ARRAY<INT>>>"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CACHE LAZY TABLE x"}
 {"dialect":"","category":"parse: Invalid expression / Unexpected token","sql":"CACHE LAZY TABLE x AS WITH a AS (SELECT 1) SELECT a.* FROM a"}
@@ -94,21 +82,6 @@
 {"dialect":"","category":"parse: Required keyword","sql":"x << 1"}
 {"dialect":"","category":"parse: Required keyword","sql":"x >> 1"}
 {"dialect":"","category":"parse: Required keyword","sql":"x >> 1 | 1 & 1 ^ 1"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS BIGINT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS BOOLEAN)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS INT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS LONGBLOB)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS LONGTEXT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS MEDIUMBLOB)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS MEDIUMINT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS MEDIUMINT) + CAST(y AS YEAR(4))"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS MEDIUMTEXT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS SMALLINT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS TEXT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS TINYBLOB)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS TINYINT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS TINYTEXT)"}
-{"dialect":"mysql","category":"gen: cast/type","sql":"CAST(x AS VARCHAR)"}
 {"dialect":"mysql","category":"gen: cast/type","sql":"SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15+00:00')"}
 {"dialect":"mysql","category":"gen: cast/type","sql":"SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.1+00:00')"}
 {"dialect":"mysql","category":"gen: cast/type","sql":"SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.12+00:00')"}
@@ -118,14 +91,8 @@
 {"dialect":"mysql","category":"gen: cast/type","sql":"SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.123456+00:00')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"'\t'"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"'\\\\\"a'"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"ALTER TABLE test_table ALTER COLUMN test_column SET DATA TYPE LONGTEXT"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"ALTER TABLE test_table MODIFY COLUMN test_column LONGTEXT"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"CAST(x AS TIMESTAMP)"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"CAST(x AS TIMESTAMPLTZ)"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"CAST(x AS TIMESTAMPTZ)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"CREATE FUNCTION f () RETURNS VARCHAR LANGUAGE SQL SQL SECURITY INVOKER SELECT 'abc'"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"CREATE TABLE t (c DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8 ROW_FORMAT=DYNAMIC"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"CREATE TABLE test (ts TIMESTAMP, ts_tz TIMESTAMPTZ, ts_ltz TIMESTAMPLTZ)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"DATE_ADD(base_date, INTERVAL day_interval DAY_HOUR)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"DATE_ADD(base_date, INTERVAL day_interval DAY_MICROSECOND)"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"DATE_ADD(base_date, INTERVAL day_interval DAY_MINUTE)"}
@@ -149,10 +116,6 @@
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT INSTR('str', 'substr')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT LCASE('foo')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15-08:00', 'America/Los_Angeles')"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SELECT TRIM('bla' FROM ' XXX ')"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SELECT TRIM(BOTH 'bla' FROM ' XXX ')"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SELECT TRIM(LEADING 'bla' FROM ' XXX ')"}
-{"dialect":"mysql","category":"gen: mismatch","sql":"SELECT TRIM(TRAILING 'bla' FROM ' XXX ')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT UCASE('foo')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT WEEK_OF_YEAR('2023-01-01')"}
 {"dialect":"mysql","category":"gen: mismatch","sql":"SELECT name FROM temp WHERE name = ? FOR UPDATE"}
@@ -212,12 +175,7 @@
 {"dialect":"mysql","category":"parse: Required keyword","sql":"SELECT CONVERT(x USING `my charset`)"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"\n            CREATE INDEX index_ci_builds_on_commit_id_and_artifacts_expireatandidpartial\n            ON public.ci_builds\n            USING btree (commit_id, artifacts_expire_at, id)\n            WHERE (\n                ((type)::text = 'Ci::Build'::text)\n                AND ((retried = false) OR (retried IS NULL))\n                AND ((name)::text = ANY (ARRAY[\n                    ('sast'::character varying)::text,\n                    ('dependency_scanning'::character varying)::text,\n                    ('sast:container'::character varying)::text,\n                    ('container_scanning'::character varying)::text,\n                    ('dast'::character varying)::text\n                ]))\n            )\n            "}
 {"dialect":"postgres","category":"gen: cast/type","sql":"CREATE OR REPLACE FUNCTION function_name (input_a character varying DEFAULT NULL::character varying)"}
-{"dialect":"postgres","category":"gen: cast/type","sql":"ROUND(CAST(x AS DOUBLE PRECISION))"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"SELECT JSON_ARRAY_ELEMENTS((foo->'sections')::JSON) AS sections"}
-{"dialect":"postgres","category":"gen: cast/type","sql":"SELECT x FROM t WHERE CAST($1 AS TEXT) = 'ok'"}
-{"dialect":"postgres","category":"gen: cast/type","sql":"cast(a as FLOAT)"}
-{"dialect":"postgres","category":"gen: cast/type","sql":"cast(a as FLOAT4)"}
-{"dialect":"postgres","category":"gen: cast/type","sql":"cast(a as FLOAT8)"}
 {"dialect":"postgres","category":"gen: cast/type","sql":"x::JSON -> 'duration' ->> -1"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"\n        CREATE TABLE IF NOT EXISTS public.rental\n        (\n            inventory_id INT NOT NULL,\n            CONSTRAINT rental_customer_id_fkey FOREIGN KEY (customer_id)\n                REFERENCES public.customer (customer_id) MATCH FULL\n                ON UPDATE CASCADE\n                ON DELETE RESTRICT,\n            CONSTRAINT rental_inventory_id_fkey FOREIGN KEY (inventory_id)\n                REFERENCES public.inventory (inventory_id) MATCH PARTIAL\n                ON UPDATE CASCADE\n                ON DELETE RESTRICT,\n            CONSTRAINT rental_staff_id_fkey FOREIGN KEY (staff_id)\n                REFERENCES public.staff (staff_id) MATCH SIMPLE\n                ON UPDATE CASCADE\n                ON DELETE RESTRICT,\n            INITIALLY IMMEDIATE\n        )\n        "}
 {"dialect":"postgres","category":"gen: mismatch","sql":"ARRAY[x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x]"}
@@ -226,43 +184,13 @@
 {"dialect":"postgres","category":"gen: mismatch","sql":"CREATE FUNCTION add(integer, integer) RETURNS integer AS 'select $1 + $2;' LANGUAGE SQL IMMUTABLE CALLED ON NULL INPUT"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"CREATE FUNCTION x(INT) RETURNS INT SET search_path TO 'public'"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"CREATE TRIGGER proc_trigger BEFORE INSERT ON users FOR EACH ROW EXECUTE PROCEDURE LOG_CHANGES()"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"INSERT INTO book (isbn, title) VALUES ($1, $2) ON CONFLICT(isbn) WHERE deleted_at IS NULL DO UPDATE SET title = EXCLUDED.title RETURNING id, isbn"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"LAST_VALUE(\"col1\") OVER (ORDER BY \"col2\" RANGE BETWEEN INTERVAL '1 DAY' PRECEDING AND '1 month' FOLLOWING)"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"MERGE INTO x USING (SELECT id) AS y ON a = b WHEN MATCHED THEN UPDATE SET x.a = y.b WHEN NOT MATCHED THEN INSERT (a, b) VALUES (y.a, y.b)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT * FROM \"x\" WHERE SUBSTRING(\"x\".\"foo\" FROM 1 FOR 2) IN ('mas')"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT * FROM x WHERE SUBSTRING('Thomas' FROM '%#\"o_a#\"_' FOR '#') IN ('mas')"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT * FROM x WHERE SUBSTRING('Thomas' FROM '...$') IN ('mas')"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"SELECT 1 FROM foo AS x FOR KEY SHARE OF x"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"SELECT 1 FROM foo AS x FOR NO KEY UPDATE OF x"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"SELECT 1 FROM foo AS x FOR SHARE OF x"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"SELECT 1 FROM foo AS x FOR UPDATE OF x"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"SELECT ARRAY_LENGTH(ARRAY[1, 2, 3], 1)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT CASE WHEN SUBSTRING('abcdefg' FROM 1 FOR 2) IN ('ab') THEN 1 ELSE 0 END"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT CASE WHEN SUBSTRING('abcdefg' FROM 1) IN ('ab') THEN 1 ELSE 0 END"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT INTERVAL '-1 MONTH'"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT INTERVAL '-10.75 MINUTE'"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT INTERVAL '0.123456789 SECOND'"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT INTERVAL '2.5 MONTH'"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT INTERVAL '3.14159 HOUR'"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT INTERVAL '4.1 DAY'"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT SUBSTRING('Thomas' FOR 3 FROM 2)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT SUBSTRING('afafa' for 1)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT SUBSTRING('bla' + 'foo' || 'bar' FROM 3 - 1 + 5 FOR 4 + SOME_FUNC(arg1, arg2))"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT TRIM(' X' FROM ' XXX ')"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT TRIM(LEADING ' XXX ' COLLATE \"de_DE\")"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT TRIM(LEADING 'bla' FROM ' XXX ' COLLATE utf8_bin)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT TRIM(TRAILING ' XXX ' COLLATE \"de_DE\")"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT a, LOGICAL_OR(b) FROM table GROUP BY a"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"SELECT date_add(current_date, interval '7' day)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT date_col - INTERVAL '1' HOUR AS one_hour_later"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"SELECT date_col - INTERVAL '30' DAY FROM t"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"STRING_AGG(DISTINCT x, ',' ORDER BY y DESC)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"STRING_AGG(x, ',' ORDER BY y DESC)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"STRING_AGG(x, ',' ORDER BY y)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"STRING_AGG(x, y)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"VARIANCE(x)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"VAR_POP(x)"}
-{"dialect":"postgres","category":"gen: mismatch","sql":"VAR_SAMP(x)"}
 {"dialect":"postgres","category":"gen: mismatch","sql":"select count() OVER(partition by a order by a range offset preceding exclude current row)"}
 {"dialect":"postgres","category":"generate: error","sql":"WITH t(c) AS (SELECT 1) SELECT * INTO UNLOGGED foo FROM (SELECT c AS c FROM t) AS temp"}
 {"dialect":"postgres","category":"parse: Expected AS after CAST","sql":"SELECT CAST(e'\\176' AS BYTEA)"}
@@ -289,8 +217,6 @@
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT * FROM schema_name.table_name st WHERE JSON_EXTRACT_PATH_TEXT((st.data)::json, variadic array['test'::text]) = 'test'::text"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT 1 FROM ((VALUES (1)) AS vals(id) LEFT OUTER JOIN tbl ON vals.id = tbl.id)"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT DATE_PART('isodow'::varchar(6), current_date)"}
-{"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT JSON_AGG(DISTINCT c1 ORDER BY c1) FROM (VALUES ('c'), ('b'), ('a')) AS t(c1)"}
-{"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT JSON_AGG(c1 ORDER BY c1) FROM (VALUES ('c'), ('b'), ('a')) AS t(c1)"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT MLEAST(VARIADIC ARRAY[10, -1, 5, 4.4])"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT MLEAST(VARIADIC ARRAY[]::numeric[])"}
 {"dialect":"postgres","category":"parse: Expecting )","sql":"SELECT OVERLAY(a PLACING b FROM 1 FOR 1)"}

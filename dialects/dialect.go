@@ -125,6 +125,19 @@ type Dialect struct {
 	// 619): whether DROP/ALTER can carry the ICEBERG keyword (e.g. Snowflake's `DROP ICEBERG
 	// TABLE a.b`; DuckDB overrides to False and just emits `DROP TABLE a.b`).
 	SupportsDropAlterIcebergProperty bool
+	// SingleStringInterval ports the generator flag of the same name (generator.py:335); postgres
+	// overrides to True (generators/postgres.py:233): render INTERVAL as a single quoted
+	// "<value> <unit>" string instead of the base's separate `INTERVAL <this> <unit>` tokens.
+	SingleStringInterval bool
+	// IntervalAllowsPluralForm ports the generator flag of the same name (generator.py:335);
+	// mysql overrides to False (generators/mysql.py:132): whether a plural interval unit (e.g.
+	// "DAYS") is kept as-is, or singularized via TIME_PART_SINGULARS first.
+	IntervalAllowsPluralForm bool
+	// ParameterToken ports the generator flag PARAMETER_TOKEN (generator.py:667); postgres
+	// overrides to "$" (generators/postgres.py:240): the sigil parameterSQL prefixes a
+	// Parameter's name with (base/mysql use "@", postgres uses "$" for its positional $1/$2/...
+	// placeholders).
+	ParameterToken string
 }
 
 func Base() *Dialect {
@@ -193,6 +206,15 @@ func Base() *Dialect {
 		AlterSetType: "SET DATA TYPE",
 		// generator.py:619 SUPPORTS_DROP_ALTER_ICEBERG_PROPERTY = True (base).
 		SupportsDropAlterIcebergProperty: true,
+		// generator.py:335 SINGLE_STRING_INTERVAL = False (base); postgres overrides to True
+		// (generators/postgres.py:233).
+		SingleStringInterval: false,
+		// generator.py:335 INTERVAL_ALLOWS_PLURAL_FORM = True (base); mysql overrides to False
+		// (generators/mysql.py:132).
+		IntervalAllowsPluralForm: true,
+		// generator.py:667 PARAMETER_TOKEN = "@" (base); postgres overrides to "$"
+		// (generators/postgres.py:240).
+		ParameterToken: "@",
 	}
 }
 

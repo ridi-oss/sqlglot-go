@@ -30,22 +30,25 @@ var FunctionByName = map[string]func([]Expression) Expression{
 	"ARRAY": func(args []Expression) Expression {
 		return newNode(KindArray, Args{"expressions": args})
 	},
-	"ABS":                   genericFunction(KindAbs),
-	"AVG":                   genericFunction(KindAvg),
-	"SUM":                   genericFunction(KindSum),
-	"SQRT":                  genericFunction(KindSqrt),
-	"LN":                    genericFunction(KindLn),
-	"EXP":                   genericFunction(KindExp),
-	"MIN":                   genericFunction(KindMin),
-	"MAX":                   genericFunction(KindMax),
-	"ROUND":                 genericFunction(KindRound),
-	"LOG":                   genericFunction(KindLog),
-	"POW":                   genericFunction(KindPow),
-	"POWER":                 genericFunction(KindPow),
-	"SUBSTR":                genericFunction(KindSubstring),
-	"CEILING":               genericFunction(KindCeil),
-	"GROUP_CONCAT":          genericFunction(KindGroupConcat),
-	"LISTAGG":               genericFunction(KindGroupConcat),
+	"ABS":          genericFunction(KindAbs),
+	"AVG":          genericFunction(KindAvg),
+	"SUM":          genericFunction(KindSum),
+	"SQRT":         genericFunction(KindSqrt),
+	"LN":           genericFunction(KindLn),
+	"EXP":          genericFunction(KindExp),
+	"MIN":          genericFunction(KindMin),
+	"MAX":          genericFunction(KindMax),
+	"ROUND":        genericFunction(KindRound),
+	"LOG":          genericFunction(KindLog),
+	"POW":          genericFunction(KindPow),
+	"POWER":        genericFunction(KindPow),
+	"SUBSTR":       genericFunction(KindSubstring),
+	"CEILING":      genericFunction(KindCeil),
+	"GROUP_CONCAT": genericFunction(KindGroupConcat),
+	// LISTAGG is deliberately NOT registered here: upstream only maps it in Oracle/Snowflake/
+	// etc.'s FUNCTIONS (never base's), so base LISTAGG(x) must fall through to Anonymous and
+	// round-trip verbatim (parity_gaps.txt:10,11 - WITHIN GROUP attaches generically via the
+	// same postfix parseWindow path PERCENTILE_CONT already uses).
 	"STDDEV":                genericFunction(KindStddev),
 	"STDEV":                 genericFunction(KindStddev),
 	"STDDEV_POP":            genericFunction(KindStddevPop),
@@ -91,6 +94,20 @@ var FunctionByName = map[string]func([]Expression) Expression{
 	"DATE_DIFF":             genericFunction(KindDateDiff),
 	"JSON_EXTRACT":          jsonExtractFunction(KindJSONExtract),
 	"JSON_EXTRACT_SCALAR":   jsonExtractFunction(KindJSONExtractScalar),
+	// REPLACE(this, expression[, replacement]) (string.py:113); base has no replace_sql, so
+	// it renders via functionFallbackSQL like any other unadorned Func (see KindInitcap).
+	"REPLACE": genericFunction(KindReplace),
+	// LENGTH/LEN/CHAR_LENGTH/CHARACTER_LENGTH are deliberately NOT registered as a single Kind:
+	// upstream keeps them distinct per dialect (MySQL LENGTH=binary/byte-length vs
+	// CHAR_LENGTH=char-length, parsers/mysql.py:127 + generators/mysql.py:179), which needs
+	// per-dialect FUNCTIONS parse-side canonicalization (ROADMAP 5b, deferred). One global Kind
+	// would render MySQL CHAR_LENGTH as LENGTH - a semantic (byte vs char) regression - so these
+	// fall through to Anonymous and round-trip verbatim until 5b lands.
+	// LogicalOr._sql_names (aggregate.py:172): all three spellings parse to the same Kind;
+	// see generator/aggregate.go logicalOrSQL for the postgres/mysql renames.
+	"LOGICAL_OR": genericFunction(KindLogicalOr),
+	"BOOL_OR":    genericFunction(KindLogicalOr),
+	"BOOLOR_AGG": genericFunction(KindLogicalOr),
 	"COUNT": func(args []Expression) Expression {
 		m := Args{"big_int": true}
 		if len(args) > 0 {
@@ -199,6 +216,8 @@ func Trim(args Args) Expression           { return newNode(KindTrim, args) }
 func Ceil(args Args) Expression           { return newNode(KindCeil, args) }
 func Floor(args Args) Expression          { return newNode(KindFloor, args) }
 func GroupConcat(args Args) Expression    { return newNode(KindGroupConcat, args) }
+func Replace(args Args) Expression        { return newNode(KindReplace, args) }
+func LogicalOr(args Args) Expression      { return newNode(KindLogicalOr, args) }
 func ArrayAgg(args Args) Expression       { return newNode(KindArrayAgg, args) }
 func ArraySize(args Args) Expression      { return newNode(KindArraySize, args) }
 func ArrayContains(args Args) Expression  { return newNode(KindArrayContains, args) }

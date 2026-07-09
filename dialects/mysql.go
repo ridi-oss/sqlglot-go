@@ -27,6 +27,8 @@ func MySQL() *Dialect {
 	d.SupportsChangeColumn = true
 	// generators/mysql.py:149 VARCHAR_REQUIRES_SIZE = True.
 	d.VarcharRequiresSize = true
+	// generators/mysql.py:132 INTERVAL_ALLOWS_PLURAL_FORM = False.
+	d.IntervalAllowsPluralForm = false
 
 	for _, unit := range []string{
 		"SECOND_MICROSECOND",

@@ -10,13 +10,22 @@ import (
 
 func parseOne(t *testing.T, sql string) string {
 	t.Helper()
-	expression, err := sqlglot.ParseOne(sql, "")
+	return roundTrip(t, "", sql)
+}
+
+// roundTrip parses sql under the given dialect ("" = base) and regenerates it in that same
+// dialect, failing the test on any parse/generate error. Shared by every dialect-aware
+// generator test (cast/interval/trim/substring/rename/lambda/aggregate); parseOne is the
+// base-dialect shorthand.
+func roundTrip(t *testing.T, dialect, sql string) string {
+	t.Helper()
+	expression, err := sqlglot.ParseOne(sql, dialect)
 	if err != nil {
-		t.Fatalf("ParseOne(%q) error: %v", sql, err)
+		t.Fatalf("ParseOne(%q, %q) error: %v", sql, dialect, err)
 	}
-	generated, err := sqlglot.Generate(expression, "", generator.Options{})
+	generated, err := sqlglot.Generate(expression, dialect, generator.Options{})
 	if err != nil {
-		t.Fatalf("Generate(%q) error: %v", sql, err)
+		t.Fatalf("Generate(%q, %q) error: %v", sql, dialect, err)
 	}
 	return generated
 }

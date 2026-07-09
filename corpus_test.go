@@ -220,16 +220,21 @@ func writeGaps(fails map[gapKey]string) error {
 }
 
 // Pass counts observed from a full local run over Scope A (identity.sql) plus
-// Scope B (dialect_identity.jsonl): base 859/955, mysql 308/424, postgres
-// 321/468 (after the DDL parity slice, incl. the MySQL AUTO_INCREMENT/computed-
-// column/UNSIGNED and ALTER-fallback fixes). These are monotonic pass floors —
-// raise them as coverage improves, never lower them to mask a regression. A drop
-// below any floor fails the build even if the regressing case is also
-// (illegitimately) added to parity_gaps.txt.
+// Scope B (dialect_identity.jsonl): base 871/955, mysql 333/424, postgres
+// 358/468 (after the generator-fidelity parity slice: Lambda/Replace node
+// support with the corrected LISTAGG round-trip, dialect-aware
+// interval/cast/trim/data-type rendering, postgres SUBSTRING FROM/FOR +
+// Variance/VariancePop renames, and the MySQL/Postgres TryCast -> plain CAST
+// fix). LENGTH/CHAR_LENGTH canonicalization is deliberately deferred (ROADMAP
+// 5b per-dialect FUNCTIONS; see expressions/functions.go), so postgres
+// CHAR_LENGTH/CHARACTER_LENGTH stay in parity_gaps.txt. These are monotonic
+// pass floors — raise them as coverage improves, never lower them to mask a
+// regression. A drop below any floor fails the build even if the regressing
+// case is also (illegitimately) added to parity_gaps.txt.
 const (
-	minPassBase     = 859
-	minPassMySQL    = 308
-	minPassPostgres = 321
+	minPassBase     = 871
+	minPassMySQL    = 333
+	minPassPostgres = 358
 )
 
 // Minimum record counts per corpus, from the committed fixtures (identity.sql:

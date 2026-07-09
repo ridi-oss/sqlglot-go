@@ -26,6 +26,101 @@ var typeMapping = map[expressions.DType]string{
 	expressions.DTypeSmallDatetime: "TIMESTAMP",
 }
 
+// mysqlTypeMapping is a FULL REPLACEMENT of typeMapping for the mysql dialect (generators/
+// mysql.py:255-273): unlike base, it does NOT remap LONGTEXT/MEDIUMTEXT/TINYTEXT/*BLOB to
+// TEXT/BLOB/VARBINARY - those stay as their own MySQL-native type names. It also folds in
+// mysql's TIMESTAMP_TYPE_MAPPING (mysql.py:246-253), used by plain (non-CAST) DataType
+// rendering, e.g. a column typed TIMESTAMP renders as DATETIME.
+var mysqlTypeMapping = map[expressions.DType]string{
+	expressions.DTypeNChar:         "CHAR",
+	expressions.DTypeNVarchar:      "VARCHAR",
+	expressions.DTypeInet:          "INET",
+	expressions.DTypeRowVersion:    "VARBINARY",
+	expressions.DTypeUBigInt:       "BIGINT",
+	expressions.DTypeUInt:          "INT",
+	expressions.DTypeUMediumInt:    "MEDIUMINT",
+	expressions.DTypeUSmallInt:     "SMALLINT",
+	expressions.DTypeUTinyInt:      "TINYINT",
+	expressions.DTypeUDecimal:      "DECIMAL",
+	expressions.DTypeUDouble:       "DOUBLE",
+	expressions.DTypeDatetime2:     "DATETIME",
+	expressions.DTypeSmallDatetime: "DATETIME",
+	expressions.DTypeTimestamp:     "DATETIME",
+	expressions.DTypeTimestampNtz:  "DATETIME",
+	expressions.DTypeTimestampTz:   "TIMESTAMP",
+	expressions.DTypeTimestampLtz:  "TIMESTAMP",
+}
+
+// postgresTypeMapping is typeMapping (base) plus the postgres TYPE_MAPPING delta
+// (generators/postgres.py:271-284).
+var postgresTypeMapping = mergeTypeMappings(typeMapping, map[expressions.DType]string{
+	expressions.DTypeTinyInt:      "SMALLINT",
+	expressions.DTypeFloat:        "REAL",
+	expressions.DTypeDouble:       "DOUBLE PRECISION",
+	expressions.DTypeBinary:       "BYTEA",
+	expressions.DTypeVarBinary:    "BYTEA",
+	expressions.DTypeRowVersion:   "BYTEA",
+	expressions.DTypeDatetime:     "TIMESTAMP",
+	expressions.DTypeTimestampNtz: "TIMESTAMP",
+	expressions.DTypeBlob:         "BYTEA",
+})
+
+func mergeTypeMappings(base map[expressions.DType]string, delta map[expressions.DType]string) map[expressions.DType]string {
+	out := make(map[expressions.DType]string, len(base)+len(delta))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range delta {
+		out[k] = v
+	}
+	return out
+}
+
+// mysqlCastMapping ports MySQL's narrow CAST_MAPPING (generators/mysql.py:315-331): MySQL's
+// CAST only supports a handful of target types, so text/blob-ish types collapse to CHAR and
+// signed-integer-ish types (plus BOOLEAN) collapse to SIGNED; UBIGINT is the one type that
+// maps to UNSIGNED instead. Values are plain override strings (not further looked up in
+// mysqlTypeMapping), matching upstream's rename-then-render-raw semantics.
+var mysqlCastMapping = map[expressions.DType]string{
+	expressions.DTypeLongText:   "CHAR",
+	expressions.DTypeLongBlob:   "CHAR",
+	expressions.DTypeMediumBlob: "CHAR",
+	expressions.DTypeMediumText: "CHAR",
+	expressions.DTypeText:       "CHAR",
+	expressions.DTypeTinyBlob:   "CHAR",
+	expressions.DTypeTinyText:   "CHAR",
+	expressions.DTypeVarchar:    "CHAR",
+	expressions.DTypeBigInt:     "SIGNED",
+	expressions.DTypeBoolean:    "SIGNED",
+	expressions.DTypeInt:        "SIGNED",
+	expressions.DTypeSmallInt:   "SIGNED",
+	expressions.DTypeTinyInt:    "SIGNED",
+	expressions.DTypeMediumInt:  "SIGNED",
+	expressions.DTypeUBigInt:    "UNSIGNED",
+}
+
+// mysqlTimestampFuncTypes ports MySQL's TIMESTAMP_FUNC_TYPES (generators/mysql.py:333-336):
+// casting to either of these renders as a TIMESTAMP(...) function call rather than CAST(...
+// AS ...), since MySQL's CAST doesn't accept a timezone-aware timestamp target type.
+var mysqlTimestampFuncTypes = map[expressions.DType]bool{
+	expressions.DTypeTimestampTz:  true,
+	expressions.DTypeTimestampLtz: true,
+}
+
+// timePartSingulars ports TIME_PART_SINGULARS (generator.py:644-654): used by intervalSQL
+// when the dialect doesn't allow plural interval unit forms (e.g. mysql).
+var timePartSingulars = map[string]string{
+	"MICROSECONDS": "MICROSECOND",
+	"SECONDS":      "SECOND",
+	"MINUTES":      "MINUTE",
+	"HOURS":        "HOUR",
+	"DAYS":         "DAY",
+	"WEEKS":        "WEEK",
+	"MONTHS":       "MONTH",
+	"QUARTERS":     "QUARTER",
+	"YEARS":        "YEAR",
+}
+
 const initcapDefaultDelimiterChars = " \t\n\r\f\v!\"#$%&'()*+,\\-./:;<=>?@\\[\\]^_`{|}~"
 
 func (g *Generator) expressionSQL(e expressions.Expression) string { return g.sqlKey(e, "this") }
@@ -184,9 +279,9 @@ func (g *Generator) placeholderSQL(e expressions.Expression) string {
 }
 
 // parameterSQL ports parameter_sql (generator.py:3406-3408). PARAMETER_TOKEN is "@" for
-// base/mysql/postgres (none override the generator default), so it is inlined here.
+// base/mysql, "$" for postgres (generators/postgres.py:240, e.g. `CAST($1 AS TEXT)`).
 func (g *Generator) parameterSQL(e expressions.Expression) string {
-	return "@" + g.sqlKey(e, "this")
+	return g.parameterToken + g.sqlKey(e, "this")
 }
 
 // rawStringSQL ports rawstring_sql (generator.py:1653-1659): a raw/heredoc string is
@@ -1307,11 +1402,26 @@ var mysqlUnsignedTypeMapping = map[expressions.DType]string{
 	expressions.DTypeUDouble:    "DOUBLE",
 }
 
-// dataTypeSQL ports datatype_sql (generator.py:1706-...) plus dialect-specific overrides that
-// don't require the full per-dialect TYPE_MAPPING table (out of scope for this slice; see
-// ROADMAP 5b): MySQL's VARCHAR_REQUIRES_SIZE -> TEXT rewrite (generators/mysql.py:670-677),
-// MySQL's UNSIGNED_TYPE_MAPPING suffix (generators/mysql.py:678-684, via mysqlUnsignedTypeMapping
-// above), and Postgres's ARRAY/ENUM/FLOAT-with-precision rendering (generators/postgres.py:477-489).
+// typeMappingTable selects the TYPE_MAPPING table datatype_sql's generic lookup consults for
+// the current dialect: mysqlTypeMapping is a full replacement (generators/mysql.py:255-273),
+// postgresTypeMapping is base typeMapping plus postgres's delta (generators/postgres.py:271-284),
+// and every other dialect (including base) uses the base typeMapping as-is.
+func (g *Generator) typeMappingTable() map[expressions.DType]string {
+	switch g.dialect.Name {
+	case "mysql":
+		return mysqlTypeMapping
+	case "postgres":
+		return postgresTypeMapping
+	default:
+		return typeMapping
+	}
+}
+
+// dataTypeSQL ports datatype_sql (generator.py:1706-...) plus dialect-specific overrides:
+// MySQL's VARCHAR_REQUIRES_SIZE -> TEXT rewrite (generators/mysql.py:670-677), MySQL's
+// UNSIGNED_TYPE_MAPPING suffix (generators/mysql.py:678-684, via mysqlUnsignedTypeMapping
+// above), Postgres's ARRAY/ENUM/FLOAT-with-precision rendering (generators/postgres.py:
+// 477-489), and the dialect-aware TYPE_MAPPING table lookup (typeMappingTable above).
 func (g *Generator) dataTypeSQL(e expressions.Expression) string {
 	if g.dialect.Name == "mysql" {
 		if g.dialect.VarcharRequiresSize && expressions.IsType(e, expressions.DTypeVarchar) && len(listFromValue(e.Arg("expressions"))) == 0 {
@@ -1361,7 +1471,7 @@ func (g *Generator) dataTypeSQL(e expressions.Expression) string {
 			typeSQL = g.sqlKey(e, "kind")
 		} else if tv == expressions.DTypeCharacterSet {
 			return "CHAR CHARACTER SET " + g.sqlKey(e, "kind")
-		} else if mapped, ok := typeMapping[tv]; ok {
+		} else if mapped, ok := g.typeMappingTable()[tv]; ok {
 			typeSQL = mapped
 		} else {
 			typeSQL = string(tv)
@@ -1414,9 +1524,32 @@ func (g *Generator) castSQLWithPrefix(e expressions.Expression, safePrefix strin
 	if formatSQL != "" {
 		formatSQL = " FORMAT " + formatSQL
 	}
-	toSQL := g.sqlKey(e, "to")
-	if toSQL != "" {
-		toSQL = " " + toSQL
+
+	toExpr := asExpression(e.Arg("to"))
+
+	// MySQL's cast_sql override (generators/mysql.py:689-697): a CAST to a timezone-aware
+	// timestamp type renders as a TIMESTAMP(...) function call (bypassing CAST entirely, and
+	// any FORMAT/DEFAULT/action clauses along with it, matching upstream's early return), and
+	// a CAST to a type outside MySQL's narrow CAST-target vocabulary is rewritten to
+	// CHAR/SIGNED/UNSIGNED (mysqlCastMapping) before the ordinary CAST(... AS ...) below. The
+	// rename is computed on a copy of the "to" DataType so the caller's expression tree (which
+	// Generate already Copy()'d once at the top) isn't mutated a second time here.
+	if g.dialect.Name == "mysql" && toExpr != nil {
+		if dt, ok := toExpr.Arg("this").(expressions.DType); ok {
+			if mysqlTimestampFuncTypes[dt] {
+				return g.funcCall("TIMESTAMP", []any{e.Arg("this")}, "(", ")", true)
+			}
+			if renamed, ok := mysqlCastMapping[dt]; ok {
+				toCopy := toExpr.Copy()
+				toCopy.Set("this", renamed)
+				toExpr = toCopy
+			}
+		}
+	}
+
+	toSQL := ""
+	if toExpr != nil {
+		toSQL = " " + g.gen(toExpr)
 	}
 	action := g.sqlKey(e, "action")
 	if action != "" {
@@ -1430,6 +1563,13 @@ func (g *Generator) castSQLWithPrefix(e expressions.Expression, safePrefix strin
 }
 
 func (g *Generator) tryCastSQL(e expressions.Expression) string {
+	// MySQL and Postgres have no TRY_CAST; upstream routes exp.TryCast through no_trycast_sql
+	// (dialects/dialect.py:1261), which renders a plain CAST - so a MySQL cast-target rename
+	// (e.g. TEXT -> CHAR) applies without a stray TRY_ prefix. See generators/mysql.py:223 and
+	// generators/postgres.py:377. Every other dialect keeps TRY_CAST (generator.py:4523).
+	if g.dialect.Name == "mysql" || g.dialect.Name == "postgres" {
+		return g.castSQLWithPrefix(e, "")
+	}
 	return g.castSQLWithPrefix(e, "TRY_")
 }
 func (g *Generator) jsonCastSQL(e expressions.Expression) string { return g.castSQLWithPrefix(e, "") }
@@ -1498,7 +1638,17 @@ func (g *Generator) extractSQL(e expressions.Expression) string {
 	return "EXTRACT(" + this + " FROM " + expressionSQL + ")"
 }
 
+// trimSQL ports trim_sql (generator.py:3624-3633): the base LTRIM/RTRIM/TRIM(this, expr) form.
+// mysql and postgres both override exp.Trim to trimSQLStandard instead (dialect.py:1782-1797,
+// wired at generators/mysql.py:221 and generators/postgres.py:376).
 func (g *Generator) trimSQL(e expressions.Expression) string {
+	if g.dialect.Name == "mysql" || g.dialect.Name == "postgres" {
+		return g.trimSQLStandard(e)
+	}
+	return g.trimSQLBase(e)
+}
+
+func (g *Generator) trimSQLBase(e expressions.Expression) string {
 	trimType := g.sqlKey(e, "position")
 	funcName := "TRIM"
 	if trimType == "LEADING" {
@@ -1506,7 +1656,47 @@ func (g *Generator) trimSQL(e expressions.Expression) string {
 	} else if trimType == "TRAILING" {
 		funcName = "RTRIM"
 	}
-	return g.funcCall(funcName, []any{e.Arg("this"), e.Arg("expression")}, "(", ")", true)
+	var this any = e.Arg("this")
+	// Upstream's _parse_bitwise folds a trailing COLLATE into a Collate node wrapping the operand
+	// it follows (verified against sqlglot v30.12.0), so upstream's trim_sql re-renders the
+	// COLLATE for free out of `this` and never reads a separate collation arg. This port has no
+	// Collate node (expressions has no KindCollate) and keeps "collation" as Trim's own arg
+	// (parser/parser_functions.go:107-109), so splice it back onto the target here whenever it's
+	// present - with OR without a remove-chars operand. Examples (base dialect):
+	//   TRIM(LEADING ' XXX ' COLLATE "de_DE")          -> LTRIM(' XXX ' COLLATE "de_DE")
+	//   TRIM(BOTH 'bla' FROM ' XXX ' COLLATE utf8_bin) -> TRIM(' XXX ' COLLATE utf8_bin, 'bla')
+	if collation := g.sqlKey(e, "collation"); collation != "" {
+		this = g.sqlKey(e, "this") + " COLLATE " + collation
+	}
+	return g.funcCall(funcName, []any{this, e.Arg("expression")}, "(", ")", true)
+}
+
+// trimSQLStandard ports trim_sql (dialect.py:1782-1797): the SQL-standard TRIM(<position>
+// <remove_chars> FROM <target> COLLATE <collation>) form shared by mysql and postgres. When
+// there's no "remove chars" expression, it falls back to the LTRIM/RTRIM/TRIM(this, expr) form
+// (trimSQLBase) instead, since that's the more idiomatic rendering for a plain whitespace trim.
+func (g *Generator) trimSQLStandard(e expressions.Expression) string {
+	removeChars := g.sqlKey(e, "expression")
+	if removeChars == "" {
+		return g.trimSQLBase(e)
+	}
+
+	target := g.sqlKey(e, "this")
+	trimType := g.sqlKey(e, "position")
+	collation := g.sqlKey(e, "collation")
+
+	if trimType != "" {
+		trimType += " "
+	}
+	removeChars += " "
+	fromPart := ""
+	if trimType != "" || removeChars != "" {
+		fromPart = "FROM "
+	}
+	if collation != "" {
+		collation = " COLLATE " + collation
+	}
+	return "TRIM(" + trimType + removeChars + fromPart + target + collation + ")"
 }
 
 func (g *Generator) ceilFloorSQL(e expressions.Expression) string {
@@ -1776,15 +1966,38 @@ func (g *Generator) bracketSQL(e expressions.Expression) string {
 	return g.sqlKey(e, "this") + "[" + strings.Join(sqls, ", ") + "]"
 }
 
+// intervalSQL ports interval_sql (generator.py:3910-3930). unit_expression carries the
+// full unit sub-expression (e.g. an IntervalSpan for "DAY TO SECOND") so it's read before
+// TIME_PART_SINGULARS/pluralization collapses it down to a bare unit string.
 func (g *Generator) intervalSQL(e expressions.Expression) string {
 	unitExpression := e.Arg("unit")
 	unit := ""
 	if truthy(unitExpression) {
 		unit = g.gen(unitExpression)
 	}
+	if !g.intervalAllowsPluralForm {
+		if singular, ok := timePartSingulars[unit]; ok {
+			unit = singular
+		}
+	}
 	if unit != "" {
 		unit = " " + unit
 	}
+
+	if g.singleStringInterval {
+		this := ""
+		if thisExpr := asExpression(e.Arg("this")); thisExpr != nil {
+			this = thisExpr.Name()
+		}
+		if this != "" {
+			if unitExprAsExpression := asExpression(unitExpression); unitExprAsExpression != nil && unitExprAsExpression.Kind() == expressions.KindIntervalSpan {
+				return "INTERVAL '" + this + "'" + unit
+			}
+			return "INTERVAL '" + this + unit + "'"
+		}
+		return "INTERVAL" + unit
+	}
+
 	this := g.sqlKey(e, "this")
 	if this != "" {
 		thisExpr := asExpression(e.Arg("this"))

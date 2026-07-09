@@ -265,6 +265,17 @@ const (
 	KindAddConstraint
 	KindDropPartition
 	KindAddPartition
+	// KindLambda ports exp.Lambda (query.py:646): a plain Expression (no Func/Condition
+	// mixin, mirroring e.g. KindTableAlias), so it gets no traitsOf row below.
+	KindLambda
+	// KindReplace ports exp.Replace (string.py:113), a Func/Condition subclass with no
+	// dedicated generator method upstream: base has no replace_sql, so functionFallbackSQL
+	// renders it (mirroring e.g. KindInitcap).
+	KindReplace
+	// KindLogicalOr ports exp.LogicalOr (aggregate.py:171-172): LOGICAL_OR/BOOL_OR/
+	// BOOLOR_AGG all parse to it; postgres/mysql rename it on generation (see
+	// generator/aggregate.go logicalOrSQL).
+	KindLogicalOr
 )
 
 type Trait uint32
@@ -589,6 +600,12 @@ var argTypes = map[Kind][]argSpec{
 	KindAddConstraint:  {{"expressions", true}},
 	KindDropPartition:  {{"expressions", true}, {"exists", false}},
 	KindAddPartition:   {{"this", true}, {"exists", false}, {"location", false}},
+	// Lambda (query.py:646/647) and Replace (string.py:113/114).
+	KindLambda:  {{"this", true}, {"expressions", true}, {"colon", false}},
+	KindReplace: {{"this", true}, {"expression", true}, {"replacement", false}},
+	// LogicalOr (aggregate.py:171) has no arg_types override, i.e. inherits the base
+	// Expression default (mirroring e.g. KindStddev above).
+	KindLogicalOr: defaultArgTypes,
 }
 
 var traitsOf = map[Kind]Trait{
@@ -717,6 +734,10 @@ var traitsOf = map[Kind]Trait{
 	KindCTE:            TraitDerivedTable,
 	KindLateral:        TraitUDTF | TraitDerivedTable,
 	KindValues:         TraitUDTF | TraitDerivedTable,
+	// KindLambda (query.py:646) is a plain Expression, so it gets no row here (matching e.g.
+	// KindTableAlias above).
+	KindReplace:   TraitCondition | TraitFunc,
+	KindLogicalOr: TraitCondition | TraitFunc | TraitAggFunc,
 }
 
 var primitive = map[Kind]bool{
@@ -974,6 +995,9 @@ var className = map[Kind]string{
 	KindAddConstraint:                       "AddConstraint",
 	KindDropPartition:                       "DropPartition",
 	KindAddPartition:                        "AddPartition",
+	KindLambda:                              "Lambda",
+	KindReplace:                             "Replace",
+	KindLogicalOr:                           "LogicalOr",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func

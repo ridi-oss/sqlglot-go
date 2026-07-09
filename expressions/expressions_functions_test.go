@@ -55,12 +55,15 @@ func TestRegisteredFunctions(t *testing.T) {
 		{"SUBSTRING(a FROM 1 FOR 2)", exp.KindSubstring},
 		{"SUBSTR(a, 1, 2)", exp.KindSubstring},
 		{"TRIM(a)", exp.KindTrim},
+		{"REPLACE(a, 'x', 'y')", exp.KindReplace},
 		{"CEIL(a)", exp.KindCeil},
 		{"CEILING(a)", exp.KindCeil},
 		{"FLOOR(a)", exp.KindFloor},
 		{"STRING_AGG(a, ',')", exp.KindGroupConcat},
 		{"GROUP_CONCAT(a, ',')", exp.KindGroupConcat},
-		{"LISTAGG(a, ',')", exp.KindGroupConcat},
+		// LISTAGG is not registered in base FunctionByName (upstream only maps it in Oracle/
+		// Snowflake/etc.), so it falls through to Anonymous - not ported from upstream base.
+		{"LISTAGG(a, ',')", exp.KindAnonymous},
 		{"ARRAY(a)", exp.KindArray},
 		{"ARRAY_AGG(a)", exp.KindArrayAgg},
 		{"ARRAY_SIZE(a)", exp.KindArraySize},
