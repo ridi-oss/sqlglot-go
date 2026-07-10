@@ -688,10 +688,15 @@ func (p *Parser) parseDDLSelect() exp.Expression {
 // (CHARACTER SET/CHARSET and COLLATE consult it in the ported subset).
 type propertyParserFunc func(p *Parser, isDefault bool) exp.Expression
 
-// propertyParsers contains the shared PROPERTY_PARSERS entries required by the CREATE
-// fidelity worklist. It intentionally remains a subset of upstream's 80+ registry: an
-// unported dialect-specific property is left unconsumed so the enclosing statement fails
-// closed to Command. Dialect-specific additions and replacements live in the override seam.
+// propertyParsers contains the currently generator-safe base subset of PROPERTY_PARSERS.
+// Although pinned upstream base registers CLUSTERED, EXTERNAL, LOCATION, ROW, STORED,
+// TBLPROPERTIES, and USING at
+// /Users/sjcho/repos/sqlglot-go-hive/.reference/sqlglot-v30.12.0/sqlglot/parser.py:
+// 1243,1268,1287,1310,1326,1328,1337, this parser-only slice keeps them dialect-local until
+// matching generator placement and renderers exist: a partial structured parse could silently
+// drop or error instead of failing
+// closed to Command. They can return here only in a future paired parser+generator slice;
+// other dialect-specific additions and replacements live in the override seam.
 var propertyParsers map[string]propertyParserFunc
 
 func init() {
@@ -713,7 +718,6 @@ func init() {
 		"CHARACTER SET": func(p *Parser, isDefault bool) exp.Expression {
 			return p.parseCharacterSet(isDefault)
 		},
-		"CLUSTERED": func(p *Parser, _ bool) exp.Expression { return p.parseClusteredBy() },
 		"COLLATE": func(p *Parser, isDefault bool) exp.Expression {
 			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
 				// Upstream builds CollateProperty via _parse_property_assignment(**kwargs);
@@ -742,9 +746,6 @@ func init() {
 				return p.expression(exp.EngineProperty(exp.Args{"this": this}), nil, nil)
 			})
 		},
-		"EXTERNAL": func(p *Parser, _ bool) exp.Expression {
-			return p.expression(exp.ExternalProperty(nil), nil, nil)
-		},
 		"FORMAT": func(p *Parser, _ bool) exp.Expression {
 			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
 				return p.expression(exp.FileFormatProperty(exp.Args{"this": this}), nil, nil)
@@ -763,12 +764,7 @@ func init() {
 				return p.expression(exp.LanguageProperty(exp.Args{"this": this}), nil, nil)
 			})
 		},
-		"LIKE": func(p *Parser, _ bool) exp.Expression { return p.parseCreateLike() },
-		"LOCATION": func(p *Parser, _ bool) exp.Expression {
-			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
-				return p.expression(exp.LocationProperty(exp.Args{"this": this}), nil, nil)
-			})
-		},
+		"LIKE":    func(p *Parser, _ bool) exp.Expression { return p.parseCreateLike() },
 		"LOCK":    func(p *Parser, _ bool) exp.Expression { return p.parseLocking() },
 		"LOCKING": func(p *Parser, _ bool) exp.Expression { return p.parseLocking() },
 		"MATERIALIZED": func(p *Parser, _ bool) exp.Expression {
@@ -791,7 +787,6 @@ func init() {
 		},
 		"READS":   func(p *Parser, _ bool) exp.Expression { return p.parseReadsProperty() },
 		"RETURNS": func(p *Parser, _ bool) exp.Expression { return p.parseReturnsProperty() },
-		"ROW":     func(p *Parser, _ bool) exp.Expression { return p.parseRow() },
 		"ROW_FORMAT": func(p *Parser, _ bool) exp.Expression {
 			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
 				return p.expression(exp.RowFormatProperty(exp.Args{"this": this}), nil, nil)
@@ -800,12 +795,8 @@ func init() {
 		"SECURITY":     func(p *Parser, _ bool) exp.Expression { return p.parseSQLSecurity() },
 		"SQL SECURITY": func(p *Parser, _ bool) exp.Expression { return p.parseSQLSecurity() },
 		"STABLE":       func(p *Parser, _ bool) exp.Expression { return p.parseStabilityProperty("STABLE") },
-		"STORED":       func(p *Parser, _ bool) exp.Expression { return p.parseStored() },
 		"STRICT": func(p *Parser, _ bool) exp.Expression {
 			return p.expression(exp.StrictProperty(nil), nil, nil)
-		},
-		"TBLPROPERTIES": func(p *Parser, _ bool) exp.Expression {
-			return p.expression(exp.Properties(exp.Args{"expressions": p.parseWrappedProperties()}), nil, nil)
 		},
 		"TEMP": func(p *Parser, _ bool) exp.Expression {
 			return p.expression(exp.TemporaryProperty(nil), nil, nil)
@@ -815,11 +806,6 @@ func init() {
 		},
 		"UNLOGGED": func(p *Parser, _ bool) exp.Expression {
 			return p.expression(exp.UnloggedProperty(nil), nil, nil)
-		},
-		"USING": func(p *Parser, _ bool) exp.Expression {
-			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
-				return p.expression(exp.FileFormatProperty(exp.Args{"this": this}), nil, nil)
-			})
 		},
 		"WITH": func(p *Parser, _ bool) exp.Expression { return p.parseWithProperty() },
 	}

@@ -5,9 +5,15 @@ import (
 	"github.com/sjincho/sqlglot-go/tokens"
 )
 
-// This overlay intentionally covers only the Hive CREATE properties, functions, transforms,
-// and type behavior in this slice. Hive's ALTER CHANGE, _parse_partition_and_order,
-// _parse_parameter, _to_prop_eq, and CURRENT_TIME-removal overrides remain out of scope.
+// Upstream Hive inherits the base PROPERTY_PARSERS and overrides SERDEPROPERTIES and USING at
+// /Users/sjcho/repos/sqlglot-go-hive/.reference/sqlglot-v30.12.0/sqlglot/parsers/hive.py:131-137.
+// This port instead composes the generator-safe shared subset with Hive-only parser callbacks for
+// the base entries at /Users/sjcho/repos/sqlglot-go-hive/.reference/sqlglot-v30.12.0/sqlglot/parser.py:
+// 1243,1268,1287,1310,1326,1328,1337.
+// This intentional temporary divergence preserves the no-generator slice's fail-closed invariant;
+// the callbacks can return to the shared registry only in a future paired parser+generator slice.
+// Hive's ALTER CHANGE, _parse_partition_and_order, _parse_parameter, _to_prop_eq, and
+// CURRENT_TIME-removal overrides remain out of scope.
 func init() {
 	registerDialectParserOverrides("hive", dialectParserOverrideSet{
 		FunctionParsers: map[string]parserOverrideFunc{
@@ -22,8 +28,28 @@ func init() {
 			"TRANSFORM": (*Parser).parseHiveTransform,
 		},
 		PropertyParsers: map[string]propertyParserFunc{
+			"CLUSTERED": func(p *Parser, _ bool) exp.Expression {
+				return p.parseClusteredBy()
+			},
+			"EXTERNAL": func(p *Parser, _ bool) exp.Expression {
+				return p.expression(exp.ExternalProperty(nil), nil, nil)
+			},
+			"LOCATION": func(p *Parser, _ bool) exp.Expression {
+				return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
+					return p.expression(exp.LocationProperty(exp.Args{"this": this}), nil, nil)
+				})
+			},
+			"ROW": func(p *Parser, _ bool) exp.Expression {
+				return p.parseRow()
+			},
 			"SERDEPROPERTIES": func(p *Parser, _ bool) exp.Expression {
 				return exp.SerdeProperties(exp.Args{"expressions": p.parseWrappedProperties()})
+			},
+			"STORED": func(p *Parser, _ bool) exp.Expression {
+				return p.parseStored()
+			},
+			"TBLPROPERTIES": func(p *Parser, _ bool) exp.Expression {
+				return p.expression(exp.Properties(exp.Args{"expressions": p.parseWrappedProperties()}), nil, nil)
 			},
 			"USING": func(p *Parser, _ bool) exp.Expression {
 				return p.parseHiveUsingProperty()

@@ -140,21 +140,54 @@ func TestHiveCreateExternalWithSerdeProperties(t *testing.T) {
 	}
 }
 
-func TestHiveSerdePropertiesAreDialectIsolated(t *testing.T) {
-	cases := []string{
-		"CREATE TABLE t (a INT) WITH SERDEPROPERTIES ('x'='1')",
-		"CREATE TABLE t (a INT) ROW FORMAT SERDE 'x' SERDEPROPERTIES ('k'='v')",
+func TestHiveDDLPropertyRegistrationIsIsolated(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{name: "external", sql: "CREATE EXTERNAL TABLE t (a INT)"},
+		{name: "location", sql: "CREATE TABLE t (a INT) LOCATION 'x'"},
+		{name: "clustered by", sql: "CREATE TABLE t (a INT) CLUSTERED BY (a) INTO 8 BUCKETS"},
+		{name: "row format serde", sql: "CREATE TABLE t (a INT) ROW FORMAT SERDE 'x'"},
+		{name: "stored as", sql: "CREATE TABLE t (a INT) STORED AS PARQUET"},
+		{name: "stored as input output format", sql: "CREATE TABLE t (a INT) STORED AS INPUTFORMAT 'i' OUTPUTFORMAT 'o'"},
+		{name: "stored by", sql: "CREATE TABLE t (a INT) STORED BY 'handler'"},
+		{name: "table properties", sql: "CREATE TABLE t (a INT) TBLPROPERTIES ('x'='1')"},
+		{name: "using file format", sql: "CREATE TABLE t (a INT) USING PARQUET"},
+		{name: "with serde properties", sql: "CREATE TABLE t (a INT) WITH SERDEPROPERTIES ('x'='1')"},
+		{name: "serde properties", sql: "CREATE TABLE t (a INT) ROW FORMAT SERDE 'x' SERDEPROPERTIES ('k'='v')"},
 	}
-	for _, sql := range cases {
-		t.Run(sql, func(t *testing.T) {
-			if hive := parseOneDialect(t, sql, "hive"); hive.Kind() != exp.KindCreate {
-				t.Fatalf("Hive SERDEPROPERTIES kind = %v, want Create:\n%s", hive.Kind(), hive.ToS())
+	dialects := []struct {
+		name    string
+		dialect string
+	}{
+		{name: "base"},
+		{name: "mysql", dialect: "mysql"},
+		{name: "postgres", dialect: "postgres"},
+		{name: "presto", dialect: "presto"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hive := parseOneDialect(t, tc.sql, "hive")
+			if hive.Kind() != exp.KindCreate {
+				t.Fatalf("Hive DDL kind = %v, want Create (never Command):\n%s", hive.Kind(), hive.ToS())
 			}
-			for _, dialect := range []string{"", "mysql", "postgres", "presto"} {
-				other := parseOneDialect(t, sql, dialect)
-				if other.Kind() != exp.KindCommand {
-					t.Fatalf("%q SERDEPROPERTIES kind = %v, want fail-closed Command:\n%s", dialect, other.Kind(), other.ToS())
-				}
+
+			for _, dialect := range dialects {
+				t.Run(dialect.name, func(t *testing.T) {
+					command := parseOneDialect(t, tc.sql, dialect.dialect)
+					if command.Kind() != exp.KindCommand {
+						t.Fatalf("%s DDL kind = %v, want fail-closed Command:\n%s", dialect.name, command.Kind(), command.ToS())
+					}
+					got, err := generateSQL(t, command, dialect.dialect)
+					if err != nil {
+						t.Fatalf("generate %s Command: %v", dialect.name, err)
+					}
+					if got != tc.sql {
+						t.Fatalf("generate %s Command = %q, want byte-identical %q", dialect.name, got, tc.sql)
+					}
+				})
 			}
 		})
 	}
@@ -283,6 +316,15 @@ func TestHiveNestedSchemaTypes(t *testing.T) {
 	nestedArray := hiveColumnDType(t, mapValue.Expressions()[1])
 	if nestedArray.Arg("this") != exp.DTypeArray || len(nestedArray.Expressions()) != 1 || nestedArray.Expressions()[0].Arg("this") != exp.DTypeBigInt {
 		t.Fatalf("STRUCT.y should be ARRAY<BIGINT>:\n%s", collectionCreate.ToS())
+	}
+}
+
+func TestHiveCreateUsingFileFormat(t *testing.T) {
+	create := parseHiveCreate(t, "CREATE TABLE t (a INT) USING PARQUET")
+	properties := assertHivePropertyKinds(t, create, exp.KindFileFormatProperty)
+	format := properties[0].This()
+	if format == nil || format.Kind() != exp.KindVar || format.Name() != "PARQUET" {
+		t.Fatalf("USING PARQUET should contain a PARQUET Var:\n%s", create.ToS())
 	}
 }
 
