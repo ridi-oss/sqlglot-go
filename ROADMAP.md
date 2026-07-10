@@ -126,6 +126,50 @@ differential-check against the pinned Python):
   and any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or DDL detail not hit by a fixture. Treat a
   not-yet-parsed construct upstream parses as a gap to close.
 
+## Planned: Athena support (Presto/Trino/Hive parser chain), scoped to lineage
+
+Motivation: proxy-monster (RIDI's query-gating proxy) is adding an Athena proxy alongside its
+MySQL/Postgres ones (planned, near-term). Its probe uses `parse` + `qualify` + `traverse_scope`
+(+ a same-dialect `.sql()` ONLY for `SELECT *` expansion) — it does NOT canonicalize functions or
+transpile cross-dialect. Empirical basis (6,072 unique RIDI Athena queries sampled from Redash;
+1,974 raw + 4,098 `{{templated}}`): the CURRENT engine (postgres dialect, zero Athena code) already
+structures 1,908/1,974 = 96.7% of the raw queries — matching the pinned Python `athena` dialect
+(1,915), with ZERO Command fallbacks. So Athena support is a faithfulness/robustness investment for
+the last ~3% + upstream-correct semantics, not a "can't parse it" necessity.
+
+Approach: import the **parser + tokenizer** side of upstream's Athena chain 1:1 — athena→trino→presto
+for queries, hive for DDL/CTAS lineage. That is ~570 LOC of `parsers/*.py` (presto 137, hive 298,
+trino 63, athena 74) + the tokenizer deltas in each `dialects/*.py`. **Skip the generators** (~1,438
+LOC of TRANSFORMS/TYPE_MAPPING) — the probe never canonicalizes or transpiles; the lone same-dialect
+`SELECT *`-expansion `.sql()` round-trips via the base generator + `Anonymous` fallback (functions
+like URL_DECODE/FORMAT_DATETIME stay Anonymous, which lineage sees through and the generator echoes
+verbatim). Athena's parser is a ROUTER: `AthenaParser.parse()` sends DDL to the Hive sub-parser and
+queries to the Trino(→Presto) sub-parser.
+
+PREREQUISITE — the per-dialect parser-override seam (parser-side of the deferred 5b): the parser's
+`functionParsers` / `statementParsers` / `noParenFunctionParsers` maps and type-token sets are
+package-global singletons today; only `d.Functions` (a FUNCTIONS overlay) + a few bool flags are
+per-dialect. Presto's parser overrides `FUNCTION_PARSERS` (drops TRIM), adds `STATEMENT_PARSERS`
+(Athena's `USING`→command), and brings ARRAY/MAP/ROW type tokens — none layerable per-dialect today.
+Generalize the seam so a dialect supplies parser-registry overlays (dialect overlay ∪ base singleton).
+This is reusable for every future dialect, so it is foundational, not throwaway.
+
+Slices (each lands `go test ./...` green; regressed against the committed RIDI Athena query corpus):
+1. PER-DIALECT PARSER-OVERRIDE SEAM (5b, parser-side): extend Dialect with FunctionParsers /
+   StatementParsers / type-token overlays; thread them through the parser's registry lookups as
+   (dialect overlay ∪ base singleton). Zero behavior change for base/MySQL/Postgres (empty overlays).
+2. PRESTO: parser (FUNCTIONS + FUNCTION_PARSERS + the `_parse` methods for ARRAY/MAP/ROW, UNNEST,
+   TRY, lambda `->`, casts/type tokens) + tokenizer deltas. The query-engine bulk — most of the value.
+3. HIVE: parser — only the DDL surface Athena routes to Hive (CREATE [EXTERNAL] TABLE etc.) that
+   CTAS/DDL lineage needs.
+4. TRINO + ATHENA: thin Trino-over-Presto layer + the AthenaParser router (DDL→Hive, query→Trino) +
+   athena tokenizer/dialect registration.
+
+Out of scope (same as base/MySQL/Postgres): generator TRANSFORMS/TYPE_MAPPING, cross-dialect
+transpilation, the other 30+ dialects. Corpus: RIDI's real Athena queries (sampled 2026-07 from Redash
+`platform-athena` + siblings) — kept OUT of the public repo (internal SQL); used as a local
+regression oracle only.
+
 Historical note: earlier entries below tagged items "off probe's critical path" / "fail-closed" —
 that framing referred to a since-removed external consumer. For this repo they are simply parity gaps.
 
