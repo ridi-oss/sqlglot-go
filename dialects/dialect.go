@@ -203,6 +203,25 @@ type Dialect struct {
 	// when set, a string-literal `this` is wrapped in `CAST(... AS JSON)` before rendering the
 	// JSON_EXTRACT_SCALAR arrow form.
 	JSONTypeRequiredForExtraction bool
+	// StrictCast ports parser.py:1755 STRICT_CAST: whether CAST and :: build Cast (true)
+	// or the dialect's permissive TryCast form (false).
+	StrictCast bool
+	// LogDefaultsToLn ports parser.py:1765 LOG_DEFAULTS_TO_LN: whether one-argument LOG(x)
+	// canonicalizes to Ln instead of Log.
+	LogDefaultsToLn bool
+	// JoinsHaveEqualPrecedence ports parser.py:1824-1828: whether keyword and comma joins build
+	// the same left-deep tree instead of keyword JOIN binding more tightly.
+	JoinsHaveEqualPrecedence bool
+	// AddJoinOnTrue ports parser.py:1842-1844: whether a JOIN without criteria receives ON TRUE
+	// so its semantics remain explicit when transpiled to dialects that require a condition.
+	AddJoinOnTrue bool
+	// RegexpExtractDefaultGroup ports dialect.py:679 and build_regexp_extract at dialect.py:
+	// 2343-2360: the capture group inserted when REGEXP_EXTRACT omits its group argument.
+	RegexpExtractDefaultGroup int
+	// RegexpExtractPositionOverflowReturnsNull ports dialect.py:682-683 and
+	// build_regexp_extract at dialect.py:2343-2360: the canonical RegexpExtract node records
+	// whether an overflowing position returns NULL rather than an empty string.
+	RegexpExtractPositionOverflowReturnsNull bool
 	// Functions ports the per-dialect FUNCTIONS class attribute (parsers/mysql.py,
 	// parsers/postgres.py, etc.): a dialect-specific overlay of function-name -> builder
 	// entries, merged OVER exp.FunctionByName at parse time (see parser/parser.go's
@@ -378,6 +397,19 @@ func Base() *Dialect {
 		// (generators/mysql.py:142) and postgres (generators/postgres.py:245) both override to
 		// True.
 		JSONTypeRequiredForExtraction: false,
+		// parser.py:1755 STRICT_CAST = True (base); Hive overrides to False.
+		StrictCast: true,
+		// parser.py:1765 LOG_DEFAULTS_TO_LN = False (base); Hive overrides to True.
+		LogDefaultsToLn: false,
+		// parser.py:1824-1828 JOINS_HAVE_EQUAL_PRECEDENCE = False (base); Hive overrides
+		// to True.
+		JoinsHaveEqualPrecedence: false,
+		// parser.py:1842-1844 ADD_JOIN_ON_TRUE = False (base); Hive overrides to True.
+		AddJoinOnTrue: false,
+		// dialect.py:679 REGEXP_EXTRACT_DEFAULT_GROUP = 0 (base); Hive overrides to 1.
+		RegexpExtractDefaultGroup: 0,
+		// dialect.py:682-683 REGEXP_EXTRACT_POSITION_OVERFLOW_RETURNS_NULL = True.
+		RegexpExtractPositionOverflowReturnsNull: true,
 		// parser.py:1801 VALUES_FOLLOWED_BY_PAREN = True (base); MySQL overrides to False
 		// (parsers/mysql.py:303).
 		ValuesFollowedByParen: true,
@@ -509,6 +541,8 @@ func GetOrRaise(name string) (*Dialect, error) {
 		return Postgres(), nil
 	case "presto":
 		return Presto(), nil
+	case "hive":
+		return Hive(), nil
 	default:
 		return nil, fmt.Errorf("unknown dialect %q", name)
 	}

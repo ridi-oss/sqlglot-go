@@ -324,11 +324,18 @@ func (p *Parser) parseWhenMatched() exp.Expression {
 	return p.expression(exp.Whens(exp.Args{"expressions": whens}), nil, nil)
 }
 
+// parseRow ports _parse_row (parser.py:3603-3606), the standalone CREATE TABLE
+// property adapter for ROW FORMAT ... clauses.
+func (p *Parser) parseRow() exp.Expression {
+	if !p.match(tokens.FORMAT) {
+		return nil
+	}
+	return p.parseRowFormat(false)
+}
+
 // parseRowFormat ports _parse_row_format (parser.py:3619-3651): the Hive `ROW FORMAT
-// DELIMITED ...` / `ROW FORMAT SERDE '...'` clause, reached here from parseInsert's
-// DIRECTORY branch with matchRow=true. The standalone CREATE-TABLE `ROW FORMAT ...`
-// property entry point (_parse_row, parser.py:3603-3606) isn't ported: this slice's
-// corpus never reaches parseRowFormat except via DIRECTORY.
+// DELIMITED ...` / `ROW FORMAT SERDE '...'` clause. parseInsert's DIRECTORY branch reaches
+// it with matchRow=true, while parseRow has already consumed ROW FORMAT.
 func (p *Parser) parseRowFormat(matchRow bool) exp.Expression {
 	if matchRow && !p.matchPair(tokens.ROW, tokens.FORMAT, true) {
 		return nil
@@ -363,24 +370,17 @@ func (p *Parser) parseRowFormat(matchRow bool) exp.Expression {
 }
 
 // parseSerdeProperties ports _parse_serde_properties (parser.py:3608-3617): `[WITH]
-// SERDEPROPERTIES (...)`. SERDEPROPERTIES isn't a dedicated tokenizer keyword (unlike
-// upstream's TokenType.SERDE_PROPERTIES) - matchTextSeq matches it by text instead, which
-// is equivalent here since it's a single word with no ambiguity. The property-list body
-// (upstream's _parse_wrapped_properties, a generic Property-node parser) is deferred infra
-// (see parseProperties's stub note above); this parses each entry as a plain `key = value`
-// equality instead, which is sufficient to round-trip the common `'key'='value'` form and
-// is never exercised by this slice's corpus (no ROW FORMAT SERDE case appears in the
-// base/MySQL/Postgres round-trip corpus), so exact upstream Property-node fidelity isn't
-// required here.
+// SERDEPROPERTIES (...)`. Matching the dedicated token keeps this Hive-only syntax fail-closed
+// for dialects whose tokenizers leave SERDEPROPERTIES as an ordinary identifier.
 func (p *Parser) parseSerdeProperties(withKeyword bool) exp.Expression {
 	index := p.index
 	with_ := withKeyword || p.matchTextSeq("WITH")
-	if !p.matchTextSeq("SERDEPROPERTIES") {
+	if !p.match(tokens.SERDE_PROPERTIES) {
 		p.retreat(index)
 		return nil
 	}
 	return p.expression(exp.SerdeProperties(exp.Args{
-		"expressions": p.parseWrappedCsv(p.parseEquality),
+		"expressions": p.parseWrappedProperties(),
 		"with_":       with_,
 	}), nil, nil)
 }

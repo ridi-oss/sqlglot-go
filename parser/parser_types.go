@@ -54,6 +54,13 @@ func (p *Parser) parseUserDefinedType(identifier exp.Expression) exp.Expression 
 }
 
 func (p *Parser) parseTypes(checkFunc, schema, allowIdentifiers, withCollation bool) exp.Expression {
+	if parser := p.typeParserOverride(); parser != nil {
+		return parser(p, checkFunc, schema, allowIdentifiers, withCollation)
+	}
+	return p.parseTypesBase(checkFunc, schema, allowIdentifiers, withCollation)
+}
+
+func (p *Parser) parseTypesBase(checkFunc, schema, allowIdentifiers, withCollation bool) exp.Expression {
 	index := p.index
 	var this exp.Expression
 	var typeToken tokens.TokenType // zero value is "no token", since real TokenTypes start at 1

@@ -18,12 +18,15 @@ import (
 // parser package and is selected through the dialect's plain-string Name, avoiding a dialects ->
 // parser import cycle.
 type parserOverrideFunc = func(*Parser) exp.Expression
+type typeParserOverrideFunc = func(*Parser, bool, bool, bool, bool) exp.Expression
 
 type dialectParserOverrideSet struct {
 	FunctionParsers         map[string]parserOverrideFunc
 	DisabledFunctionParsers map[string]bool
 	StatementParsers        map[tokens.TokenType]parserOverrideFunc
 	NoParenFunctionParsers  map[string]parserOverrideFunc
+	PropertyParsers         map[string]propertyParserFunc
+	TypeParser              typeParserOverrideFunc
 }
 
 var dialectParserOverrides = map[string]dialectParserOverrideSet{}
@@ -49,6 +52,11 @@ func registerDialectParserOverrides(name string, overrides dialectParserOverride
 	for _, callback := range overrides.NoParenFunctionParsers {
 		if callback == nil {
 			panic("parser: nil no-parentheses function parser override for dialect " + name)
+		}
+	}
+	for _, callback := range overrides.PropertyParsers {
+		if callback == nil {
+			panic("parser: nil property parser override for dialect " + name)
 		}
 	}
 
@@ -95,6 +103,36 @@ func (p *Parser) statementParser(tokenType tokens.TokenType) parserOverrideFunc 
 		return parser
 	}
 	return statementParsers[tokenType]
+}
+
+// propertyParser mirrors functionParser and statementParser: the selected dialect overlay wins,
+// while the shared PROPERTY_PARSERS singleton remains the fallback for every dialect.
+func (p *Parser) propertyParser(name string) propertyParserFunc {
+	name = strings.ToUpper(name)
+	dialectName := strings.ToLower(p.dialect.Name)
+	if parser := dialectParserOverrides[dialectName].PropertyParsers[name]; parser != nil {
+		return parser
+	}
+	return propertyParsers[name]
+}
+
+// propertyParserKeys returns a fresh union because matchTexts needs every overlay key even when the
+// same dialect continues to inherit the rest of the shared registry.
+func (p *Parser) propertyParserKeys() map[string]bool {
+	dialectName := strings.ToLower(p.dialect.Name)
+	overlay := dialectParserOverrides[dialectName].PropertyParsers
+	keys := make(map[string]bool, len(propertyParsers)+len(overlay))
+	for name := range propertyParsers {
+		keys[name] = true
+	}
+	for name := range overlay {
+		keys[name] = true
+	}
+	return keys
+}
+
+func (p *Parser) typeParserOverride() typeParserOverrideFunc {
+	return dialectParserOverrides[strings.ToLower(p.dialect.Name)].TypeParser
 }
 
 func (p *Parser) noParenFunctionParserFor(name string) parserOverrideFunc {

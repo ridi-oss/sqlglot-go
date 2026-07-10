@@ -46,7 +46,7 @@ func NewWithErrorLevel(d *dialects.Dialect, level sqlerrors.ErrorLevel) *Parser 
 		maxErrors:           3,
 		maxNodes:            -1,
 		dialect:             d,
-		strictCast:          true,
+		strictCast:          d.StrictCast,
 		curr:                tokens.SentinelNone,
 		next:                tokens.SentinelNone,
 		prev:                tokens.SentinelNone,
@@ -928,10 +928,14 @@ func (p *Parser) parseJoinParts() (method, side, kind *tokens.Token) {
 func (p *Parser) parseJoin(skipJoinToken bool, parseBracket bool, aliasTokensArg map[tokens.TokenType]bool) exp.Expression {
 	if p.match(tokens.COMMA) {
 		table := p.tryParse(func() exp.Expression { return p.parseTable(false, false, aliasTokensArg, false, false, false, false) }, false)
-		if table != nil {
-			return p.expression(exp.Join(exp.Args{"this": table}), nil, nil)
+		if table == nil {
+			return nil
 		}
-		return nil
+		join := p.expression(exp.Join(exp.Args{"this": table}), nil, nil)
+		if p.dialect.JoinsHaveEqualPrecedence {
+			join.Set("kind", "CROSS")
+		}
+		return join
 	}
 	index := p.index
 	method, side, kind := p.parseJoinParts()
@@ -992,6 +996,11 @@ func (p *Parser) parseJoin(skipJoinToken bool, parseBracket bool, aliasTokensArg
 				joinThis.Set("joins", nil)
 			}
 		}
+	}
+	joinKind, _ := kwargs["kind"].(string)
+	if p.dialect.AddJoinOnTrue && kwargs["on"] == nil && kwargs["using"] == nil && kwargs["method"] == nil &&
+		(joinKind == "" || joinKind == "INNER" || joinKind == "OUTER") {
+		kwargs["on"] = exp.Boolean(exp.Args{"this": true})
 	}
 	comments := append([]string(nil), joinComments...)
 	for _, token := range []*tokens.Token{method, side, kind} {

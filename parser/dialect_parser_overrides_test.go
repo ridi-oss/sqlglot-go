@@ -49,6 +49,21 @@ func TestDialectParserOverrideSeam(t *testing.T) {
 				return p.expression(exp.Variadic(exp.Args{"this": p.parseBitwise()}), nil, nil)
 			},
 		},
+		// TEMPORARY is deliberately also a base property key. Replacing it proves the overlay
+		// wins over the shared callback, and placing it before TABLE proves dialect property keys
+		// participate in CREATE's pre-creatable-token property pass.
+		PropertyParsers: map[string]propertyParserFunc{
+			"TEMPORARY": func(p *Parser, _ bool) exp.Expression {
+				return p.expression(exp.ExternalProperty(nil), nil, nil)
+			},
+		},
+		TypeParser: func(p *Parser, checkFunc, schema, allowIdentifiers, withCollation bool) exp.Expression {
+			dtype := p.parseTypesBase(checkFunc, schema, allowIdentifiers, withCollation)
+			if dtype != nil && dtype.Kind() == exp.KindDataType && dtype.Arg("this") == exp.DTypeInt {
+				dtype.Set("this", exp.DTypeText)
+			}
+			return dtype
+		},
 	})
 	t.Cleanup(func() { delete(dialectParserOverrides, testName) })
 
@@ -60,6 +75,64 @@ func TestDialectParserOverrideSeam(t *testing.T) {
 		"SEAM_FUNC": func(args []exp.Expression) exp.Expression {
 			return exp.Variadic(exp.Args{"this": args[0]})
 		},
+	}
+
+	customCreate, err := parseFirstWithDialect(d, "CREATE TEMPORARY TABLE x")
+	if err != nil {
+		t.Fatalf("parse custom TEMPORARY property: %v", err)
+	}
+	if customCreate.Kind() != exp.KindCreate {
+		t.Fatalf("custom TEMPORARY CREATE kind = %v, want Create:\n%s", customCreate.Kind(), customCreate.ToS())
+	}
+	customProperties, ok := customCreate.Arg("properties").(exp.Expression)
+	if !ok || customProperties == nil || len(customProperties.Expressions()) != 1 || customProperties.Expressions()[0].Kind() != exp.KindExternalProperty {
+		t.Fatalf("custom TEMPORARY callback should replace the base callback before TABLE:\n%s", customCreate.ToS())
+	}
+
+	for _, tc := range []struct {
+		name string
+		new  func() *dialects.Dialect
+	}{
+		{name: "base", new: dialects.Base},
+		{name: "mysql", new: dialects.MySQL},
+		{name: "postgres", new: dialects.Postgres},
+		{name: "presto", new: dialects.Presto},
+	} {
+		create, err := parseFirstWithDialect(tc.new(), "CREATE TEMPORARY TABLE x")
+		if err != nil {
+			t.Fatalf("parse %s TEMPORARY property: %v", tc.name, err)
+		}
+		properties, ok := create.Arg("properties").(exp.Expression)
+		if create.Kind() != exp.KindCreate || !ok || properties == nil || len(properties.Expressions()) != 1 || properties.Expressions()[0].Kind() != exp.KindTemporaryProperty {
+			t.Fatalf("%s TEMPORARY property changed by custom overlay:\n%s", tc.name, create.ToS())
+		}
+	}
+
+	customCast, err := parseFirstWithDialect(d, "CAST(x AS INT)")
+	if err != nil {
+		t.Fatalf("parse custom CAST type: %v", err)
+	}
+	customType, ok := customCast.Arg("to").(exp.Expression)
+	if customCast.Kind() != exp.KindCast || !ok || customType == nil || customType.Kind() != exp.KindDataType || customType.Arg("this") != exp.DTypeText {
+		t.Fatalf("custom TypeParser should rewrite INT to TEXT:\n%s", customCast.ToS())
+	}
+	for _, tc := range []struct {
+		name string
+		new  func() *dialects.Dialect
+	}{
+		{name: "base", new: dialects.Base},
+		{name: "mysql", new: dialects.MySQL},
+		{name: "postgres", new: dialects.Postgres},
+		{name: "presto", new: dialects.Presto},
+	} {
+		cast, err := parseFirstWithDialect(tc.new(), "CAST(x AS INT)")
+		if err != nil {
+			t.Fatalf("parse %s CAST type: %v", tc.name, err)
+		}
+		dtype, ok := cast.Arg("to").(exp.Expression)
+		if cast.Kind() != exp.KindCast || !ok || dtype == nil || dtype.Kind() != exp.KindDataType || dtype.Arg("this") != exp.DTypeInt {
+			t.Fatalf("%s CAST type changed by custom TypeParser:\n%s", tc.name, cast.ToS())
+		}
 	}
 
 	seamFunc, err := parseFirstWithDialect(d, "SEAM_FUNC(a USING b)")
@@ -84,6 +157,7 @@ func TestDialectParserOverrideSeam(t *testing.T) {
 		{name: "base", new: dialects.Base},
 		{name: "mysql", new: dialects.MySQL},
 		{name: "postgres", new: dialects.Postgres},
+		{name: "presto", new: dialects.Presto},
 	} {
 		if expression, err := parseFirstWithDialect(tc.new(), "SEAM_FUNC(a USING b)"); err == nil {
 			t.Fatalf("%s unexpectedly gained SEAM_FUNC grammar:\n%s", tc.name, expression.ToS())

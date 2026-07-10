@@ -691,15 +691,8 @@ type propertyParserFunc func(p *Parser, isDefault bool) exp.Expression
 // propertyParsers contains the shared PROPERTY_PARSERS entries required by the CREATE
 // fidelity worklist. It intentionally remains a subset of upstream's 80+ registry: an
 // unported dialect-specific property is left unconsumed so the enclosing statement fails
-// closed to Command. MySQL overrides LOCK and PARTITION BY; Postgres overrides SET.
-var (
-	propertyParsers         map[string]propertyParserFunc
-	propertyParserKeySet    map[string]bool
-	mysqlPropertyParsers    map[string]propertyParserFunc
-	mysqlPropertyKeySet     map[string]bool
-	postgresPropertyParsers map[string]propertyParserFunc
-	postgresPropertyKeySet  map[string]bool
-)
+// closed to Command. Dialect-specific additions and replacements live in the override seam.
+var propertyParsers map[string]propertyParserFunc
 
 func init() {
 	propertyParsers = map[string]propertyParserFunc{
@@ -720,6 +713,7 @@ func init() {
 		"CHARACTER SET": func(p *Parser, isDefault bool) exp.Expression {
 			return p.parseCharacterSet(isDefault)
 		},
+		"CLUSTERED": func(p *Parser, _ bool) exp.Expression { return p.parseClusteredBy() },
 		"COLLATE": func(p *Parser, isDefault bool) exp.Expression {
 			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
 				// Upstream builds CollateProperty via _parse_property_assignment(**kwargs);
@@ -748,6 +742,9 @@ func init() {
 				return p.expression(exp.EngineProperty(exp.Args{"this": this}), nil, nil)
 			})
 		},
+		"EXTERNAL": func(p *Parser, _ bool) exp.Expression {
+			return p.expression(exp.ExternalProperty(nil), nil, nil)
+		},
 		"FORMAT": func(p *Parser, _ bool) exp.Expression {
 			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
 				return p.expression(exp.FileFormatProperty(exp.Args{"this": this}), nil, nil)
@@ -766,7 +763,12 @@ func init() {
 				return p.expression(exp.LanguageProperty(exp.Args{"this": this}), nil, nil)
 			})
 		},
-		"LIKE":    func(p *Parser, _ bool) exp.Expression { return p.parseCreateLike() },
+		"LIKE": func(p *Parser, _ bool) exp.Expression { return p.parseCreateLike() },
+		"LOCATION": func(p *Parser, _ bool) exp.Expression {
+			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
+				return p.expression(exp.LocationProperty(exp.Args{"this": this}), nil, nil)
+			})
+		},
 		"LOCK":    func(p *Parser, _ bool) exp.Expression { return p.parseLocking() },
 		"LOCKING": func(p *Parser, _ bool) exp.Expression { return p.parseLocking() },
 		"MATERIALIZED": func(p *Parser, _ bool) exp.Expression {
@@ -789,6 +791,7 @@ func init() {
 		},
 		"READS":   func(p *Parser, _ bool) exp.Expression { return p.parseReadsProperty() },
 		"RETURNS": func(p *Parser, _ bool) exp.Expression { return p.parseReturnsProperty() },
+		"ROW":     func(p *Parser, _ bool) exp.Expression { return p.parseRow() },
 		"ROW_FORMAT": func(p *Parser, _ bool) exp.Expression {
 			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
 				return p.expression(exp.RowFormatProperty(exp.Args{"this": this}), nil, nil)
@@ -797,8 +800,12 @@ func init() {
 		"SECURITY":     func(p *Parser, _ bool) exp.Expression { return p.parseSQLSecurity() },
 		"SQL SECURITY": func(p *Parser, _ bool) exp.Expression { return p.parseSQLSecurity() },
 		"STABLE":       func(p *Parser, _ bool) exp.Expression { return p.parseStabilityProperty("STABLE") },
+		"STORED":       func(p *Parser, _ bool) exp.Expression { return p.parseStored() },
 		"STRICT": func(p *Parser, _ bool) exp.Expression {
 			return p.expression(exp.StrictProperty(nil), nil, nil)
+		},
+		"TBLPROPERTIES": func(p *Parser, _ bool) exp.Expression {
+			return p.expression(exp.Properties(exp.Args{"expressions": p.parseWrappedProperties()}), nil, nil)
 		},
 		"TEMP": func(p *Parser, _ bool) exp.Expression {
 			return p.expression(exp.TemporaryProperty(nil), nil, nil)
@@ -809,86 +816,45 @@ func init() {
 		"UNLOGGED": func(p *Parser, _ bool) exp.Expression {
 			return p.expression(exp.UnloggedProperty(nil), nil, nil)
 		},
+		"USING": func(p *Parser, _ bool) exp.Expression {
+			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
+				return p.expression(exp.FileFormatProperty(exp.Args{"this": this}), nil, nil)
+			})
+		},
 		"WITH": func(p *Parser, _ bool) exp.Expression { return p.parseWithProperty() },
 	}
-	propertyParserKeySet = funcMapKeys2(propertyParsers)
+	registerDialectParserOverrides("mysql", dialectParserOverrideSet{
+		PropertyParsers: map[string]propertyParserFunc{
+			"LOCK": func(p *Parser, _ bool) exp.Expression {
+				return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
+					return p.expression(exp.LockProperty(exp.Args{"this": this}), nil, nil)
+				})
+			},
+			"PARTITION BY": func(p *Parser, _ bool) exp.Expression {
+				return p.parseMySQLPartitionProperty()
+			},
+		},
+	})
 
-	mysqlPropertyParsers = make(map[string]propertyParserFunc, len(propertyParsers))
-	for k, v := range propertyParsers {
-		mysqlPropertyParsers[k] = v
-	}
-	mysqlPropertyParsers["LOCK"] = func(p *Parser, _ bool) exp.Expression {
-		return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
-			return p.expression(exp.LockProperty(exp.Args{"this": this}), nil, nil)
-		})
-	}
-	mysqlPropertyParsers["PARTITION BY"] = func(p *Parser, _ bool) exp.Expression {
-		return p.parseMySQLPartitionProperty()
-	}
-	mysqlPropertyKeySet = funcMapKeys2(mysqlPropertyParsers)
-
-	// postgresPropertyParsers ports parsers/postgres.py:89-91 PostgresParser.PROPERTY_PARSERS:
-	// `**parser.Parser.PROPERTY_PARSERS` (minus INPUT, not ported anyway) plus a "SET"
-	// override -> exp.SetConfigProperty (`SET <config_param> {TO|=} <value>`). This reuses
-	// the top-level parseSet (parser/stmt_set.go) rather than a bespoke CSV-of-parseSetItem
-	// helper: upstream's own `_parse_set()` (parser.py:9265-9275, called here with its
-	// defaults) degrades to a raw Command whenever anything follows the SET-item list that
-	// isn't itself a further SET item - swallowing the *rest of the whole statement*
-	// (parser.py's own `self._parse_as_command(start)` has no notion of "just this
-	// property"'s scope). That's not a bug specific to being invoked mid-CREATE-FUNCTION: it's
-	// upstream's real behavior (verified against the pinned oracle for
-	// `SET search_path TO 'public' AS 'select $1 + $2;' LANGUAGE SQL IMMUTABLE`, which
-	// produces SetConfigProperty(this=Command(this=SET, expression="search_path TO 'public'
-	// AS ... IMMUTABLE"))), so parseSet's identical "SET " + Command(rest) fallback is exactly
-	// the 1:1 port, not an approximation.
-	postgresPropertyParsers = make(map[string]propertyParserFunc, len(propertyParsers)+1)
-	for k, v := range propertyParsers {
-		postgresPropertyParsers[k] = v
-	}
-	postgresPropertyParsers["SET"] = func(p *Parser, _ bool) exp.Expression {
-		return p.expression(exp.SetConfigProperty(exp.Args{"this": p.parseSet()}), nil, nil)
-	}
-	postgresPropertyKeySet = funcMapKeys2(postgresPropertyParsers)
-}
-
-func funcMapKeys2(m map[string]propertyParserFunc) map[string]bool {
-	out := make(map[string]bool, len(m))
-	for k := range m {
-		out[k] = true
-	}
-	return out
-}
-
-func (p *Parser) propertyParsersFor() map[string]propertyParserFunc {
-	switch p.dialect.Name {
-	case "mysql":
-		return mysqlPropertyParsers
-	case "postgres":
-		return postgresPropertyParsers
-	default:
-		return propertyParsers
-	}
-}
-
-func (p *Parser) propertyParserKeys() map[string]bool {
-	switch p.dialect.Name {
-	case "mysql":
-		return mysqlPropertyKeySet
-	case "postgres":
-		return postgresPropertyKeySet
-	default:
-		return propertyParserKeySet
-	}
+	// parsers/postgres.py:89-91 replaces SET with SetConfigProperty(this=_parse_set()).
+	// parseSet intentionally retains upstream's whole-statement Command fallback behavior.
+	registerDialectParserOverrides("postgres", dialectParserOverrideSet{
+		PropertyParsers: map[string]propertyParserFunc{
+			"SET": func(p *Parser, _ bool) exp.Expression {
+				return p.expression(exp.SetConfigProperty(exp.Args{"this": p.parseSet()}), nil, nil)
+			},
+		},
+	})
 }
 
 // parseTailProperty is the singleton adapter for _parse_function_properties
 // (parser.py:7091-7106), intentionally omitting the generic key=value fallback after AS.
 func (p *Parser) parseTailProperty() exp.Expression {
 	if p.matchTexts(p.propertyParserKeys()) {
-		return p.propertyParsersFor()[stringsUpper(p.prev.Text)](p, false)
+		return p.propertyParser(stringsUpper(p.prev.Text))(p, false)
 	}
 	if p.match(tokens.DEFAULT) && p.matchTexts(p.propertyParserKeys()) {
-		return p.propertyParsersFor()[stringsUpper(p.prev.Text)](p, true)
+		return p.propertyParser(stringsUpper(p.prev.Text))(p, true)
 	}
 	return nil
 }

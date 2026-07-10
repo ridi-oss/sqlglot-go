@@ -26,7 +26,7 @@ func (p *Parser) parsePropertyBefore() exp.Expression {
 		p.retreat(index)
 		return nil
 	}
-	return p.propertyParsersFor()[stringsUpper(p.prev.Text)](p, isDefault)
+	return p.propertyParser(stringsUpper(p.prev.Text))(p, isDefault)
 }
 
 // parseWrappedProperties ports _parse_wrapped_properties (parser.py:2792-2793), flattening
@@ -49,10 +49,10 @@ func (p *Parser) parseWrappedProperties() []exp.Expression {
 // registered, so they consume nothing and the enclosing CREATE degrades to Command.
 func (p *Parser) parseProperty() exp.Expression {
 	if p.matchTexts(p.propertyParserKeys()) {
-		return p.propertyParsersFor()[stringsUpper(p.prev.Text)](p, false)
+		return p.propertyParser(stringsUpper(p.prev.Text))(p, false)
 	}
 	if p.match(tokens.DEFAULT) && p.matchTexts(p.propertyParserKeys()) {
-		return p.propertyParsersFor()[stringsUpper(p.prev.Text)](p, true)
+		return p.propertyParser(stringsUpper(p.prev.Text))(p, true)
 	}
 	return p.parseKeyValueProperty(nil)
 }
@@ -89,6 +89,67 @@ func (p *Parser) parseKeyValueProperty(parseValue func() exp.Expression) exp.Exp
 	}
 
 	return p.expression(exp.Property(exp.Args{"this": key, "value": value}), nil, nil)
+}
+
+// parseStored ports _parse_stored (parser.py:2843-2864).
+func (p *Parser) parseStored() exp.Expression {
+	if p.matchTextSeq("BY") {
+		return p.expression(exp.StorageHandlerProperty(exp.Args{"this": p.parseVarOrString(false)}), nil, nil)
+	}
+
+	p.match(tokens.ALIAS)
+	var inputFormat exp.Expression
+	if p.matchTextSeq("INPUTFORMAT") {
+		inputFormat = p.parseString()
+	}
+	var outputFormat exp.Expression
+	if p.matchTextSeq("OUTPUTFORMAT") {
+		outputFormat = p.parseString()
+	}
+
+	var this exp.Expression
+	if inputFormat != nil || outputFormat != nil {
+		this = p.expression(exp.InputOutputFormat(exp.Args{
+			"input_format":  inputFormat,
+			"output_format": outputFormat,
+		}), nil, nil)
+	} else {
+		this = p.parseVarOrString(false)
+		if this == nil {
+			this = p.parseNumber()
+		}
+		if this == nil {
+			this = p.parseIdVar(true, nil)
+		}
+	}
+
+	return p.expression(exp.FileFormatProperty(exp.Args{"this": this, "hive_format": true}), nil, nil)
+}
+
+// parseClusteredBy ports _parse_clustered_by (parser.py:3108-3128).
+func (p *Parser) parseClusteredBy() exp.Expression {
+	p.matchTextSeq("BY")
+
+	p.matchLParen(nil)
+	expressions := p.parseCsv(p.parseColumn)
+	p.matchRParen(nil)
+
+	var sortedBy []exp.Expression
+	if p.matchTextSeq("SORTED", "BY") {
+		p.matchLParen(nil)
+		sortedBy = p.parseCsv(func() exp.Expression { return p.parseOrdered(nil) })
+		p.matchRParen(nil)
+	}
+
+	p.match(tokens.INTO)
+	buckets := p.parseNumber()
+	p.matchTextSeq("BUCKETS")
+
+	return p.expression(exp.ClusteredByProperty(exp.Args{
+		"expressions": expressions,
+		"sorted_by":   sortedBy,
+		"buckets":     buckets,
+	}), nil, nil)
 }
 
 // parseDefiner ports _parse_definer (parser.py:3058-3069): DEFINER[=]user@host.
@@ -130,6 +191,9 @@ func (p *Parser) parseWithProperty() exp.Expression {
 	}
 	if p.matchTextSeq("NO", "DATA") {
 		return p.parseWithData(true)
+	}
+	if p.match(tokens.SERDE_PROPERTIES, false) {
+		return p.parseSerdeProperties(true)
 	}
 	return nil
 }

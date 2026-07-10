@@ -616,6 +616,31 @@ const (
 	// Condition (NOT a Func) - it has no functionFallbackSQL path, so the generator
 	// supplies a dedicated dispatch method (mirrors KindNational's `N'...'`).
 	KindUnicodeString // query.py:494
+	// hive cluster: property, transform, map, and function Kinds referenced by the
+	// Hive parser and FUNCTIONS overlay. Appended so existing Kind values remain stable.
+	KindExternalProperty       // properties.py:168-169
+	KindClusteredByProperty    // properties.py:230-231
+	KindLocationProperty       // properties.py:262-263
+	KindStorageHandlerProperty // properties.py:488-489
+	KindUsingProperty          // properties.py:492-494
+	KindInputOutputFormat      // query.py:878-879
+	KindQueryTransform         // properties.py:422-431
+	KindTransform              // array.py:214-215
+	KindToBase64               // string.py:325-326
+	KindFromBase64             // string.py:301-302
+	KindTsOrDsAdd              // temporal.py:145-147
+	KindTsOrDsToDate           // temporal.py:492-493
+	KindFirst                  // aggregate.py:125-126
+	KindFirstValue             // aggregate.py:129-130
+	KindLast                   // aggregate.py:155-156
+	KindLastValue              // aggregate.py:159-160
+	KindRegexpExtract          // string.py:421-430
+	KindRegexpExtractAll       // string.py:433-441
+	KindTimestampTrunc         // temporal.py:190-191
+	KindUnixToStr              // temporal.py:528-529
+	KindTimeToStr              // temporal.py:476-477
+	KindStarMap                // array.py:331-332
+	KindVarMap                 // array.py:339-341
 )
 
 type Trait uint32
@@ -1154,6 +1179,31 @@ var argTypes = map[Kind][]argSpec{
 	KindArraySlice:       {{"this", true}, {"start", true}, {"end", false}, {"step", false}, {"zero_based", false}},                                            // array.py:85
 	KindCurrentTimestamp: {{"this", false}, {"sysdate", false}},                                                                                                // temporal.py:37
 	KindUnicodeString:    {{"this", true}, {"escape", false}},                                                                                                  // query.py:494
+	// hive cluster: arg_types preserve upstream declaration order because FromArgList
+	// maps function arguments positionally using these rows.
+	KindExternalProperty:       {{"this", false}},
+	KindClusteredByProperty:    {{"expressions", true}, {"sorted_by", false}, {"buckets", true}},
+	KindLocationProperty:       {{"this", true}},
+	KindStorageHandlerProperty: {{"this", true}},
+	KindUsingProperty:          {{"this", true}, {"kind", true}},
+	KindInputOutputFormat:      {{"input_format", false}, {"output_format", false}},
+	KindQueryTransform:         {{"expressions", true}, {"command_script", true}, {"schema", false}, {"row_format_before", false}, {"record_writer", false}, {"row_format_after", false}, {"record_reader", false}},
+	KindTransform:              {{"this", true}, {"expression", true}},
+	KindToBase64:               defaultArgTypes,
+	KindFromBase64:             defaultArgTypes,
+	KindTsOrDsAdd:              {{"this", true}, {"expression", true}, {"unit", false}, {"return_type", false}},
+	KindTsOrDsToDate:           {{"this", true}, {"format", false}, {"safe", false}},
+	KindFirst:                  {{"this", true}, {"expression", false}},
+	KindFirstValue:             defaultArgTypes,
+	KindLast:                   {{"this", true}, {"expression", false}},
+	KindLastValue:              defaultArgTypes,
+	KindRegexpExtract:          {{"this", true}, {"expression", true}, {"position", false}, {"occurrence", false}, {"parameters", false}, {"group", false}, {"null_if_pos_overflow", false}},
+	KindRegexpExtractAll:       {{"this", true}, {"expression", true}, {"group", false}, {"parameters", false}, {"position", false}, {"occurrence", false}},
+	KindTimestampTrunc:         {{"this", true}, {"unit", true}, {"zone", false}, {"input_type_preserved", false}},
+	KindUnixToStr:              {{"this", true}, {"format", false}},
+	KindTimeToStr:              {{"this", true}, {"format", true}, {"culture", false}, {"zone", false}},
+	KindStarMap:                defaultArgTypes,
+	KindVarMap:                 {{"keys", true}, {"values", true}},
 }
 
 var traitsOf = map[Kind]Trait{
@@ -1401,6 +1451,24 @@ var traitsOf = map[Kind]Trait{
 	KindArraySlice:       TraitCondition | TraitFunc,
 	KindCurrentTimestamp: TraitCondition | TraitFunc,
 	KindUnicodeString:    TraitCondition,
+	// hive cluster: Func subclasses are Conditions with TraitFunc; aggregate
+	// subclasses additionally carry TraitAggFunc. Property/query nodes have no traits.
+	KindTransform:        TraitCondition | TraitFunc,
+	KindToBase64:         TraitCondition | TraitFunc,
+	KindFromBase64:       TraitCondition | TraitFunc,
+	KindTsOrDsAdd:        TraitCondition | TraitFunc,
+	KindTsOrDsToDate:     TraitCondition | TraitFunc,
+	KindFirst:            TraitCondition | TraitFunc | TraitAggFunc,
+	KindFirstValue:       TraitCondition | TraitFunc | TraitAggFunc,
+	KindLast:             TraitCondition | TraitFunc | TraitAggFunc,
+	KindLastValue:        TraitCondition | TraitFunc | TraitAggFunc,
+	KindRegexpExtract:    TraitCondition | TraitFunc,
+	KindRegexpExtractAll: TraitCondition | TraitFunc,
+	KindTimestampTrunc:   TraitCondition | TraitFunc,
+	KindUnixToStr:        TraitCondition | TraitFunc,
+	KindTimeToStr:        TraitCondition | TraitFunc,
+	KindStarMap:          TraitCondition | TraitFunc,
+	KindVarMap:           TraitCondition | TraitFunc,
 }
 
 var primitive = map[Kind]bool{
@@ -1823,6 +1891,30 @@ var className = map[Kind]string{
 	KindArraySlice:       "ArraySlice",
 	KindCurrentTimestamp: "CurrentTimestamp",
 	KindUnicodeString:    "UnicodeString",
+	// hive cluster: exact upstream class names.
+	KindExternalProperty:       "ExternalProperty",
+	KindClusteredByProperty:    "ClusteredByProperty",
+	KindLocationProperty:       "LocationProperty",
+	KindStorageHandlerProperty: "StorageHandlerProperty",
+	KindUsingProperty:          "UsingProperty",
+	KindInputOutputFormat:      "InputOutputFormat",
+	KindQueryTransform:         "QueryTransform",
+	KindTransform:              "Transform",
+	KindToBase64:               "ToBase64",
+	KindFromBase64:             "FromBase64",
+	KindTsOrDsAdd:              "TsOrDsAdd",
+	KindTsOrDsToDate:           "TsOrDsToDate",
+	KindFirst:                  "First",
+	KindFirstValue:             "FirstValue",
+	KindLast:                   "Last",
+	KindLastValue:              "LastValue",
+	KindRegexpExtract:          "RegexpExtract",
+	KindRegexpExtractAll:       "RegexpExtractAll",
+	KindTimestampTrunc:         "TimestampTrunc",
+	KindUnixToStr:              "UnixToStr",
+	KindTimeToStr:              "TimeToStr",
+	KindStarMap:                "StarMap",
+	KindVarMap:                 "VarMap",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func
@@ -1848,6 +1940,8 @@ var varLenArgs = map[Kind]bool{
 	KindConcat:            true,
 	// presto cluster: MD5Digest is_var_len_args=True (string.py:540).
 	KindMD5Digest: true,
+	// hive cluster: VarMap is_var_len_args=True (array.py:339-341).
+	KindVarMap: true,
 }
 
 // ArgKeys returns the arg keys of a Kind in class-declaration order (mirrors
