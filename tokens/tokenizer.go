@@ -513,7 +513,17 @@ func compileConfig(cfg TokenizerConfig) TokenizerConfig {
 // Exported so per-dialect config builders in package dialects can finalize configs.
 func CompileConfig(cfg TokenizerConfig) TokenizerConfig { return compileConfig(cfg) }
 
-type Tokenizer struct{ core *TokenizerCore }
+// TokenizeFunc lets dialects with multi-stage tokenization retain the public concrete
+// *Tokenizer API while routing each SQL string through a custom implementation.
+type TokenizeFunc func(sql string) ([]Token, error)
+
+type Tokenizer struct {
+	core         *TokenizerCore
+	tokenizeFunc TokenizeFunc
+	sql          []rune
+	size         int
+	tokens       []Token
+}
 
 func NewTokenizer() *Tokenizer { cfg := BaseConfig(); return NewTokenizerWithConfig(cfg) }
 
@@ -521,7 +531,44 @@ func NewTokenizerWithConfig(cfg TokenizerConfig) *Tokenizer {
 	return &Tokenizer{core: NewTokenizerCore(cfg)}
 }
 
-func (t *Tokenizer) Tokenize(sql string) ([]Token, error) { return t.core.Tokenize(sql) }
-func (t *Tokenizer) Tokens() []Token                      { return t.core.tokens }
-func (t *Tokenizer) SQL() string                          { return string(t.core.sql) }
-func (t *Tokenizer) Size() int                            { return t.core.size }
+// NewTokenizerWithFunc constructs a tokenizer backed by a non-nil custom callback.
+func NewTokenizerWithFunc(tokenizeFunc TokenizeFunc) *Tokenizer {
+	if tokenizeFunc == nil {
+		panic("tokens: nil tokenize function")
+	}
+	return &Tokenizer{tokenizeFunc: tokenizeFunc}
+}
+
+func (t *Tokenizer) Tokenize(sql string) ([]Token, error) {
+	if t.tokenizeFunc == nil {
+		return t.core.Tokenize(sql)
+	}
+
+	t.sql = []rune(sql)
+	t.size = len(t.sql)
+	t.tokens = nil
+	tokenized, err := t.tokenizeFunc(sql)
+	t.tokens = tokenized
+	return tokenized, err
+}
+
+func (t *Tokenizer) Tokens() []Token {
+	if t.tokenizeFunc == nil {
+		return t.core.tokens
+	}
+	return t.tokens
+}
+
+func (t *Tokenizer) SQL() string {
+	if t.tokenizeFunc == nil {
+		return string(t.core.sql)
+	}
+	return string(t.sql)
+}
+
+func (t *Tokenizer) Size() int {
+	if t.tokenizeFunc == nil {
+		return t.core.size
+	}
+	return t.size
+}

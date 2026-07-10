@@ -15,6 +15,7 @@ type Parser struct {
 	maxErrors           int
 	maxNodes            int
 	dialect             *dialects.Dialect
+	parserOverrideName  string
 	strictCast          bool
 	sql                 string
 	errors              []*sqlerrors.ParseError
@@ -37,8 +38,15 @@ func New(d *dialects.Dialect) *Parser {
 }
 
 func NewWithErrorLevel(d *dialects.Dialect, level sqlerrors.ErrorLevel) *Parser {
+	return newWithErrorLevelAndOverrideName(d, level, "")
+}
+
+func newWithErrorLevelAndOverrideName(d *dialects.Dialect, level sqlerrors.ErrorLevel, overrideName string) *Parser {
 	if d == nil {
 		d = dialects.Base()
+	}
+	if overrideName == "" {
+		overrideName = d.Name
 	}
 	p := &Parser{
 		errorLevel:          level,
@@ -46,6 +54,7 @@ func NewWithErrorLevel(d *dialects.Dialect, level sqlerrors.ErrorLevel) *Parser 
 		maxErrors:           3,
 		maxNodes:            -1,
 		dialect:             d,
+		parserOverrideName:  overrideName,
 		strictCast:          d.StrictCast,
 		curr:                tokens.SentinelNone,
 		next:                tokens.SentinelNone,
@@ -283,6 +292,9 @@ func (p *Parser) Parse(rawTokens []tokens.Token, sql string) (expressions []exp.
 			}
 		}
 	}()
+	if p.isAthenaRouter() {
+		return p.parseAthena(rawTokens, sql)
+	}
 	return p.parse(p.parseStatement, rawTokens, sql), nil
 }
 
@@ -299,6 +311,9 @@ func (p *Parser) ParseInto(rawTokens []tokens.Token, sql string, into exp.Kind) 
 			}
 		}
 	}()
+	if p.isAthenaRouter() {
+		return p.parseIntoAthena(rawTokens, sql, into)
+	}
 	var method func() exp.Expression
 	switch into {
 	case exp.KindDataType:
@@ -2474,11 +2489,11 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 		// NO_PAREN_FUNCTIONS (parser.py:6973-6975): a bare CURRENT_DATE/CURRENT_TIME keyword
 		// (no trailing "(", not after a DOT) builds the corresponding zero-arg node, e.g.
 		// postgres `date_add(current_date, ...)` -> CurrentDate rendering CURRENT_DATE. Only
-		// the tokens whose Kinds this port models are wired here (see noParenFunctions);
-		// CURRENT_TIMESTAMP/USER/ROLE keep falling through to a bare column, which already
-		// round-trips for base/mysql/postgres.
+		// shared tokens whose Kinds this port models are wired in noParenFunctions, with
+		// dialect-local additions resolved by noParenFunctionFor. CURRENT_TIMESTAMP/USER/ROLE
+		// keep falling through to a bare column, which already round-trips for base/mysql/postgres.
 		if optionalParens && !afterDot {
-			if build := noParenFunctions[tokenType]; build != nil {
+			if build := p.noParenFunctionFor(tokenType); build != nil {
 				p.advance()
 				return p.expression(build(exp.Args{}), &token, comments)
 			}

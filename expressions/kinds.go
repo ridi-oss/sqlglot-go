@@ -616,6 +616,15 @@ const (
 	// Condition (NOT a Func) - it has no functionFallbackSQL path, so the generator
 	// supplies a dedicated dispatch method (mirrors KindNational's `N'...'`).
 	KindUnicodeString // query.py:494
+	// trino cluster: minimal AST surface required by the Trino/Athena parser and
+	// generator deltas. These mirror functions.py:249-250,317-318,
+	// query.py:1961-1962,2062-2066, core.py:1596-1597, and array.py:146-147.
+	KindCurrentCatalog           // functions.py:249-250
+	KindCurrentVersion           // functions.py:317-318
+	KindJSONExtractQuote         // query.py:2062-2066
+	KindOverflowTruncateBehavior // query.py:1961-1962
+	KindRefresh                  // core.py:1596-1597
+	KindArrayFirst               // array.py:146-147
 	// hive cluster: property, transform, map, and function Kinds referenced by the
 	// Hive parser and FUNCTIONS overlay. Appended so existing Kind values remain stable.
 	KindExternalProperty       // properties.py:168-169
@@ -1179,6 +1188,14 @@ var argTypes = map[Kind][]argSpec{
 	KindArraySlice:       {{"this", true}, {"start", true}, {"end", false}, {"step", false}, {"zero_based", false}},                                            // array.py:85
 	KindCurrentTimestamp: {{"this", false}, {"sysdate", false}},                                                                                                // temporal.py:37
 	KindUnicodeString:    {{"this", true}, {"escape", false}},                                                                                                  // query.py:494
+	// trino cluster: arg_types mirror the pinned declarations exactly. In particular,
+	// CurrentCatalog and CurrentVersion have genuinely empty arg maps, not optional `this`.
+	KindCurrentCatalog:           {},                                      // functions.py:249-250
+	KindCurrentVersion:           {},                                      // functions.py:317-318
+	KindJSONExtractQuote:         {{"option", true}, {"scalar", false}},   // query.py:2062-2066
+	KindOverflowTruncateBehavior: {{"this", false}, {"with_count", true}}, // query.py:1961-1962
+	KindRefresh:                  {{"this", true}, {"kind", true}},        // core.py:1596-1597
+	KindArrayFirst:               {{"this", true}, {"expression", false}}, // array.py:146-147
 	// hive cluster: arg_types preserve upstream declaration order because FromArgList
 	// maps function arguments positionally using these rows.
 	KindExternalProperty:       {{"this", false}},
@@ -1451,6 +1468,11 @@ var traitsOf = map[Kind]Trait{
 	KindArraySlice:       TraitCondition | TraitFunc,
 	KindCurrentTimestamp: TraitCondition | TraitFunc,
 	KindUnicodeString:    TraitCondition,
+	// trino cluster: only the Func subclasses carry traits. JSONExtractQuote,
+	// OverflowTruncateBehavior, and Refresh are plain Expression subclasses upstream.
+	KindCurrentCatalog: TraitCondition | TraitFunc,
+	KindCurrentVersion: TraitCondition | TraitFunc,
+	KindArrayFirst:     TraitCondition | TraitFunc,
 	// hive cluster: Func subclasses are Conditions with TraitFunc; aggregate
 	// subclasses additionally carry TraitAggFunc. Property/query nodes have no traits.
 	KindTransform:        TraitCondition | TraitFunc,
@@ -1891,6 +1913,13 @@ var className = map[Kind]string{
 	KindArraySlice:       "ArraySlice",
 	KindCurrentTimestamp: "CurrentTimestamp",
 	KindUnicodeString:    "UnicodeString",
+	// trino cluster: exact upstream PascalCase class names.
+	KindCurrentCatalog:           "CurrentCatalog",
+	KindCurrentVersion:           "CurrentVersion",
+	KindJSONExtractQuote:         "JSONExtractQuote",
+	KindOverflowTruncateBehavior: "OverflowTruncateBehavior",
+	KindRefresh:                  "Refresh",
+	KindArrayFirst:               "ArrayFirst",
 	// hive cluster: exact upstream class names.
 	KindExternalProperty:       "ExternalProperty",
 	KindClusteredByProperty:    "ClusteredByProperty",

@@ -15,8 +15,8 @@ import (
 // expressions.ParseIntoFunc (expressions/builders.go:14-15, wired at sqlglot.go:108-114), but
 // cannot copy that mechanism literally. ParseIntoFunc uses leaf-package types, while these
 // callbacks must resume an in-flight *Parser. Their typed callback table therefore remains in the
-// parser package and is selected through the dialect's plain-string Name, avoiding a dialects ->
-// parser import cycle.
+// parser package and is selected through a plain-string parser override name (normally the dialect
+// Name), avoiding a dialects -> parser import cycle.
 type parserOverrideFunc = func(*Parser) exp.Expression
 type typeParserOverrideFunc = func(*Parser, bool, bool, bool, bool) exp.Expression
 
@@ -25,6 +25,7 @@ type dialectParserOverrideSet struct {
 	DisabledFunctionParsers map[string]bool
 	StatementParsers        map[tokens.TokenType]parserOverrideFunc
 	NoParenFunctionParsers  map[string]parserOverrideFunc
+	NoParenFunctions        map[tokens.TokenType]func(exp.Args) exp.Expression
 	PropertyParsers         map[string]propertyParserFunc
 	TypeParser              typeParserOverrideFunc
 }
@@ -54,6 +55,11 @@ func registerDialectParserOverrides(name string, overrides dialectParserOverride
 			panic("parser: nil no-parentheses function parser override for dialect " + name)
 		}
 	}
+	for _, callback := range overrides.NoParenFunctions {
+		if callback == nil {
+			panic("parser: nil no-parentheses function override for dialect " + name)
+		}
+	}
 	for _, callback := range overrides.PropertyParsers {
 		if callback == nil {
 			panic("parser: nil property parser override for dialect " + name)
@@ -63,9 +69,18 @@ func registerDialectParserOverrides(name string, overrides dialectParserOverride
 	dialectParserOverrides[name] = overrides
 }
 
+// parserOverrideKey resolves the parser-class overlay independently from the concrete dialect.
+// Athena uses a Trino dialect instance for flags and tokenizer behavior while selecting the
+// AthenaTrinoParser callback tables.
+func (p *Parser) parserOverrideKey() string {
+	if p.parserOverrideName != "" {
+		return strings.ToLower(p.parserOverrideName)
+	}
+	return strings.ToLower(p.dialect.Name)
+}
+
 func (p *Parser) functionParser(name string) parserOverrideFunc {
-	dialectName := strings.ToLower(p.dialect.Name)
-	overrides := dialectParserOverrides[dialectName]
+	overrides := dialectParserOverrides[p.parserOverrideKey()]
 	if parser := overrides.FunctionParsers[name]; parser != nil {
 		return parser
 	}
@@ -79,7 +94,9 @@ func (p *Parser) functionParser(name string) parserOverrideFunc {
 	}
 
 	// Keep the current base-singleton compatibility gates on the fallback only. An overlay above
-	// may intentionally add or override any of these names for another dialect.
+	// may intentionally add or override any of these names for another dialect. These gates use
+	// the concrete dialect rather than the parser overlay key: Athena's query parser is real Trino.
+	dialectName := strings.ToLower(p.dialect.Name)
 	switch name {
 	case "VALUES":
 		if !p.dialect.ValuesIsFunction {
@@ -98,8 +115,7 @@ func (p *Parser) functionParser(name string) parserOverrideFunc {
 }
 
 func (p *Parser) statementParser(tokenType tokens.TokenType) parserOverrideFunc {
-	dialectName := strings.ToLower(p.dialect.Name)
-	if parser := dialectParserOverrides[dialectName].StatementParsers[tokenType]; parser != nil {
+	if parser := dialectParserOverrides[p.parserOverrideKey()].StatementParsers[tokenType]; parser != nil {
 		return parser
 	}
 	return statementParsers[tokenType]
@@ -109,8 +125,7 @@ func (p *Parser) statementParser(tokenType tokens.TokenType) parserOverrideFunc 
 // while the shared PROPERTY_PARSERS singleton remains the fallback for every dialect.
 func (p *Parser) propertyParser(name string) propertyParserFunc {
 	name = strings.ToUpper(name)
-	dialectName := strings.ToLower(p.dialect.Name)
-	if parser := dialectParserOverrides[dialectName].PropertyParsers[name]; parser != nil {
+	if parser := dialectParserOverrides[p.parserOverrideKey()].PropertyParsers[name]; parser != nil {
 		return parser
 	}
 	return propertyParsers[name]
@@ -119,8 +134,7 @@ func (p *Parser) propertyParser(name string) propertyParserFunc {
 // propertyParserKeys returns a fresh union because matchTexts needs every overlay key even when the
 // same dialect continues to inherit the rest of the shared registry.
 func (p *Parser) propertyParserKeys() map[string]bool {
-	dialectName := strings.ToLower(p.dialect.Name)
-	overlay := dialectParserOverrides[dialectName].PropertyParsers
+	overlay := dialectParserOverrides[p.parserOverrideKey()].PropertyParsers
 	keys := make(map[string]bool, len(propertyParsers)+len(overlay))
 	for name := range propertyParsers {
 		keys[name] = true
@@ -132,18 +146,24 @@ func (p *Parser) propertyParserKeys() map[string]bool {
 }
 
 func (p *Parser) typeParserOverride() typeParserOverrideFunc {
-	return dialectParserOverrides[strings.ToLower(p.dialect.Name)].TypeParser
+	return dialectParserOverrides[p.parserOverrideKey()].TypeParser
 }
 
 func (p *Parser) noParenFunctionParserFor(name string) parserOverrideFunc {
-	dialectName := strings.ToLower(p.dialect.Name)
-	if parser := dialectParserOverrides[dialectName].NoParenFunctionParsers[name]; parser != nil {
+	if parser := dialectParserOverrides[p.parserOverrideKey()].NoParenFunctionParsers[name]; parser != nil {
 		return parser
 	}
 
 	parser := noParenFunctionParsers[name]
-	if parser == nil || (name == "VARIADIC" && dialectName != "postgres") {
+	if parser == nil || (name == "VARIADIC" && strings.ToLower(p.dialect.Name) != "postgres") {
 		return nil
 	}
 	return parser
+}
+
+func (p *Parser) noParenFunctionFor(tokenType tokens.TokenType) func(exp.Args) exp.Expression {
+	if build := dialectParserOverrides[p.parserOverrideKey()].NoParenFunctions[tokenType]; build != nil {
+		return build
+	}
+	return noParenFunctions[tokenType]
 }

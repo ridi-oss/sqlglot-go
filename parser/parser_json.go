@@ -119,3 +119,54 @@ func (p *Parser) parseJSONValue() exp.Expression {
 		"on_condition": p.parseOnCondition(),
 	}), nil, nil)
 }
+
+// trinoJSONQueryOptions ports TrinoParser.JSON_QUERY_OPTIONS (parsers/trino.py:28-40), including
+// the reference's CONDITIONAL ARRAY WRAPPED spelling.
+var trinoJSONQueryOptions = optionsType{
+	"WITH": {
+		{"WRAPPER"},
+		{"ARRAY", "WRAPPER"},
+		{"CONDITIONAL", "WRAPPER"},
+		{"CONDITIONAL", "ARRAY", "WRAPPED"},
+		{"UNCONDITIONAL", "WRAPPER"},
+		{"UNCONDITIONAL", "ARRAY", "WRAPPER"},
+	},
+	"WITHOUT": {
+		{"WRAPPER"},
+		{"ARRAY", "WRAPPER"},
+		{"CONDITIONAL", "WRAPPER"},
+		{"CONDITIONAL", "ARRAY", "WRAPPED"},
+		{"UNCONDITIONAL", "WRAPPER"},
+		{"UNCONDITIONAL", "ARRAY", "WRAPPER"},
+	},
+}
+
+func (p *Parser) parseJSONQueryQuote() exp.Expression {
+	if !(p.matchTextSeq("KEEP", "QUOTES") || p.matchTextSeq("OMIT", "QUOTES")) {
+		return nil
+	}
+
+	return p.expression(exp.JSONExtractQuote(exp.Args{
+		"option": stringsUpper(p.tokens[p.index-2].Text),
+		"scalar": p.matchTextSeq("ON", "SCALAR", "STRING"),
+	}), nil, nil)
+}
+
+// parseJSONQuery ports TrinoParser._parse_json_query (parsers/trino.py:53-63). The path remains
+// the raw parsed expression because this port does not yet have dialect.to_json_path normalization.
+func (p *Parser) parseJSONQuery() exp.Expression {
+	this := p.parseBitwise()
+	var expression exp.Expression
+	if p.match(tokens.COMMA) {
+		expression = p.parseBitwise()
+	}
+
+	return p.expression(exp.JSONExtract(exp.Args{
+		"this":         this,
+		"expression":   expression,
+		"option":       p.parseVarFromOptions(trinoJSONQueryOptions, false),
+		"json_query":   true,
+		"quote":        p.parseJSONQueryQuote(),
+		"on_condition": p.parseOnCondition(),
+	}), nil, nil)
+}

@@ -20,11 +20,15 @@ const (
 )
 
 type Dialect struct {
-	Name                     string
-	QuoteStart               string
-	QuoteEnd                 string
-	IdentifierStart          string
-	IdentifierEnd            string
+	Name            string
+	QuoteStart      string
+	QuoteEnd        string
+	IdentifierStart string
+	IdentifierEnd   string
+	// TokenizerFactory supports Athena's classify-and-re-tokenize router while preserving
+	// Dialect.NewTokenizer's concrete *tokens.Tokenizer return type. A nil factory uses the
+	// ordinary compiled TokenizerConfig path.
+	TokenizerFactory         func() *tokens.Tokenizer
 	TokenizerConfig          tokens.TokenizerConfig
 	NormalizationStrategy    NormalizationStrategy
 	DPipeIsStringConcat      bool
@@ -541,14 +545,21 @@ func GetOrRaise(name string) (*Dialect, error) {
 		return Postgres(), nil
 	case "presto":
 		return Presto(), nil
+	case "trino":
+		return Trino(), nil
 	case "hive":
 		return Hive(), nil
+	case "athena":
+		return Athena(), nil
 	default:
 		return nil, fmt.Errorf("unknown dialect %q", name)
 	}
 }
 
 func (d *Dialect) NewTokenizer() *tokens.Tokenizer {
+	if d.TokenizerFactory != nil {
+		return d.TokenizerFactory()
+	}
 	return tokens.NewTokenizerWithConfig(d.TokenizerConfig)
 }
 

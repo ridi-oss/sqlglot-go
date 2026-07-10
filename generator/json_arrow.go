@@ -24,14 +24,36 @@ func jsonExtractArgs(e expressions.Expression) []any {
 // deferral note).
 
 // jsonExtractSQL ports the base/mysql default (functionFallbackSQL - neither dialect overrides
-// exp.JSONExtract in TRANSFORMS, generators/mysql.py has no entry for it) and postgres's
-// _json_extract_sql("JSON_EXTRACT_PATH", "->") (generators/postgres.py:322).
+// exp.JSONExtract in TRANSFORMS), postgres's _json_extract_sql("JSON_EXTRACT_PATH", "->")
+// (generators/postgres.py:322), and Trino's JSON_QUERY-specific override
+// (generators/trino.py:50-68). The Postgres branch stays first so its existing extraction
+// spelling remains authoritative even if a caller supplies a JSONExtract with json_query set.
 func (g *Generator) jsonExtractSQL(e expressions.Expression) string {
 	if g.dialect.Name == "postgres" {
 		if boolValue(e.Arg("only_json_types")) {
 			return g.binary(e, "->")
 		}
 		return g.funcCall("JSON_EXTRACT_PATH", jsonExtractArgs(e), "(", ")", true)
+	}
+	if (g.dialect.Name == "trino" || g.dialect.Name == "athena") && boolValue(e.Arg("json_query")) {
+		path := g.sqlKey(e, "expression")
+
+		option := g.sqlKey(e, "option")
+		if option != "" {
+			option = " " + option
+		}
+
+		quote := g.sqlKey(e, "quote")
+		if quote != "" {
+			quote = " " + quote
+		}
+
+		onCondition := g.sqlKey(e, "on_condition")
+		if onCondition != "" {
+			onCondition = " " + onCondition
+		}
+
+		return g.funcCall("JSON_QUERY", []any{e.Arg("this"), path + option + quote + onCondition}, "(", ")", true)
 	}
 	return g.funcCall("JSON_EXTRACT", jsonExtractArgs(e), "(", ")", true)
 }
