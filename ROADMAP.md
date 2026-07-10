@@ -126,7 +126,20 @@ differential-check against the pinned Python):
   and any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or DDL detail not hit by a fixture. Treat a
   not-yet-parsed construct upstream parses as a gap to close.
 
-## Planned: Athena support (Presto/Trino/Hive parser chain), scoped to lineage
+## Athena support (Presto/Trino/Hive parser chain), scoped to lineage — DONE
+
+**DONE (2026-07, main @ e428a54).** All 4 slices landed + merged, each `go test ./...` green with
+base/MySQL/Postgres byte-identical throughout: (1) per-dialect parser-override seam `d9474c2`,
+(2) Presto `22c7fbd`, (3) Hive `a1d322e`, (4) Trino + Athena router `e428a54`. `GetOrRaise` now
+returns real dialects for **presto / trino / hive / athena** (parser + tokenizer only; generators
+skipped as planned). Validation on the real RIDI Athena corpus (1,974 raw queries): `athena` parses
+**1909 structured / 0 Command** (= the presto baseline); a `CREATE EXTERNAL TABLE … STORED AS PARQUET
+LOCATION …` routes to Hive → structured `Create`; and `ParseOne → Qualify → TraverseScope` runs under
+`athena` and resolves columns (proxy-monster's exact pipeline). The seam gained `PropertyParsers`
+(slice 3) + token-keyed `NoParenFunctions` + an override-key indirection (slice 4). Known deferrals
+(rare, lineage-safe, Anonymous): Presto DATE_FORMAT/DATE_PARSE/REGEXP_*/LOCALTIME family,
+MATCH_RECOGNIZE, U&'…' UESCAPE; the 7 Hive CREATE-DDL property callbacks live in Hive's overlay (not
+the shared registry) until a future paired parser+generator slice. The original plan follows.
 
 Motivation: proxy-monster (RIDI's query-gating proxy) is adding an Athena proxy alongside its
 MySQL/Postgres ones (planned, near-term). Its probe uses `parse` + `qualify` + `traverse_scope`
