@@ -1,14 +1,20 @@
 # sqlglot-go — roadmap
 
-Goal: a faithful Go port of sqlglot v30.12.0 with behavioral parity for base + MySQL + Postgres —
-tokenizer, AST, parser, generator, schema, and the qualify/scope optimizer passes. Anything upstream
-sqlglot parses should parse here. Port 1:1 from .reference/sqlglot-v30.12.0/ file-by-file; port the
-matching upstream tests as the oracle.
+Goal: a faithful Go port of sqlglot v30.12.0's **parse → AST → generate** core (tokenizer, AST,
+parser, generator, schema) plus the `qualify` + `scope` optimizer passes that column qualification and
+**lineage** build on, for **base + MySQL + Postgres**. This is deliberately **not** a full port of
+sqlglot: the rest of the optimizer (simplify/normalize/pushdown/eliminate/merge/unnest/`optimize()`),
+cross-dialect transpilation, and the other 30+ dialects are out of scope for now. Port 1:1 from
+.reference/sqlglot-v30.12.0/ file-by-file; port the matching upstream tests as the oracle.
 
-The initial slices below were sequenced to first stand up a working parse→qualify→scope pipeline
-(that ordering was driven by an external consumer's needs); the CURRENT focus is closing parser/
-feature parity with upstream — see "Remaining work" after the slice ledger. Slices 0–5 are done and
-committed; each landed `go test ./...` green.
+Status: the parse → generate round-trip is at **100% parity on the ported upstream identity corpus** —
+1847/1847 cases (base 955/955, MySQL 424/424, Postgres 468/468), enforced by a monotonic corpus floor
+(`corpus_test.go` + `testdata/parity_gaps.txt`, now empty) and an AST-fidelity gate (`fidelity_test.go`
++ `testdata/fidelity_cases.txt`: no statement fakes a round-trip via a raw-text `exp.Command` where
+upstream builds a structured node). The initial slices below stood up the parse→qualify→scope pipeline;
+the residual-tail and CREATE-properties fidelity slices then closed the last round-trip + fidelity gaps.
+Slices 0–5 are done and committed; each landed `go test ./...` green. **The CURRENT remaining work is
+the optimizer** — see "Remaining work" after the slice ledger.
 
 Slices (historical ledger; each landed `go test ./...` green before the next):
 
@@ -95,28 +101,33 @@ initial slices to drive/validate the API surface; it has since been removed — 
 engine only. That validation confirmed the qualify/scope pipeline matches upstream on ~94 real
 queries across MySQL/Postgres.)
 
-## Remaining work — parser/feature parity with upstream
+## Remaining work
 
-Anything upstream sqlglot parses should parse here. Known gaps to close (port 1:1 from `.reference/`,
-port the matching upstream tests, differential-check `.sql()` against the pinned Python):
+The parse → generate round-trip is done for the ported corpus (see Status). The remaining work is
+mostly the **optimizer** (port 1:1 from `.reference/`, port the matching upstream tests,
+differential-check against the pinned Python):
 
-- PARSER TAIL: table-valued function sources (`generate_series(...)`, `JSON_TABLE(...)`, `FOO(bar)`)
-  as FROM/JOIN sources; `SIMILAR TO`; `FROM ONLY` (Postgres); `CONNECT BY` / `START WITH`; MySQL
-  `ON DUPLICATE KEY UPDATE ... VALUES(col)`; the long `FUNCTIONS` / `FUNCTION_PARSERS` registry
-  tail; DDL detail (properties, column + table CONSTRAINT_PARSERS, indexes, clone/sequence).
-  (`ARRAY[...]` literals + `UNNEST(ARRAY[...])` are DONE as of the residual-tail slice below -
-  parseBracket's ARRAY_CONSTRUCTORS swap builds a real exp.Array instead of a Bracket-shaped
-  workaround.)
+- THE REST OF THE OPTIMIZER (the big one): `simplify` (full — only `simplify_parens` is present),
+  `normalize` (CNF/DNF), `pushdown_predicates`, `pushdown_projections`, `eliminate_ctes` /
+  `eliminate_joins` / `eliminate_subqueries`, `merge_subqueries`, `unnest_subqueries`,
+  `optimize_joins`, `canonicalize` / `canonicalize_internal_names`, and the top-level `optimize()`
+  rule orchestrator that chains them. Only `qualify` + `scope`/`traverse_scope` (+ `isolate_table_
+  selects`) are ported today.
 - FULL annotate_types (coercion tables + per-node type rules) — currently a minimal constructible
   stub; not yet a faithful port.
-- Per-dialect parser/generator override tables (function + type-name remaps must land paired to
-  avoid round-trip regressions), MySQL `||`/`&&`/`XOR` logical operators, MySQL
-  `CAST(x AS TIMESTAMP/BLOB)` round-trip.
-- Optional/larger: dialects beyond base + MySQL + Postgres; canonicalize/normalize/simplify beyond
-  the pieces qualify needs.
+- CROSS-DIALECT transpilation: same-dialect round-trip is verified; reading one dialect and writing
+  another is not. The per-dialect override tables that make it correct are partial — per-dialect
+  parser `FUNCTIONS` ↔ generator `TRANSFORMS`/`TYPE_MAPPING` remaps (must land paired to avoid
+  round-trip regressions), MySQL `||`/`&&`/`XOR` logical operators, MySQL `CAST(x AS TIMESTAMP/BLOB)`.
+- DIALECTS beyond base + MySQL + Postgres (upstream ships 30+).
+- PARSER coverage is bounded by the ported corpus: constructs upstream parses that are NOT exercised
+  by the identity fixtures may still be gaps — e.g. `exp.Heredoc` for postgres `CREATE FUNCTION ... AS
+  $$...$$` dollar-quoted bodies (still degrades to Command; see the fidelity-slice deferred item),
+  and any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or DDL detail not hit by a fixture. Treat a
+  not-yet-parsed construct upstream parses as a gap to close.
 
 Historical note: earlier entries below tagged items "off probe's critical path" / "fail-closed" —
-that framing referred to the removed consumer. For this repo they are simply parser-parity gaps.
+that framing referred to a since-removed external consumer. For this repo they are simply parity gaps.
 
 Cross-cutting deferred from foundation (tracked as TODOs in code):
 - Expr→SQL (generator) — blocks all .sql() asserts.
