@@ -45,6 +45,8 @@ type Expression interface {
 	Comments() []string
 	AddComments(cs []string, prepend bool)
 	PopComments() []string
+	Meta() map[string]any
+	MetaGet(key string) any
 	Is(Trait) bool
 	IsPrimitive() bool
 	IsLeaf() bool
@@ -99,6 +101,7 @@ type Node struct {
 	argKey   string
 	index    int
 	comments []string
+	meta     map[string]any
 	hash     *uint64
 }
 
@@ -413,6 +416,25 @@ func (n *Node) PopComments() []string {
 	return comments
 }
 
+// Meta returns the node's mutable metadata map, allocating it on first access. Ports upstream
+// Expression.meta (core.py:991). Metadata (e.g. "is_table", "case_sensitive") travels with the
+// node but is never part of its generated SQL or its ToS() repr.
+func (n *Node) Meta() map[string]any {
+	if n.meta == nil {
+		n.meta = map[string]any{}
+	}
+	return n.meta
+}
+
+// MetaGet reads a metadata value without allocating the map (unlike Meta). Ports upstream
+// Expression.meta_get (core.py:996); returns nil when the key (or the map) is unset.
+func (n *Node) MetaGet(key string) any {
+	if n.meta == nil {
+		return nil
+	}
+	return n.meta[key]
+}
+
 func (n *Node) Is(trait Trait) bool { return traitsOf[n.kind]&trait != 0 }
 
 func (n *Node) IsPrimitive() bool { return primitive[n.kind] }
@@ -631,6 +653,14 @@ func (n *Node) Copy() Expression {
 		node, copyNode := pair[0], pair[1]
 		if node.comments != nil {
 			copyNode.comments = append([]string(nil), node.comments...)
+		}
+		if node.meta != nil {
+			// Ports upstream copy._meta = deepcopy(node._meta) (core.py:1013). A shallow
+			// clone suffices: the metadata values in use are scalars (bools, strings).
+			copyNode.meta = make(map[string]any, len(node.meta))
+			for k, v := range node.meta {
+				copyNode.meta[k] = v
+			}
 		}
 		if node.hash != nil {
 			h := *node.hash

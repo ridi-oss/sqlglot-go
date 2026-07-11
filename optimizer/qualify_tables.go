@@ -18,13 +18,16 @@ func QualifyTables(expression exp.Expression, db any, catalog any, dialect strin
 	var dbIdentifier exp.Expression
 	if present(db) {
 		dbIdentifier = exp.ParseIdentifier(db, dialect)
-		// TODO(slice 5): BigQuery reads meta["is_table"]; no Node.Meta yet.
+		// qualify_tables.py:55: mark as table-level so a dialect's normalize_identifier can
+		// treat it accordingly (only BigQuery reads meta["is_table"]; inert for base/mysql/pg).
+		dbIdentifier.Meta()["is_table"] = true
 		dbIdentifier = NormalizeIdentifiers(dbIdentifier, dialect)
 	}
 	var catalogIdentifier exp.Expression
 	if present(catalog) {
 		catalogIdentifier = exp.ParseIdentifier(catalog, dialect)
-		// TODO(slice 5): BigQuery reads meta["is_table"]; no Node.Meta yet.
+		// qualify_tables.py:59: see the db.meta["is_table"] note above.
+		catalogIdentifier.Meta()["is_table"] = true
 		catalogIdentifier = NormalizeIdentifiers(catalogIdentifier, dialect)
 	}
 

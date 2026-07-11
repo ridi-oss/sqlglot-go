@@ -16,9 +16,17 @@ func NormalizeIdentifiers(expression exp.Expression, dialect any) exp.Expression
 	if expression == nil {
 		return nil
 	}
-	for _, node := range expression.WalkWithPrune(true, func(n exp.Expression) bool { return false }) {
-		// TODO(slice 5): meta_get("case_sensitive") prune/skip + store_original_column_identifiers
-		// needs Node.Meta (see schema.go:440).
+	// Ports normalize_identifiers.py:66-78: prune subtrees under a case_sensitive-marked node
+	// and skip such nodes, normalizing only the rest. (store_original_column_identifiers is off
+	// by default, so its dot_parts branch is not ported here.)
+	caseSensitive := func(n exp.Expression) bool {
+		b, _ := n.MetaGet("case_sensitive").(bool)
+		return b
+	}
+	for _, node := range expression.WalkWithPrune(true, caseSensitive) {
+		if caseSensitive(node) {
+			continue
+		}
 		if node.Kind() == exp.KindIdentifier {
 			d.NormalizeIdentifier(node)
 		}

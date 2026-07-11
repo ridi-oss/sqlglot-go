@@ -437,7 +437,9 @@ func normalizeName(identifier any, dialect string, isTable bool, normalize bool)
 	if !normalize {
 		return id, nil
 	}
-	_ = isTable // TODO(slice 5): BigQuery reads identifier meta["is_table"], but Node has no meta field.
+	// schema.py:704: identifier.meta["is_table"] = is_table, consulted by a dialect's
+	// normalize_identifier (only BigQuery reads it today; inert for base/mysql/pg).
+	id.Meta()["is_table"] = isTable
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
 		return nil, err
