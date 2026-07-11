@@ -12,6 +12,13 @@ func MySQL() *Dialect {
 	d.QuoteEnd = "'"
 	d.IdentifierStart = "`"
 	d.IdentifierEnd = "`"
+	// mysql.py:25 NORMALIZATION_STRATEGY = CASE_SENSITIVE (upstream default, kept for
+	// faithfulness — no folding). For correct+safe identifier folding (columns are
+	// case-insensitive on every MySQL platform), a consumer opts into a MySQL strategy via the
+	// settings string, e.g.
+	//   GetOrRaise("mysql, normalization_strategy=mysql_case_sensitive_table_names")   (lctn=0)
+	//   GetOrRaise("mysql, normalization_strategy=mysql_case_insensitive")             (lctn=1/2)
+	// Those strategies fold with MySQL's exact .tolower map (dialects/mysql_casefold.tsv).
 	d.NormalizationStrategy = CaseSensitive
 	d.DPipeIsStringConcat = false
 	d.SupportsUserDefinedTypes = false

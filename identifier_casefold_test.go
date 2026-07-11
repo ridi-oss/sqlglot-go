@@ -109,6 +109,72 @@ func TestNormalizeIdentifier_ASCIIFold(t *testing.T) {
 	}
 }
 
+// TestMySQLIdentifierFold pins the two non-upstream MySQL strategies (DEVIATIONS.md §1.2):
+// they fold with MySQL's exact .tolower map (Unicode-simple, accent-PRESERVING — CAFÉ->café,
+// NIÑO->niño, but Ñ!=N), regardless of quoting, and MYSQL_CASE_SENSITIVE_TABLE_NAMES keeps
+// database/table names case-sensitive while folding everything else. Exercised through the
+// settings-string form of GetOrRaise (the whole overridable-settings surface).
+func TestMySQLIdentifierFold(t *testing.T) {
+	const tbl = "mysql, normalization_strategy = mysql_case_sensitive_table_names"
+	const ci = "mysql, normalization_strategy = mysql_case_insensitive"
+	cases := []struct{ name, dialect, in, want string }{
+		// role-aware (lower_case_table_names=0): column folds, db/table stay case-sensitive.
+		{"tbl: column folds, table/db kept", tbl, "SELECT Col FROM MyDB.MyTable", "SELECT col FROM MyDB.MyTable"},
+		// MySQL Unicode fold, accent-preserving.
+		{"tbl: CAFÉ->café (accent kept)", tbl, "SELECT CAFÉ FROM t", "SELECT café FROM t"},
+		{"tbl: NIÑO->niño (Ñ!=N)", tbl, "SELECT NIÑO FROM t", "SELECT niño FROM t"},
+		// quoted column folds its case but stays quoted on output.
+		{"tbl: quoted column folds, stays quoted", tbl, "SELECT `CAFÉ` FROM t", "SELECT `café` FROM t"},
+		// mysql_case_insensitive folds table/db too.
+		{"ci: table also folds", ci, "SELECT Col FROM MyDB.MyTable", "SELECT col FROM mydb.mytable"},
+		{"ci: ß stays ß (no ss)", ci, "SELECT STRAßE FROM t", "SELECT straße FROM t"},
+		// MySQL default (upstream CASE_SENSITIVE) is unchanged — no folding.
+		{"default mysql: unchanged", "mysql", "SELECT CAFÉ FROM T", "SELECT CAFÉ FROM T"},
+		// Postgres stays ASCII-only (proves the MySQL fold is dialect-scoped): CAFÉ->cafÉ.
+		{"postgres still ASCII-only", "postgres", "SELECT CAFÉ FROM t", "SELECT cafÉ FROM t"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := normalizeVia(t, c.in, c.dialect); got != c.want {
+				t.Fatalf("normalize %q (%s) = %q, want %q", c.in, c.dialect, got, c.want)
+			}
+		})
+	}
+}
+
+// TestGetOrRaiseNormalizationSettings pins the upstream-style settings string form
+// ("dialect, normalization_strategy = X") that makes the strategy overridable.
+func TestGetOrRaiseNormalizationSettings(t *testing.T) {
+	ok := map[string]dialects.NormalizationStrategy{
+		"mysql, normalization_strategy=mysql_case_insensitive":             dialects.MySQLCaseInsensitive,
+		"mysql, normalization_strategy = mysql_case_sensitive_table_names": dialects.MySQLCaseSensitiveTableNames,
+		"postgres, normalization_strategy=case_sensitive":                  dialects.CaseSensitive,
+	}
+	for spec, want := range ok {
+		d, err := dialects.GetOrRaise(spec)
+		if err != nil {
+			t.Fatalf("GetOrRaise(%q): %v", spec, err)
+		}
+		if d.NormalizationStrategy != want {
+			t.Errorf("GetOrRaise(%q) strategy = %v, want %v", spec, d.NormalizationStrategy, want)
+		}
+	}
+	// bare name is unchanged (mysql default = upstream CASE_SENSITIVE).
+	if d, _ := dialects.GetOrRaise("mysql"); d.NormalizationStrategy != dialects.CaseSensitive {
+		t.Errorf("bare mysql strategy = %v, want CaseSensitive", d.NormalizationStrategy)
+	}
+	// errors: unknown strategy value, unknown setting key, unknown dialect.
+	for _, bad := range []string{
+		"mysql, normalization_strategy = nonsense",
+		"mysql, lower_case_table_names = 1",
+		"notadialect",
+	} {
+		if _, err := dialects.GetOrRaise(bad); err == nil {
+			t.Errorf("GetOrRaise(%q): expected error, got nil", bad)
+		}
+	}
+}
+
 // TestCaseSensitive_ASCIIOnly pins that "case sensitivity" (does folding change
 // it → must be quoted to preserve) is decided ASCII-only: an identifier differing
 // only by non-ASCII case is already normal form and is NOT case-sensitive.

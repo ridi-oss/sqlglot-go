@@ -16,6 +16,22 @@ const (
 	CaseSensitive
 	CaseInsensitive
 	CaseInsensitiveUppercase
+	// The two MySQL strategies below are NON-UPSTREAM (DEVIATIONS.md §1.2). They fold with
+	// MySQL's exact identifier lowercase (mysqlLower — my_unicase_default .tolower, Unicode
+	// simple + accent-preserving: É->é but Ñ!=N), NOT the ASCII fold used by the other
+	// strategies. This is the only fold that both matches MySQL and is reproducible
+	// byte-for-byte off dialects/mysql_casefold.tsv by a JVM consumer.
+
+	// MySQLCaseInsensitive folds EVERY identifier (columns AND table/db names), regardless of
+	// quoting, with mysqlLower. Models MySQL with lower_case_table_names=1/2 (all names
+	// case-insensitive).
+	MySQLCaseInsensitive
+	// MySQLCaseSensitiveTableNames is role-aware: table/database name identifiers are
+	// case-sensitive (never folded); every other identifier (columns, aliases, CTE names, ...)
+	// is folded with mysqlLower, regardless of quoting. Models MySQL's default on a
+	// case-sensitive filesystem (lower_case_table_names=0): columns case-insensitive on every
+	// platform, database/table names case-sensitive on Linux.
+	MySQLCaseSensitiveTableNames
 )
 
 type Dialect struct {
@@ -534,8 +550,9 @@ func validIntervalUnits(mapping map[string]string) map[string]bool {
 	return out
 }
 
-func GetOrRaise(name string) (*Dialect, error) {
-	switch strings.ToLower(name) {
+// dialectByName constructs a fresh dialect from its bare name (no settings).
+func dialectByName(name string) (*Dialect, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "", "base":
 		return Base(), nil
 	case "mysql":
@@ -553,6 +570,67 @@ func GetOrRaise(name string) (*Dialect, error) {
 	default:
 		return nil, fmt.Errorf("unknown dialect %q", name)
 	}
+}
+
+// parseNormalizationStrategy maps a canonical strategy name (case-insensitive; the
+// upstream UPPER_SNAKE spellings, plus this port's two MySQL strategies) to the enum.
+func parseNormalizationStrategy(v string) (NormalizationStrategy, error) {
+	switch strings.ToUpper(strings.TrimSpace(v)) {
+	case "LOWERCASE":
+		return Lowercase, nil
+	case "UPPERCASE":
+		return Uppercase, nil
+	case "CASE_SENSITIVE":
+		return CaseSensitive, nil
+	case "CASE_INSENSITIVE":
+		return CaseInsensitive, nil
+	case "CASE_INSENSITIVE_UPPERCASE":
+		return CaseInsensitiveUppercase, nil
+	case "MYSQL_CASE_INSENSITIVE":
+		return MySQLCaseInsensitive, nil
+	case "MYSQL_CASE_SENSITIVE_TABLE_NAMES":
+		return MySQLCaseSensitiveTableNames, nil
+	default:
+		return 0, fmt.Errorf("unknown normalization_strategy %q", v)
+	}
+}
+
+// GetOrRaise resolves a dialect, optionally with comma-separated settings, mirroring
+// upstream sqlglot's Dialect.get_or_raise string form, e.g.
+// "mysql, normalization_strategy = mysql_case_sensitive_table_names". The bare name (no
+// comma) behaves exactly as before. Each constructor returns a fresh *Dialect, so applying
+// a per-call setting override cannot leak across callers. The only supported setting is
+// normalization_strategy (upstream also has "version", which this port does not model).
+func GetOrRaise(name string) (*Dialect, error) {
+	base, rest, hasSettings := strings.Cut(name, ",")
+	d, err := dialectByName(base)
+	if err != nil {
+		return nil, err
+	}
+	if !hasSettings {
+		return d, nil
+	}
+	for _, part := range strings.Split(rest, ",") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		key, val, hasVal := strings.Cut(part, "=")
+		key = strings.ToLower(strings.TrimSpace(key))
+		switch key {
+		case "normalization_strategy":
+			if !hasVal {
+				return nil, fmt.Errorf("dialect setting %q requires a value", key)
+			}
+			ns, err := parseNormalizationStrategy(val)
+			if err != nil {
+				return nil, err
+			}
+			d.NormalizationStrategy = ns
+		default:
+			return nil, fmt.Errorf("unsupported dialect setting %q (supported: normalization_strategy)", key)
+		}
+	}
+	return d, nil
 }
 
 func (d *Dialect) NewTokenizer() *tokens.Tokenizer {
@@ -609,34 +687,77 @@ func asciiUpper(s string) string {
 	return string(b)
 }
 
+// isTableNameIdentifier reports whether e is a database/table name identifier: a
+// direct this/db/catalog child of an exp.Table. Column.table is deliberately
+// EXCLUDED — it is a table ALIAS reference, not a table name, and must fold with
+// the column so a qualified column keeps matching its lowercased source alias
+// (see DEVIATIONS.md §1.2). A nil parent (Copy()/schema/parse-identifier paths)
+// returns false, so such an identifier folds — the safe default for a normalized
+// security key (never leaves a would-be-folded name un-folded).
+func isTableNameIdentifier(e exp.Expression) bool {
+	p := e.Parent()
+	if p == nil || p.Kind() != exp.KindTable {
+		return false
+	}
+	switch e.ArgKey() {
+	case "this", "db", "catalog":
+		return true
+	}
+	return false
+}
+
 func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
-	if e != nil && e.Kind() == exp.KindIdentifier && d.NormalizationStrategy != CaseSensitive {
-		quoted, _ := e.Arg("quoted").(bool)
-		if !quoted || d.NormalizationStrategy == CaseInsensitive || d.NormalizationStrategy == CaseInsensitiveUppercase {
+	s := d.NormalizationStrategy
+	if e == nil || e.Kind() != exp.KindIdentifier || s == CaseSensitive {
+		return e
+	}
+
+	// MySQL strategies (non-upstream): fold with MySQL's exact .tolower map, regardless of
+	// quoting (MySQL identifier case-insensitivity ignores backticks). See DEVIATIONS.md §1.2.
+	switch s {
+	case MySQLCaseSensitiveTableNames:
+		// role-aware: table/db names stay case-sensitive; everything else folds.
+		if !isTableNameIdentifier(e) {
 			this, _ := e.Arg("this").(string)
-			if d.NormalizationStrategy == Uppercase || d.NormalizationStrategy == CaseInsensitiveUppercase {
-				e.Set("this", asciiUpper(this))
-			} else {
-				e.Set("this", asciiLower(this))
-			}
+			e.Set("this", mysqlLower(this))
+		}
+		return e
+	case MySQLCaseInsensitive:
+		this, _ := e.Arg("this").(string)
+		e.Set("this", mysqlLower(this))
+		return e
+	}
+
+	// Upstream strategies: ASCII-only fold; quoted identifiers are protected unless the
+	// strategy is case-insensitive (see DEVIATIONS.md §1.1).
+	quoted, _ := e.Arg("quoted").(bool)
+	if !quoted || s == CaseInsensitive || s == CaseInsensitiveUppercase {
+		this, _ := e.Arg("this").(string)
+		if s == Uppercase || s == CaseInsensitiveUppercase {
+			e.Set("this", asciiUpper(this))
+		} else {
+			e.Set("this", asciiLower(this))
 		}
 	}
 	return e
 }
 
 func (d *Dialect) CaseSensitive(text string) bool {
-	if d.NormalizationStrategy == CaseInsensitive {
+	// Strategies that fold every identifier unconditionally never need quoting to
+	// preserve case: nothing is preserved.
+	if d.NormalizationStrategy == CaseInsensitive || d.NormalizationStrategy == MySQLCaseInsensitive {
 		return false
 	}
-	// ASCII-only, to stay consistent with asciiLower/asciiUpper folding: an
-	// identifier is "case sensitive" (would be changed by folding, so must be
-	// quoted to preserve it) only if it contains an ASCII letter of the case the
-	// fold would flip. A non-ASCII letter like `É` is NEVER folded, so an
-	// identifier that differs only by non-ASCII case (e.g. `cafÉ`) is already in
-	// normalized form and must NOT be treated as needing folding/quoting.
+	// ASCII-only, to stay consistent with the ASCII fold (asciiLower/asciiUpper): an
+	// identifier is "case sensitive" (would be changed by folding, so must be quoted to
+	// preserve it) only if it contains an ASCII letter of the case the fold would flip. A
+	// non-ASCII letter like `É` is not considered here — for the ASCII-folding strategies it
+	// is never folded, and for the MySQL strategies (MySQLCaseSensitiveTableNames) this stays
+	// an ASCII approximation used only for output quoting (CanQuote), not the normalized
+	// identity; being conservative here at worst under-quotes a non-ASCII name on output.
 	// (Upstream uses full-Unicode str.isupper/str.islower — dialects/dialect.py
-	// v30.12.0:1055-1064; we diverge to match asciiLower/asciiUpper. See above.)
-	unsafe := func(r rune) bool { return r >= 'A' && r <= 'Z' } // Lowercase strategy
+	// v30.12.0:1055-1064; we diverge to match the ASCII fold. See DEVIATIONS.md §1.1.)
+	unsafe := func(r rune) bool { return r >= 'A' && r <= 'Z' } // lower-folding strategies
 	if d.NormalizationStrategy == Uppercase {
 		unsafe = func(r rune) bool { return r >= 'a' && r <= 'z' }
 	}
