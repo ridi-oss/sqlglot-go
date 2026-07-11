@@ -23,14 +23,16 @@ func TestGroupConcatSQLPostgres(t *testing.T) {
 	}
 }
 
-// TestGroupConcatSQLFallback guards that registering the KindGroupConcat dispatch entry
-// leaves base/mysql GROUP_CONCAT and base LISTAGG on their pre-dispatch-entry rendering
-// (functionFallbackSQL and Anonymous respectively - LISTAGG isn't even a registered
-// function in base FunctionByName, see expressions/functions.go).
+// TestGroupConcatSQLFallback guards that the KindGroupConcat dispatch entry leaves base
+// GROUP_CONCAT and base LISTAGG on their fallback rendering (functionFallbackSQL and
+// Anonymous respectively - LISTAGG isn't even a registered function in base FunctionByName,
+// see expressions/functions.go). MySQL now has its own parser (parseGroupConcat) + generator
+// (the SEPARATOR form), so `GROUP_CONCAT(x, ',')` there is two value args -> CONCAT(x, ',')
+// with the default ',' separator, matching upstream.
 func TestGroupConcatSQLFallback(t *testing.T) {
 	cases := []struct{ dialect, sql, want string }{
 		{"", "SELECT GROUP_CONCAT(x, ',')", "SELECT GROUP_CONCAT(x, ',')"},
-		{"mysql", "SELECT GROUP_CONCAT(x, ',')", "SELECT GROUP_CONCAT(x, ',')"},
+		{"mysql", "SELECT GROUP_CONCAT(x, ',')", "SELECT GROUP_CONCAT(CONCAT(x, ',') SEPARATOR ',')"},
 		{"", "SELECT LISTAGG(x) WITHIN GROUP (ORDER BY x DESC)", "SELECT LISTAGG(x) WITHIN GROUP (ORDER BY x DESC)"},
 		{"", "SELECT LISTAGG(x) WITHIN GROUP (ORDER BY x) AS y", "SELECT LISTAGG(x) WITHIN GROUP (ORDER BY x) AS y"},
 	}

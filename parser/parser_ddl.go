@@ -810,6 +810,11 @@ func init() {
 		"WITH": func(p *Parser, _ bool) exp.Expression { return p.parseWithProperty() },
 	}
 	registerDialectParserOverrides("mysql", dialectParserOverrideSet{
+		// GROUP_CONCAT: MySQL FUNCTION_PARSERS entry (parsers/mysql.py:156); see
+		// parseGroupConcat in dialect_mysql_overrides.go.
+		FunctionParsers: map[string]parserOverrideFunc{
+			"GROUP_CONCAT": (*Parser).parseGroupConcat,
+		},
 		PropertyParsers: map[string]propertyParserFunc{
 			"LOCK": func(p *Parser, _ bool) exp.Expression {
 				return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
