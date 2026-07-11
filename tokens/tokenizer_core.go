@@ -322,7 +322,7 @@ func (c *TokenizerCore) scanKeywords() {
 		// divergence: some dialects (MySQL) only begin a line comment on a start like
 		// `--` when it is immediately followed by whitespace/control or EOF; otherwise
 		// `--` is two `-` operators (`1--2` == `1 - -2`). Upstream sqlglot mis-tokenizes
-		// this (drops `--2` as a comment) — we match the real engine. See DEVIATIONS §1.
+		// this (drops `--2` as a comment) — we match the real engine. See DEVIATIONS §1.4.
 		// When suppressed, fall through so only the first rune is emitted as a single
 		// token and the tokenizer re-scans the remainder.
 		if !c.lineCommentSuppressed(word) {
@@ -350,7 +350,7 @@ func (c *TokenizerCore) scanKeywords() {
 // start, must NOT begin a comment here because the dialect requires a trailing
 // whitespace/control char (or EOF) and the next char is neither. MySQL `--`: `1--2` is
 // `1 - -2`, not `1` + comment. The word begins at c.current-1, so the char after it is at
-// c.current-1+len(word). See DEVIATIONS §1.
+// c.current-1+len(word). See DEVIATIONS §1.4.
 func (c *TokenizerCore) lineCommentSuppressed(commentStart string) bool {
 	if !c.lineCommentRequiresSpace[commentStart] {
 		return false

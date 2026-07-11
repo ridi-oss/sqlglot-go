@@ -7,6 +7,7 @@ import (
 	"github.com/sjincho/sqlglot-go/dialects"
 	"github.com/sjincho/sqlglot-go/generator"
 	"github.com/sjincho/sqlglot-go/optimizer"
+	"github.com/sjincho/sqlglot-go/schema"
 )
 
 // TestDialectTypePolymorphism verifies that NormalizeIdentifiers and Qualify accept a
@@ -66,5 +67,44 @@ func TestDialectTypePolymorphism(t *testing.T) {
 	}
 	if rt.NormalizationStrategy != dialects.MySQLCaseInsensitive {
 		t.Fatalf("round-trip strategy = %v, want MySQLCaseInsensitive", rt.NormalizationStrategy)
+	}
+
+	// Instance preservation: EnsureSchema must hand back the SAME *Dialect instance (not a
+	// fresh re-resolution), so the passes that read dialect fields via Schema.Dialect() —
+	// e.g. QualifyColumns' ForceEarlyAliasRefExpansion / TablesReferenceableAsColumns — see
+	// the caller's instance and all its (possibly non-default) fields. This is the fix for a
+	// review finding: the earlier settings-string round-trip discarded non-strategy state.
+	s, err := schema.EnsureSchema(schema.NewMapping(), ciDialect, true)
+	if err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+	if s.Dialect() != ciDialect {
+		t.Fatalf("EnsureSchema re-resolved the dialect (%p) instead of preserving the passed instance (%p)", s.Dialect(), ciDialect)
+	}
+
+	// Qualify-level polymorphism: a *Dialect and the equivalent settings string produce
+	// identical output end-to-end (the "proxy builds a *Dialect once" path, previously only
+	// covered at the NormalizeIdentifiers layer).
+	qualifyOut := func(t *testing.T, dialect any) string {
+		t.Helper()
+		e, err := sqlglot.ParseOne("SELECT A FROM x", "mysql")
+		if err != nil {
+			t.Fatalf("ParseOne: %v", err)
+		}
+		opts := optimizer.DefaultQualifyOpts()
+		opts.Schema = optimizerTestSchema()
+		opts.Dialect = dialect
+		out, err := sqlglot.Generate(optimizer.Qualify(e, opts), "mysql", generator.Options{})
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return out
+	}
+	ciDialect2 := dialects.MySQL()
+	ciDialect2.NormalizationStrategy = dialects.MySQLCaseInsensitive
+	qFromDialect := qualifyOut(t, ciDialect2)
+	qFromString := qualifyOut(t, "mysql, normalization_strategy=mysql_case_insensitive")
+	if qFromDialect != qFromString {
+		t.Fatalf("Qualify string vs *Dialect disagree:\n  string  %q\n  dialect %q", qFromString, qFromDialect)
 	}
 }

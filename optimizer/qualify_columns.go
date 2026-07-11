@@ -34,7 +34,7 @@ func (s *orderedNameSet) add(name string) {
 	}
 }
 
-func QualifyColumns(expression exp.Expression, schemaArg any, expandAliasRefs bool, expandStars bool, inferSchema *bool, allowPartialQualification bool, dialect string) exp.Expression {
+func QualifyColumns(expression exp.Expression, schemaArg any, expandAliasRefs bool, expandStars bool, inferSchema *bool, allowPartialQualification bool, dialect any) exp.Expression {
 	s, err := schema.EnsureSchema(schemaArg, dialect, true)
 	if err != nil {
 		panic(err)
@@ -946,7 +946,7 @@ func QualifyOutputs(scopeOrExpression any) {
 	}
 }
 
-func QuoteIdentifiers(expression exp.Expression, dialect string, identify bool) exp.Expression {
+func QuoteIdentifiers(expression exp.Expression, dialect any, identify bool) exp.Expression {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
 		panic(err)

@@ -6,7 +6,7 @@ import (
 	"github.com/sjincho/sqlglot-go/schema"
 )
 
-func IsolateTableSelects(expression exp.Expression, schemaArg any, dialect string) exp.Expression {
+func IsolateTableSelects(expression exp.Expression, schemaArg any, dialect any) exp.Expression {
 	s, err := schema.EnsureSchema(schemaArg, dialect, true)
 	if err != nil {
 		panic(err)

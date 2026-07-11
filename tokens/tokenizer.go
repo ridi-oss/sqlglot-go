@@ -21,7 +21,7 @@ type TokenizerConfig struct {
 	// LineCommentRequiresSpace holds line-comment starts (keys of Comments) that only
 	// begin a comment when immediately followed by whitespace/control or EOF. MySQL
 	// requires this for `--` — `1--2` is arithmetic `1 - -2`, not `1` + comment. See
-	// DEVIATIONS §1 (upstream mis-tokenizes this).
+	// DEVIATIONS §1.4 (upstream mis-tokenizes this).
 	LineCommentRequiresSpace         map[string]bool
 	StringEscapes                    map[rune]bool
 	ByteStringEscapes                map[rune]bool

@@ -655,11 +655,12 @@ func (n *Node) Copy() Expression {
 			copyNode.comments = append([]string(nil), node.comments...)
 		}
 		if node.meta != nil {
-			// Ports upstream copy._meta = deepcopy(node._meta) (core.py:1013). A shallow
-			// clone suffices: the metadata values in use are scalars (bools, strings).
+			// Ports upstream copy._meta = deepcopy(node._meta) (core.py:1013): the copy's
+			// metadata must not alias the original's composite values (e.g. a []string like
+			// upstream's "dot_parts").
 			copyNode.meta = make(map[string]any, len(node.meta))
 			for k, v := range node.meta {
-				copyNode.meta[k] = v
+				copyNode.meta[k] = deepCopyMetaValue(v)
 			}
 		}
 		if node.hash != nil {
@@ -1092,6 +1093,31 @@ func cloneScalar(value any) any {
 	switch v := value.(type) {
 	case []string:
 		return append([]string(nil), v...)
+	default:
+		return v
+	}
+}
+
+// deepCopyMetaValue recursively copies a Node.meta value so a copied node never aliases the
+// original's mutable metadata (ports the deepcopy in upstream Expression.copy, core.py:1013).
+// Scalars are immutable and returned as-is; the composite shapes metadata actually uses
+// (slices, string-keyed maps) are cloned recursively.
+func deepCopyMetaValue(value any) any {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = deepCopyMetaValue(e)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, e := range v {
+			out[k] = deepCopyMetaValue(e)
+		}
+		return out
 	default:
 		return v
 	}

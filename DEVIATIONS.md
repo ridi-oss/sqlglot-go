@@ -173,9 +173,8 @@ untouched (Postgres `--` stays an unconditional comment, per the SQL standard).
 **Why we diverge (correctness):** this matches the real server. MySQL's manual: *"the `--` comment style
 requires the second dash to be followed by at least one whitespace or control character (such as a space,
 tab, newline, and so on)."* So `1--2` evaluates to `1 - (-2) = 3` on a real MySQL, not `1`. Upstream
-over-eagerly comments it out. This is the correctness property proxy-monster's grant-hash normalizer
-depends on when it rebuilds over the shared tokenizer (otherwise `SELECT 1--2` and `SELECT 1` would
-normalize/hash identically). Regression test: `tokenizer_mysql_comment_test.go`.
+over-eagerly comments it out; a consumer that relies on the token stream to distinguish `SELECT 1--2` from
+`SELECT 1` would otherwise conflate them. Regression test: `tokenizer_mysql_comment_test.go`.
 
 ---
 

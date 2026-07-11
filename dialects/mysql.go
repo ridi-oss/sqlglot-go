@@ -94,7 +94,7 @@ func MySQL() *Dialect {
 	cfg.Comments["#"] = ""
 	// MySQL requires `--` to be followed by whitespace/control (or EOF) to start a line
 	// comment; otherwise it is two `-` operators (`1--2` == `1 - -2`). Upstream sqlglot
-	// mis-tokenizes this — see DEVIATIONS §1. `#` needs no such guard (`#comment` is a
+	// mis-tokenizes this — see DEVIATIONS §1.4. `#` needs no such guard (`#comment` is a
 	// full-line comment in MySQL).
 	cfg.LineCommentRequiresSpace = map[string]bool{"--": true}
 	cfg.StringEscapes['"'] = true

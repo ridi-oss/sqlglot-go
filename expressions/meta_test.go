@@ -27,7 +27,11 @@ func TestNodeMeta(t *testing.T) {
 		t.Fatalf("meta leaked into ToS(): %q vs %q", id.ToS(), before)
 	}
 
-	// Copy carries meta, but copy and original are independent maps.
+	// A composite metadata value (like upstream's "dot_parts" []string) must be deep-copied,
+	// so mutating the copy's slice element does not bleed into the original.
+	id.Meta()["dot_parts"] = []string{"a", "b"}
+
+	// Copy carries meta, but copy and original are independent (scalars and composites alike).
 	clone := id.Copy()
 	if got := clone.MetaGet("is_table"); got != true {
 		t.Fatalf("Copy did not carry meta: MetaGet(is_table) = %v", got)
@@ -35,5 +39,13 @@ func TestNodeMeta(t *testing.T) {
 	clone.Meta()["is_table"] = false
 	if got := id.MetaGet("is_table"); got != true {
 		t.Fatalf("mutating the copy's meta changed the original: %v", got)
+	}
+	cloneParts, _ := clone.MetaGet("dot_parts").([]string)
+	if len(cloneParts) != 2 {
+		t.Fatalf("Copy did not carry composite meta: dot_parts = %v", cloneParts)
+	}
+	cloneParts[0] = "MUTATED"
+	if orig, _ := id.MetaGet("dot_parts").([]string); orig[0] != "a" {
+		t.Fatalf("deep-copy failed: mutating copy's dot_parts changed the original: %v", orig)
 	}
 }

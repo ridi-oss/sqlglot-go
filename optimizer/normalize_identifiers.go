@@ -18,7 +18,10 @@ func NormalizeIdentifiers(expression exp.Expression, dialect any) exp.Expression
 	}
 	// Ports normalize_identifiers.py:66-78: prune subtrees under a case_sensitive-marked node
 	// and skip such nodes, normalizing only the rest. (store_original_column_identifiers is off
-	// by default, so its dot_parts branch is not ported here.)
+	// by default, so its dot_parts branch is not ported here.) NB: the only upstream producer of
+	// the case_sensitive meta is add_comments parsing a `/* sqlglot.meta case_sensitive */`
+	// annotation (core.py:1044), which this port does not yet parse — so this guard is currently
+	// inert (nothing sets the flag) but kept structurally faithful for when that lands.
 	caseSensitive := func(n exp.Expression) bool {
 		b, _ := n.MetaGet("case_sensitive").(bool)
 		return b

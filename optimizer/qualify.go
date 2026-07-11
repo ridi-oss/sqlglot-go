@@ -1,7 +1,6 @@
 package optimizer
 
 import (
-	"github.com/sjincho/sqlglot-go/dialects"
 	exp "github.com/sjincho/sqlglot-go/expressions"
 	"github.com/sjincho/sqlglot-go/schema"
 )
@@ -40,13 +39,11 @@ func DefaultQualifyOpts() QualifyOpts {
 }
 
 func Qualify(expression exp.Expression, opts QualifyOpts) exp.Expression {
-	// opts.Dialect is a DialectType-style value (nil | string | *dialects.Dialect). Reduce it
-	// once to the canonical settings string the string-threaded internals accept; a *Dialect's
-	// name + normalization_strategy round-trip through it (see dialects.CanonicalString).
-	dialect, err := dialects.CanonicalString(opts.Dialect)
-	if err != nil {
-		panic(err)
-	}
+	// opts.Dialect is a DialectType-style value (nil | string | *dialects.Dialect), threaded
+	// through unchanged so a *Dialect instance reaches the schema (Dialect()) and the passes
+	// that read dialect fields — mirroring upstream qualify.py:78, which resolves once and
+	// passes the same instance down.
+	dialect := opts.Dialect
 
 	s, err := schema.EnsureSchema(opts.Schema, dialect, true)
 	if err != nil {

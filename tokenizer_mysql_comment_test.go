@@ -7,12 +7,12 @@ import (
 	"github.com/sjincho/sqlglot-go/generator"
 )
 
-// TestMySQLDashDashComment locks in the MySQL `--` rule (DEVIATIONS §1): `--` only
+// TestMySQLDashDashComment locks in the MySQL `--` rule (DEVIATIONS §1.4): `--` only
 // starts a line comment when followed by whitespace/control or EOF; otherwise it is two
 // `-` operators (`1--2` == `1 - -2`). Upstream sqlglot mis-tokenizes this (drops `--2`
 // as a comment); we match the real engine. Postgres keeps the standard unconditional
-// `--` comment. This is the correctness property proxy-monster's grant-hash normalizer
-// relies on when it rebuilds over the shared tokenizer.
+// `--` comment. A consumer relying on the token stream to tell `SELECT 1--2` from
+// `SELECT 1` depends on this distinction.
 func TestMySQLDashDashComment(t *testing.T) {
 	tokenTexts := func(t *testing.T, sql, dialect string) []string {
 		t.Helper()

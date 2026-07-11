@@ -21,7 +21,7 @@ type Schema interface {
 	Find(table exp.Expression, raiseOnMissing bool, ensureDataTypes bool) (*Mapping, error)
 }
 
-func EnsureSchema(s any, dialect string, normalize bool) (Schema, error) {
+func EnsureSchema(s any, dialect any, normalize bool) (Schema, error) {
 	if schema, ok := s.(Schema); ok {
 		return schema, nil
 	}
@@ -193,8 +193,17 @@ type MappingSchema struct {
 	findCache          map[findCacheKey]*Mapping
 }
 
-func NewMappingSchema(schema *Mapping, dialect string, normalize bool) (*MappingSchema, error) {
+func NewMappingSchema(schema *Mapping, dialect any, normalize bool) (*MappingSchema, error) {
+	// dialect is a DialectType-style value (nil | string | *dialects.Dialect). A *Dialect is
+	// stored verbatim (so Dialect() hands the caller's instance — with all its fields — back to
+	// the optimizer, mirroring upstream ensure_schema), while dialectName keeps a canonical
+	// string form so the string-threaded per-name normalization still re-resolves the same
+	// normalization strategy.
 	d, err := dialects.GetOrRaise(dialect)
+	if err != nil {
+		return nil, err
+	}
+	dialectName, err := dialects.CanonicalString(dialect)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +213,7 @@ func NewMappingSchema(schema *Mapping, dialect string, normalize bool) (*Mapping
 	m := &MappingSchema{
 		visible:     NewMapping(),
 		normalize:   normalize,
-		dialectName: dialect,
+		dialectName: dialectName,
 		dialect:     d,
 		typeCache:   map[string]exp.Expression{},
 		findCache:   map[findCacheKey]*Mapping{},
