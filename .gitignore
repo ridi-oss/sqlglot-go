@@ -21,3 +21,6 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Local scratch (evaluations, notes) — not part of the repo
+/tmp/
