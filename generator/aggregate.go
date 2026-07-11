@@ -14,6 +14,17 @@ import "github.com/sjincho/sqlglot-go/expressions"
 // out of this part's scope: postgres is the only caller wired up below and it always passes
 // within_group=False, so that branch is elided.
 func (g *Generator) groupConcatSQL(e expressions.Expression) string {
+	if g.dialect.Name == "mysql" {
+		// generators/mysql.py:174-175: GROUP_CONCAT({this} SEPARATOR {sep or "','"}).
+		// `this` already encodes any DISTINCT/CONCAT/ORDER BY shape built by
+		// parser.parseGroupConcat, so it renders itself; the separator defaults to a comma
+		// literal when GroupConcat has no explicit "separator" arg.
+		separator := g.sqlKey(e, "separator")
+		if separator == "" {
+			separator = "','"
+		}
+		return "GROUP_CONCAT(" + g.sqlKey(e, "this") + " SEPARATOR " + separator + ")"
+	}
 	if g.dialect.Name != "postgres" {
 		return g.functionFallbackSQL(e)
 	}
