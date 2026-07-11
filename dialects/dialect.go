@@ -17,18 +17,18 @@ const (
 	CaseInsensitive
 	CaseInsensitiveUppercase
 	// The two MySQL strategies below are NON-UPSTREAM (DEVIATIONS.md §1.2). They fold with
-	// MySQL's exact identifier lowercase (mysqlLower — my_unicase_default .tolower, Unicode
+	// MySQL's exact identifier lowercase (MySQLLower — my_unicase_default .tolower, Unicode
 	// simple + accent-preserving: É->é but Ñ!=N), NOT the ASCII fold used by the other
-	// strategies. This is the only fold that both matches MySQL and is reproducible
-	// byte-for-byte off dialects/mysql_casefold.tsv by a JVM consumer.
+	// strategies. That fold is exported (MySQLLower) so a consumer can call the same
+	// implementation via a native binding, guaranteeing a byte-identical normalized identifier.
 
 	// MySQLCaseInsensitive folds EVERY identifier (columns AND table/db names), regardless of
-	// quoting, with mysqlLower. Models MySQL with lower_case_table_names=1/2 (all names
+	// quoting, with MySQLLower. Models MySQL with lower_case_table_names=1/2 (all names
 	// case-insensitive).
 	MySQLCaseInsensitive
 	// MySQLCaseSensitiveTableNames is role-aware: table/database name identifiers are
 	// case-sensitive (never folded); every other identifier (columns, aliases, CTE names, ...)
-	// is folded with mysqlLower, regardless of quoting. Models MySQL's default on a
+	// is folded with MySQLLower, regardless of quoting. Models MySQL's default on a
 	// case-sensitive filesystem (lower_case_table_names=0): columns case-insensitive on every
 	// platform, database/table names case-sensitive on Linux.
 	MySQLCaseSensitiveTableNames
@@ -719,12 +719,12 @@ func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
 		// role-aware: table/db names stay case-sensitive; everything else folds.
 		if !isTableNameIdentifier(e) {
 			this, _ := e.Arg("this").(string)
-			e.Set("this", mysqlLower(this))
+			e.Set("this", MySQLLower(this))
 		}
 		return e
 	case MySQLCaseInsensitive:
 		this, _ := e.Arg("this").(string)
-		e.Set("this", mysqlLower(this))
+		e.Set("this", MySQLLower(this))
 		return e
 	}
 

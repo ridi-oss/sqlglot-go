@@ -1,51 +1,20 @@
 package dialects
 
-import (
-	_ "embed"
-	"strconv"
-	"strings"
-)
+import "strings"
 
-// mysql_casefold.tsv is the canonical, byte-exact MySQL identifier case-fold
-// table (MySQL 8.0 my_unicase_default `.tolower`, utf8mb3_general_ci =
-// system_charset_info — the collation MySQL resolves identifiers under). It is
-// a simple 1:1, accent-PRESERVING, BMP-only lowercase: É->é but Ñ!=N and ß
-// unchanged. It is the SINGLE SOURCE OF TRUTH shared with any consumer (e.g. the
-// JVM proxy), which must embed the identical file so the normalized identifier
-// is byte-for-byte the same across languages — neither Go's strings.ToLower nor
-// the JVM's lowercase() reproduces this map (they diverge; see DEVIATIONS.md).
-// Regenerate via scripts/gen_mysql_casefold.py against the pinned MySQL source.
+// MySQLLower folds a string exactly as MySQL folds identifiers for case-insensitive
+// resolution: per code point via MySQL's my_unicase_default `.tolower` map (see
+// mysql_casefold_table.go, generated from the MySQL source). The fold is
+// Unicode-simple and accent-PRESERVING — É->é, but Ñ stays distinct from N and ß is
+// unchanged — and covers only the BMP (utf8mb3); any code point without a table entry
+// (incl. all non-BMP runes) is left unchanged.
 //
-//go:embed mysql_casefold.tsv
-var mysqlCasefoldTSV string
-
-// mysqlLowerMap maps a code point to its MySQL lowercase, only where they differ.
-var mysqlLowerMap = func() map[rune]rune {
-	m := make(map[rune]rune, 700)
-	for _, line := range strings.Split(mysqlCasefoldTSV, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		cp, lo, ok := strings.Cut(line, "\t")
-		if !ok {
-			continue
-		}
-		c, err1 := strconv.ParseInt(strings.TrimSpace(cp), 16, 32)
-		l, err2 := strconv.ParseInt(strings.TrimSpace(lo), 16, 32)
-		if err1 == nil && err2 == nil {
-			m[rune(c)] = rune(l)
-		}
-	}
-	return m
-}()
-
-// mysqlLower folds an identifier exactly as MySQL folds identifiers for
-// case-insensitive resolution: per code point via the MySQL .tolower table
-// (accent-preserving; leaves a code point unchanged when the table has no entry
-// for it, incl. all non-BMP runes). This is the MySQL-compatible fold to use for
-// any MySQL folding strategy — NOT strings.ToLower.
-func mysqlLower(s string) string {
+// This is the MySQL-compatible identifier fold. It is EXPORTED so a consumer (e.g. a
+// JVM service via a native binding) can call this exact implementation rather than
+// re-deriving it: neither Go's strings.ToLower nor the JVM's String.lowercase()
+// reproduces this map, and they diverge from each other on characters like U+0130 and
+// Greek final-sigma (see DEVIATIONS.md §1.2). Do NOT substitute a stdlib case function.
+func MySQLLower(s string) string {
 	var b strings.Builder
 	changed := false
 	for i, r := range s {

@@ -18,7 +18,7 @@ func MySQL() *Dialect {
 	// settings string, e.g.
 	//   GetOrRaise("mysql, normalization_strategy=mysql_case_sensitive_table_names")   (lctn=0)
 	//   GetOrRaise("mysql, normalization_strategy=mysql_case_insensitive")             (lctn=1/2)
-	// Those strategies fold with MySQL's exact .tolower map (dialects/mysql_casefold.tsv).
+	// Those strategies fold with MySQL's exact .tolower map (exported as MySQLLower).
 	d.NormalizationStrategy = CaseSensitive
 	d.DPipeIsStringConcat = false
 	d.SupportsUserDefinedTypes = false
