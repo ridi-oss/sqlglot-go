@@ -21,6 +21,30 @@ the SQL engine only; it has no application-specific code.
   upstream tests and `tests/fixtures/*.sql` are the correctness oracle — reuse the `.sql` fixtures
   verbatim (they live under each package's `testdata/`), reimplement the loader/assertions in Go.
 
+## How deviations are tracked (READ before intentionally diverging)
+
+Every place the port *intentionally* behaves differently from upstream is recorded in
+**[DEVIATIONS.md](./DEVIATIONS.md)** — the single ledger, grouped by how observable the divergence is
+(§1 = *changes same-dialect parse→generate output*; §2+ = cross-dialect-only / output-preserving / scope
+boundary). It complements the per-site code comments (grep `divergence` / `Unlike upstream`) and
+ROADMAP.md's known-divergences + resolved-findings ledgers. Two kinds of divergence, two disciplines:
+
+- **Correctness fixes — upstream is wrong vs the real engine.** When upstream's parsing/tokenizing/folding
+  disagrees with the actual DB, sqlglot-go matches the DB, not upstream. Precedents: §1.1 (ASCII identifier
+  fold — upstream over-folds with full-Unicode `str.lower()`) and §1.4 (MySQL `--` requires a trailing
+  space; upstream mis-tokenizes `1--2`). Discipline: add a **DEVIATIONS §1 entry** + a `divergence` code
+  comment citing the real-engine behavior + a test asserting the port matches the **DB** (not upstream). No
+  tripwire needed — we *want* to stay diverged; if upstream later fixes it, the test still passes.
+- **Grammar beyond upstream — constructs upstream does not parse.** Permitted, but each must be (a) correct
+  (round-trip + AST-shape asserted) and (b) tracked so an upstream bump can't silently collide. The plan
+  (not yet built — no such construct is ported today) is an **extension ledger** (`testdata/upstream_
+  extensions.jsonl`) listing each construct pinned upstream does *not* parse, plus a `.reference`-gated
+  **pin-tripwire test** that re-asserts upstream's behavior so the next reference bump fails loudly with a
+  reconciliation note. Model each extension on upstream's likely eventual node (reuse a Kind/family).
+
+Do **not** invent a same-dialect deviation for convenience: the default is faithfulness. A deviation needs a
+correctness rationale (matches the DB) or an explicit, tracked feature decision — and a DEVIATIONS entry.
+
 ## Current status
 
 `go test ./...` is green. The parse → generate pipeline is at **100% round-trip parity** for base +

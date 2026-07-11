@@ -153,10 +153,14 @@ The dialect-accepting entry points (`dialects.GetOrRaise`, `optimizer.NormalizeI
 `optimizer.QualifyOpts.Dialect`) now accept a **DialectType-style value** — `nil` | a string (bare name
 or the settings form) | a `*dialects.Dialect` — mirroring upstream's polymorphic `DialectType =
 Union[str, Dialect, Type[Dialect], None]` (`dialect.py:1171`). This *restores* upstream API
-compatibility the earlier string-only port had narrowed. A `*Dialect` is honored for the state qualify
-consults (dialect name + `NormalizationStrategy`); it is reduced to its canonical settings string
-(`(*Dialect).SettingsString()`) at the boundaries that still thread a dialect as a string (schema,
-identifier parsing), which round-trips through `GetOrRaise`.
+compatibility the earlier string-only port had narrowed. A passed `*Dialect` is threaded through the
+optimizer and `schema.EnsureSchema` **unchanged** — `EnsureSchema(...).Dialect()` returns the caller's
+instance — so every instance field the qualify passes read (`NormalizationStrategy`,
+`ForceEarlyAliasRefExpansion`, `TablesReferenceableAsColumns`, `DefaultFunctionsColumnNames`, …) is
+honored, matching upstream `qualify.py:78`. Only the schema's per-name fold re-resolution and
+identifier parsing still take a string; for those the dialect is reduced to its canonical settings
+string (`(*Dialect).SettingsString()` / `dialects.CanonicalString`), which round-trips its name +
+`NormalizationStrategy` through `GetOrRaise`.
 
 ### 1.4 MySQL `--` line comment requires a trailing space — *fixes an upstream tokenizer bug*
 

@@ -126,6 +126,41 @@ differential-check against the pinned Python):
   and any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or DDL detail not hit by a fixture. Treat a
   not-yet-parsed construct upstream parses as a gap to close.
 
+## MySQL grammar + tokenizer correctness + typed dialect + Node.Meta — DONE (PR #2)
+
+**DONE (2026-07).** Branch `sjincho/parity/mysql-grammar-tokenizer-meta`, PR
+[sjincho/sqlglot-go#2](https://github.com/sjincho/sqlglot-go/pull/2) — reviewed (Codex gpt-5.6-sol xhigh +
+Opus, each verified vs the pinned reference), `go test ./...` / `go vet` / `gofmt` green. Motivated by the
+proxy-monster suggestions review; five slices, each a faithful port, an API restoration, or a documented
+correctness fix:
+
+- **P1 — MySQL/base `MATCH(cols) AGAINST('x' [modifier])`.** Registered the base `FUNCTION_PARSERS["MATCH"]`
+  entry (parser.py:1508 → `_parse_match_against`, parser.py:8181). The `exp.MatchAgainst` node + base/PG
+  generators already existed (reachable only via PG `@@`); this closed the parser gap. Ports
+  `tests/dialects/test_mysql.py::test_match_against`.
+- **P2 — MySQL `GROUP_CONCAT(expr [, …] [ORDER BY …] [SEPARATOR s])`.** Ported `_parse_group_concat`
+  (parser.py:10074, MySQL `FUNCTION_PARSERS`, parsers/mysql.py:156) **and** the MySQL generator
+  (generators/mysql.py:174) together — parser-only would re-emit the comma form (per-row concat under the
+  default separator), a re-generation correctness bug. Multi-arg → `CONCAT`, `ORDER BY` → `exp.Order`.
+- **N1 — typed dialect (restores upstream `DialectType`).** `dialects.GetOrRaise`,
+  `optimizer.NormalizeIdentifiers`, and `optimizer.QualifyOpts.Dialect` accept `nil | string |
+  *dialects.Dialect`; the dialect is threaded through the optimizer + `EnsureSchema` as an `any` so a passed
+  `*Dialect` instance flows through **unchanged** (matches upstream `qualify.py:78` — verified by pointer
+  identity that `EnsureSchema(...).Dialect()` is the caller's instance). The string/settings form is
+  unchanged. Added `(*Dialect).SettingsString()` / `dialects.CanonicalString`.
+- **N3 — port `Node.Meta` (upstream `Expression.meta`, core.py:991/996).** `Node` gains a `meta
+  map[string]any` with `Meta()` (lazy) / `MetaGet()` (no-alloc) + a deep-copy in `Copy` (core.py:1013);
+  wired the `is_table` (qualify_tables.py:55/59, schema.py:704) and `case_sensitive`
+  (normalize_identifiers.py:66-67) consumers. **Inert** for base/MySQL/Postgres — only BigQuery reads
+  `is_table`, and `case_sensitive` has no producer until `sqlglot.meta` comment parsing is ported — so the
+  corpus/fidelity are unchanged; the value is upstream parity + a foundation (resolved the `Node.Meta` TODOs
+  in `schema.go`, `normalize_identifiers.go`, `qualify_tables.go`).
+
+**Deviation added:** T1 — MySQL `--` line comment requires a trailing whitespace/control/EOF; otherwise it
+is two `-` operators (`1--2` == `1 - -2`), matching the real server. Upstream mis-tokenizes it. Recorded in
+**DEVIATIONS.md §1.4** (a same-dialect behavioral deviation, same class as the §1.1 ASCII fold), with a
+regression test. Base/Postgres unchanged.
+
 ## Athena support (Presto/Trino/Hive parser chain), scoped to lineage — DONE
 
 **DONE (2026-07, main @ e428a54).** All 4 slices landed + merged, each `go test ./...` green with
