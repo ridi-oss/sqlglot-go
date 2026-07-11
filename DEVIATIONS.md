@@ -149,6 +149,25 @@ previously lacked** (a gap from upstream, now closed), not a behavioral divergen
 is unchanged. Only `normalization_strategy` is supported (upstream also has `version`, which this port
 does not model); unknown settings/strategy values error, as upstream.
 
+### 1.4 MySQL `--` line comment requires a trailing space — *fixes an upstream tokenizer bug*
+
+**What upstream does:** sqlglot's tokenizer treats `--` as a line-comment start unconditionally in every
+dialect, so it tokenizes MySQL `SELECT 1--2` as `SELECT 1` (dropping `--2` as a comment). Verified on the
+pinned reference: `tokenize("SELECT 1--2", dialect="mysql")` → `[SELECT, 1]`.
+
+**What sqlglot-go does:** for MySQL, `--` begins a line comment only when the next character is
+**whitespace/control or EOF**; otherwise it is two `-` operators. `SELECT 1--2` → `SELECT 1 - -2`
+(tokens `[SELECT, 1, -, -, 2]`). Implemented via `TokenizerConfig.LineCommentRequiresSpace{"--": true}` on
+the MySQL dialect + a guard in `tokens.TokenizerCore.lineCommentSuppressed`; base and Postgres are
+untouched (Postgres `--` stays an unconditional comment, per the SQL standard).
+
+**Why we diverge (correctness):** this matches the real server. MySQL's manual: *"the `--` comment style
+requires the second dash to be followed by at least one whitespace or control character (such as a space,
+tab, newline, and so on)."* So `1--2` evaluates to `1 - (-2) = 3` on a real MySQL, not `1`. Upstream
+over-eagerly comments it out. This is the correctness property proxy-monster's grant-hash normalizer
+depends on when it rebuilds over the shared tokenizer (otherwise `SELECT 1--2` and `SELECT 1` would
+normalize/hash identically). Regression test: `tokenizer_mysql_comment_test.go`.
+
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)

@@ -12,12 +12,17 @@ type FormatString struct {
 }
 
 type TokenizerConfig struct {
-	SingleTokens                     map[rune]TokenType
-	Keywords                         map[string]TokenType
-	Quotes                           map[string]string
-	FormatStrings                    map[string]FormatString
-	Identifiers                      map[rune]string
-	Comments                         map[string]string
+	SingleTokens  map[rune]TokenType
+	Keywords      map[string]TokenType
+	Quotes        map[string]string
+	FormatStrings map[string]FormatString
+	Identifiers   map[rune]string
+	Comments      map[string]string
+	// LineCommentRequiresSpace holds line-comment starts (keys of Comments) that only
+	// begin a comment when immediately followed by whitespace/control or EOF. MySQL
+	// requires this for `--` — `1--2` is arithmetic `1 - -2`, not `1` + comment. See
+	// DEVIATIONS §1 (upstream mis-tokenizes this).
+	LineCommentRequiresSpace         map[string]bool
 	StringEscapes                    map[rune]bool
 	ByteStringEscapes                map[rune]bool
 	IdentifierEscapes                map[rune]bool

@@ -36,6 +36,7 @@ type TokenizerCore struct {
 	formatStrings                    map[string]FormatString
 	identifiers                      map[rune]string
 	commentsConfig                   map[string]string
+	lineCommentRequiresSpace         map[string]bool
 	stringEscapes                    map[rune]bool
 	byteStringEscapes                map[rune]bool
 	identifierEscapes                map[rune]bool
@@ -67,6 +68,7 @@ func NewTokenizerCore(cfg TokenizerConfig) *TokenizerCore {
 		formatStrings:                    cfg.FormatStrings,
 		identifiers:                      cfg.Identifiers,
 		commentsConfig:                   cfg.Comments,
+		lineCommentRequiresSpace:         cfg.LineCommentRequiresSpace,
 		stringEscapes:                    cfg.StringEscapes,
 		byteStringEscapes:                cfg.ByteStringEscapes,
 		identifierEscapes:                cfg.IdentifierEscapes,
@@ -317,14 +319,22 @@ func (c *TokenizerCore) scanKeywords() {
 		if c.scanString(word) {
 			return
 		}
-		if c.scanComment(word) {
-			return
-		}
-		if prevSpace || singleToken || char == 0 {
-			c.advance(size-1, false)
-			upperWord := strings.ToUpper(word)
-			c.add(c.keywords[upperWord], upperWord)
-			return
+		// divergence: some dialects (MySQL) only begin a line comment on a start like
+		// `--` when it is immediately followed by whitespace/control or EOF; otherwise
+		// `--` is two `-` operators (`1--2` == `1 - -2`). Upstream sqlglot mis-tokenizes
+		// this (drops `--2` as a comment) — we match the real engine. See DEVIATIONS §1.
+		// When suppressed, fall through so only the first rune is emitted as a single
+		// token and the tokenizer re-scans the remainder.
+		if !c.lineCommentSuppressed(word) {
+			if c.scanComment(word) {
+				return
+			}
+			if prevSpace || singleToken || char == 0 {
+				c.advance(size-1, false)
+				upperWord := strings.ToUpper(word)
+				c.add(c.keywords[upperWord], upperWord)
+				return
+			}
 		}
 	}
 
@@ -334,6 +344,23 @@ func (c *TokenizerCore) scanKeywords() {
 	}
 
 	c.scanVar()
+}
+
+// lineCommentSuppressed reports whether commentStart, though matched as a line-comment
+// start, must NOT begin a comment here because the dialect requires a trailing
+// whitespace/control char (or EOF) and the next char is neither. MySQL `--`: `1--2` is
+// `1 - -2`, not `1` + comment. The word begins at c.current-1, so the char after it is at
+// c.current-1+len(word). See DEVIATIONS §1.
+func (c *TokenizerCore) lineCommentSuppressed(commentStart string) bool {
+	if !c.lineCommentRequiresSpace[commentStart] {
+		return false
+	}
+	after := c.current - 1 + len([]rune(commentStart))
+	if after >= c.size {
+		return false // EOF right after the marker — a valid (empty) comment.
+	}
+	next := c.sql[after]
+	return !unicode.IsSpace(next) && !unicode.IsControl(next)
 }
 
 func (c *TokenizerCore) scanComment(commentStart string) bool {
