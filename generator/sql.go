@@ -1241,6 +1241,10 @@ func (g *Generator) embedIgnoreNulls(e expressions.Expression, text string) stri
 }
 
 func (g *Generator) insertSQL(e expressions.Expression) string {
+	keyword := "INSERT"
+	if g.dialect.Name == "mysql" && boolValue(e.Arg("replace")) {
+		keyword = "REPLACE"
+	}
 	hint := g.sqlKey(e, "hint")
 	thisKeyword := " INTO"
 	if boolValue(e.Arg("overwrite")) {
@@ -1305,7 +1309,7 @@ func (g *Generator) insertSQL(e expressions.Expression) string {
 	if source != "" {
 		source = "TABLE " + source
 	}
-	sql := "INSERT" + hint + alternative + ignore + this + stored + byName + exists + partitionBy + settings + where + expressionSQL + source
+	sql := keyword + hint + alternative + ignore + this + stored + byName + exists + partitionBy + settings + where + expressionSQL + source
 	return g.prependCtes(e, sql)
 }
 

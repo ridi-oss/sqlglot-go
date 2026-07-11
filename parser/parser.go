@@ -3110,15 +3110,11 @@ func init() {
 	statementParsers[tokens.DELETE] = (*Parser).parseDelete
 	statementParsers[tokens.MERGE] = (*Parser).parseMerge
 	statementParsers[tokens.CREATE] = (*Parser).parseCreate
-	// Upstream base STATEMENT_PARSERS has no TokenType.REPLACE entry (verified against
-	// parser.py): "CREATE OR REPLACE ..." is driven entirely by the CREATE token above (the
-	// OR REPLACE modifier is consumed inside parseCreate), and base's REPLACE(...) is a Func
-	// call (expressions/functions.go), not a statement. Registering REPLACE here (as an
-	// alias of parseCreate) was wrong: it intercepted base REPLACE(...) before expression
-	// parsing ever saw it, producing a Command('REPLACE (...)') instead of the function
-	// call. MySQL's own "REPLACE INTO ..." statement is unaffected by this removal - MySQL
-	// marks TokenType.REPLACE as a tokenizer Command (dialects/mysql.go), so it's caught by
-	// the Commands-set fallback in parseStatement below, never by this map.
+	// Upstream base STATEMENT_PARSERS has no TokenType.REPLACE entry (parser.py:1081-1111):
+	// CREATE consumes its own OR REPLACE modifier, while statement-leading REPLACE(...) is
+	// an ordinary function expression. The mysql-replace extension registers a dialect
+	// statement override instead; it retreats on `(` and structures only supported MySQL
+	// statement forms now that dialects/mysql.py:154's tokenizer Command behavior is removed.
 	statementParsers[tokens.PRAGMA] = (*Parser).parsePragma
 
 	noParenFunctionParsers = map[string]func(*Parser) exp.Expression{

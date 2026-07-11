@@ -35,9 +35,27 @@ func (p *Parser) parseInsert() exp.Expression {
 		}
 		p.match(tokens.INTO)
 		comments = p.prevComments
-		p.match(tokens.TABLE)
+		// mysql-insert-set/mysql-replace divergence from parser.py:3511-3514: when TABLE is
+		// followed by target-column or source syntax, it is the target's literal name, not the
+		// optional keyword. This becomes observable once dialects/mysql.py:154 no longer tokenizes
+		// REPLACE as Command. L_PAREN is listed explicitly even though selectStartTokens also
+		// contains it, because here it most commonly starts the target's explicit column list.
+		tableIsTarget := p.dialect.Name == "mysql" && p.curr.TokenType == tokens.TABLE &&
+			(p.next.TokenType == tokens.L_PAREN || p.next.TokenType == tokens.SET ||
+				p.next.TokenType == tokens.VALUES || selectStartTokens[p.next.TokenType])
+		if !tableIsTarget {
+			p.match(tokens.TABLE)
+		}
 		isFunction = p.match(tokens.FUNCTION)
-		if isFunction {
+		if tableIsTarget {
+			// Keep the identity-corpus spelling `REPLACE INTO table SELECT ...` source-preserving:
+			// a normal Identifier would be auto-quoted because MySQL reserves TABLE. A Var remains
+			// a valid Table child and reparses through this same MySQL target-name branch.
+			tableToken := p.curr
+			p.advance()
+			name := p.expression(exp.Var(exp.Args{"this": tableToken.Text}), &tableToken, nil)
+			this = p.parseSchema(p.expression(exp.Table(exp.Args{"this": name}), nil, nil))
+		} else if isFunction {
 			this = p.parseFunction(nil, false, true, false)
 		} else {
 			this = p.parseInsertTable()
@@ -51,16 +69,23 @@ func (p *Parser) parseInsert() exp.Expression {
 		where = p.parseDisjunction()
 	}
 	default_ := p.matchTextSeq("DEFAULT", "VALUES")
-	// These firstExpression calls evaluate their alternatives eagerly (unlike a
-	// short-circuit `or`), which is safe here only because the alternatives sit at
-	// non-overlapping token positions: parseDerivedTableValues/parseReturning consume
-	// nothing when they return nil, and the second parseReturning is a no-op once the
-	// first grabbed the RETURNING clause. Contrast parseLateral, where eager evaluation
-	// would drop a trailing alias.
-	expression := firstExpression(p.parseDerivedTableValues(), p.parseDDLSelect())
+	var expression exp.Expression
+	if p.dialect.Name == "mysql" && p.match(tokens.SET) {
+		// mysql-insert-set divergence from parser.py:3486-3542: the pinned INSERT grammar
+		// does not consume SET; desugar it into the ordinary Schema + one-row Values shape.
+		this, expression = p.parseMySQLInsertSet(this, p.parseCsv(p.parseEquality))
+	} else {
+		// These firstExpression calls evaluate their alternatives eagerly (unlike a
+		// short-circuit `or`), which is safe here only because the alternatives sit at
+		// non-overlapping token positions: parseDerivedTableValues/parseReturning consume
+		// nothing when they return nil, and the second parseReturning is a no-op once the
+		// first grabbed the RETURNING clause. Contrast parseLateral, where eager evaluation
+		// would drop a trailing alias.
+		expression = firstExpression(p.parseDerivedTableValues(), p.parseDDLSelect())
+	}
 	conflict := p.parseOnConflict()
 	returning = firstExpression(returning, p.parseReturning())
-	return p.expression(exp.Insert(exp.Args{
+	args := exp.Args{
 		"hint":        hint,
 		"overwrite":   overwrite,
 		"ignore":      ignore,
@@ -74,7 +99,13 @@ func (p *Parser) parseInsert() exp.Expression {
 		"default":     default_,
 		"expression":  expression,
 		"conflict":    conflict,
-	}), &keywordTok, comments)
+	}
+	// mysql-replace is a Go-only extension: upstream v30.12.0 leaves statement-leading
+	// REPLACE raw via dialects/mysql.py:154, while this port structures the supported grammar.
+	if keywordTok.TokenType == tokens.REPLACE {
+		args["replace"] = true
+	}
+	return p.expression(exp.Insert(args), &keywordTok, comments)
 }
 
 func (p *Parser) parseInsertTable() exp.Expression {

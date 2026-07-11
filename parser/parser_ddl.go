@@ -815,6 +815,11 @@ func init() {
 		FunctionParsers: map[string]parserOverrideFunc{
 			"GROUP_CONCAT": (*Parser).parseGroupConcat,
 		},
+		// mysql-replace divergence from dialects/mysql.py:154: the tokenizer no longer
+		// packs REPLACE as Command, so this override can disambiguate REPLACE(...).
+		StatementParsers: map[tokens.TokenType]parserOverrideFunc{
+			tokens.REPLACE: (*Parser).parseMySQLReplace,
+		},
 		PropertyParsers: map[string]propertyParserFunc{
 			"LOCK": func(p *Parser, _ bool) exp.Expression {
 				return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {

@@ -238,6 +238,23 @@ fail closed to
 use the stable ledger id and tripwire for its reconciliation lifecycle rather than copying the row's
 mutable reconciliation instructions here.
 
+Ledger id [`mysql-insert-set`](./testdata/upstream_extensions.jsonl) registers MySQL `INSERT ... SET`,
+which pinned upstream rejects with a parse error. The MySQL parser intentionally normalizes assignments
+such as `INSERT INTO t SET a = 1, b = 2` directly to the existing `Insert` shape whose target is
+`Schema(Table, columns)` and whose source is one-row `Values(Tuple(values))`; it therefore renders as
+`INSERT INTO t (a, b) VALUES (1, 2)`, and that canonical form is idempotent across subsequent
+parse/generate cycles. The extension is MySQL-only. Use the stable ledger id for its reconciliation
+lifecycle.
+
+Ledger id [`mysql-replace`](./testdata/upstream_extensions.jsonl) registers structural MySQL `REPLACE`,
+which pinned upstream packs as a tokenizer-level `Command`. The MySQL tokenizer no longer performs that
+packing, and the parser represents supported statements as `Insert` with the Go-only optional
+`replace = true` marker. Only MySQL generation consults the marker and renders `REPLACE`; unmarked
+`Insert` nodes and other dialects retain their existing behavior. A leading `REPLACE(` retreats to
+ordinary expression parsing to disambiguate function calls from statements, while unsupported or
+partially consumed statement forms fail closed to a source-preserving `Command`. Use the stable ledger
+id for its reconciliation lifecycle.
+
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)

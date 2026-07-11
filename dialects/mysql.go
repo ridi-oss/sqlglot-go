@@ -190,7 +190,10 @@ func MySQL() *Dialect {
 	} {
 		cfg.Keywords[keyword] = tokenType
 	}
-	cfg.Commands[tokens.REPLACE] = true
+	// The pinned .reference/sqlglot-v30.12.0/sqlglot/dialects/mysql.py:154 adds
+	// REPLACE as a Command, but the mysql-replace extension preserves its suffix
+	// tokens for statement parsing.
+	delete(cfg.Commands, tokens.REPLACE)
 	delete(cfg.Commands, tokens.SHOW)
 	d.TokenizerConfig = tokens.CompileConfig(cfg)
 	return d
