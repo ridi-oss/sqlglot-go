@@ -340,6 +340,47 @@ func (p *Parser) parseJSONTable() exp.Expression {
 	})
 }
 
+// parseMatchAgainst ports _parse_match_against (parser.py:8181): MATCH(col, ...) AGAINST
+// ('expr' [modifier]) full-text search, the base FUNCTION_PARSERS["MATCH"] entry
+// (parser.py:1508). Called positioned inside `MATCH(` (parseFunctionCall already consumed
+// the name + `(`); the caller consumes the closing `)` of the AGAINST group. The base
+// generator renders MATCH(...) AGAINST(...); postgres' matchAgainstSQL override renders `@@`.
+func (p *Parser) parseMatchAgainst() exp.Expression {
+	var expressions []exp.Expression
+	if p.matchTextSeq("TABLE") {
+		// SingleStore MATCH(TABLE ...) syntax, kept 1:1 with upstream (not exercised by
+		// base/mysql/postgres).
+		if table := p.parseTable(false, false, nil, false, false, false, false); table != nil {
+			expressions = []exp.Expression{table}
+		}
+	} else {
+		expressions = p.parseCsv(p.parseColumn)
+	}
+
+	p.matchTextSeq(")", "AGAINST", "(")
+
+	this := p.parseString()
+
+	var modifier any
+	switch {
+	case p.matchTextSeq("IN", "NATURAL", "LANGUAGE", "MODE"):
+		modifier = "IN NATURAL LANGUAGE MODE"
+		if p.matchTextSeq("WITH", "QUERY", "EXPANSION") {
+			modifier = "IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION"
+		}
+	case p.matchTextSeq("IN", "BOOLEAN", "MODE"):
+		modifier = "IN BOOLEAN MODE"
+	case p.matchTextSeq("WITH", "QUERY", "EXPANSION"):
+		modifier = "WITH QUERY EXPANSION"
+	}
+
+	args := exp.Args{"this": this, "expressions": expressions}
+	if modifier != nil {
+		args["modifier"] = modifier
+	}
+	return p.expression(exp.MatchAgainst(args), nil, nil)
+}
+
 // init registers this file's base FUNCTION_PARSERS/NO_PAREN_FUNCTION_PARSERS entries by plain
 // key assignment into the shared functionParsers/noParenFunctionParsers package vars (see the
 // package-var doc comments on statementParsers/dispatch for why this is safe regardless of
@@ -350,6 +391,10 @@ func (p *Parser) parseJSONTable() exp.Expression {
 func init() {
 	// OVERLAY is a base FUNCTION_PARSERS entry (parser.py:1511) - not dialect-gated.
 	functionParsers["OVERLAY"] = (*Parser).parseOverlay
+	// MATCH is a base FUNCTION_PARSERS entry (parser.py:1508) - not dialect-gated. Used
+	// mainly in MySQL full-text search; the base generator renders MATCH(...) AGAINST(...)
+	// and postgres overrides matchAgainstSQL to the `@@` form.
+	functionParsers["MATCH"] = (*Parser).parseMatchAgainst
 	// SUBSTR is MySQL-only upstream (parsers/mysql.py:162). The base singleton retains this
 	// pre-existing entry for zero behavior change; functionParser applies the MySQL-only
 	// compatibility filter after consulting parser-side dialect overrides.
