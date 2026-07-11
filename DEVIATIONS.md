@@ -184,6 +184,39 @@ over-eagerly comments it out; a consumer that relies on the token stream to dist
 
 ---
 
+## Opt-in behavioral extensions beyond upstream
+
+### Search-path-aware table qualification
+
+Pinned upstream `qualify_tables` accepts one fixed `db`/`catalog` and stamps those parts without an
+existence check (`.reference/sqlglot-v30.12.0/sqlglot/optimizer/qualify_tables.py:16-23,62-75`). The
+Go-only `optimizer.QualifyOpts.SearchPath` adds a separate, opt-in resolution mode. The mode switch is
+exact: a nil or empty `SearchPath` uses the existing upstream-faithful fixed `DB`/`Catalog` path
+unchanged, so all existing fixture output remains unchanged; only a non-empty `SearchPath` enables the
+extension.
+
+In non-empty mode, candidates are dialect-normalized and checked in order against the supplied schema.
+A candidate database is stamped only when `schema.Find(..., false, false)` returns a mapping for that
+candidate, and the first proven candidate wins. There is no fallback to the fixed `DB`, and no catalog
+is added. If no candidate is proven, the table remains unqualified so downstream policy can fail
+closed. Absent, ambiguous, empty, flat, or otherwise db-incapable schemas therefore produce no stamp.
+Already-qualified tables and CTE references are preserved and are not rewritten.
+
+The lookup requires a schema whose `SupportedTableArgs` includes `db`. An empty schema or a flat,
+table-only mapping is intentionally insufficient because it cannot prove that a table exists in a
+specific database; probing it as though it could would allow a mapping implementation to truncate the
+db-qualified lookup and return an unrelated unscoped table.
+
+This boundary is security-relevant: guessing a database can bind access analysis to a table that the
+actual database would not resolve, creating a wrong-ALLOW decision. Leaving the database absent when
+its resolution cannot be proven is the safe result.
+
+This is not a parse-grammar construct, so it is neither registered in
+[`testdata/upstream_extensions.jsonl`](./testdata/upstream_extensions.jsonl) nor governed by the
+grammar-extension tripwire.
+
+---
+
 ## Grammar extensions beyond upstream
 
 Grammar extensions are output-round-tripping AST extensions: they preserve valid same-dialect SQL output

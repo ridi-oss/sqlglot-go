@@ -6,9 +6,10 @@ import (
 
 	"github.com/sjincho/sqlglot-go/dialects"
 	exp "github.com/sjincho/sqlglot-go/expressions"
+	"github.com/sjincho/sqlglot-go/schema"
 )
 
-func QualifyTables(expression exp.Expression, db any, catalog any, dialect any, canonicalizeTableAliases bool, onQualify func(exp.Expression)) exp.Expression {
+func QualifyTables(expression exp.Expression, db any, catalog any, dialect any, canonicalizeTableAliases bool, onQualify func(exp.Expression), searchPath []string, s schema.Schema) exp.Expression {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
 		panic(err)
@@ -31,21 +32,64 @@ func QualifyTables(expression exp.Expression, db any, catalog any, dialect any, 
 		catalogIdentifier = NormalizeIdentifiers(catalogIdentifier, dialect)
 	}
 
+	searchPathMode := len(searchPath) > 0
+	var searchPathIdentifiers []exp.Expression
+	if searchPathMode {
+		searchPathIdentifiers = make([]exp.Expression, 0, len(searchPath))
+		for _, candidate := range searchPath {
+			if candidate == "" {
+				continue
+			}
+			identifier := exp.ParseIdentifier(candidate, d.Name)
+			identifier.Meta()["is_table"] = true
+			identifier = NormalizeIdentifiers(identifier, dialect)
+			searchPathIdentifiers = append(searchPathIdentifiers, identifier)
+		}
+	}
+
+	supportsDB := false
+	if searchPathMode && s != nil {
+		for _, tableArg := range s.SupportedTableArgs() {
+			if tableArg == "db" {
+				supportsDB = true
+				break
+			}
+		}
+	}
+
 	qualify := func(table exp.Expression) {
 		if table == nil || table.Kind() != exp.KindTable {
 			return
 		}
 		if table.This() != nil && table.This().Kind() == exp.KindIdentifier {
-			if dbIdentifier != nil && table.Arg("db") == nil {
-				table.Set("db", dbIdentifier.Copy())
+			if table.Arg("db") == nil {
+				if searchPathMode {
+					// Unlike .reference/sqlglot-v30.12.0/sqlglot/optimizer/qualify_tables.py:62-67,
+					// this opt-in extension requires schema-backed proof instead of applying one fixed db.
+					if supportsDB {
+						for _, candidate := range searchPathIdentifiers {
+							probe := exp.Table(exp.Args{"this": table.This().Copy(), "db": candidate.Copy()})
+							mapping, err := s.Find(probe, false, false)
+							if err != nil {
+								panic(err)
+							}
+							if mapping != nil {
+								table.Set("db", candidate.Copy())
+								break
+							}
+						}
+					}
+				} else if dbIdentifier != nil {
+					table.Set("db", dbIdentifier.Copy())
+				}
 			}
-			if catalogIdentifier != nil && table.Arg("catalog") == nil && table.Arg("db") != nil {
+			if !searchPathMode && catalogIdentifier != nil && table.Arg("catalog") == nil && table.Arg("db") != nil {
 				table.Set("catalog", catalogIdentifier.Copy())
 			}
 		}
 	}
 
-	if (dbIdentifier != nil || catalogIdentifier != nil) && !expression.Is(exp.TraitQuery) {
+	if (dbIdentifier != nil || catalogIdentifier != nil || searchPathMode) && !expression.Is(exp.TraitQuery) {
 		cteNames := map[string]bool{}
 		with := asExpression(expression.Arg("with_"))
 		if with != nil {

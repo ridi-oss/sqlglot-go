@@ -9,9 +9,12 @@ type QualifyOpts struct {
 	// Dialect is a DialectType-style value: nil (base), a string (bare name or the
 	// "name, normalization_strategy=..." settings form), or a *dialects.Dialect. Mirrors
 	// upstream sqlglot's polymorphic dialect argument; DB/Catalog/Schema are likewise any.
-	Dialect                   any
-	DB                        any
-	Catalog                   any
+	Dialect any
+	DB      any
+	Catalog any
+	// SearchPath is an ordered, opt-in database search path. Its zero value preserves
+	// upstream-compatible fixed DB/Catalog qualification.
+	SearchPath                []string
 	Schema                    any
 	ExpandAliasRefs           bool
 	ExpandStars               bool
@@ -52,7 +55,7 @@ func Qualify(expression exp.Expression, opts QualifyOpts) exp.Expression {
 
 	// TODO(slice 4c): store_original_column_identifiers needs Node meta.
 	expression = NormalizeIdentifiers(expression, dialect)
-	expression = QualifyTables(expression, opts.DB, opts.Catalog, dialect, opts.CanonicalizeTableAliases, opts.OnQualify)
+	expression = QualifyTables(expression, opts.DB, opts.Catalog, dialect, opts.CanonicalizeTableAliases, opts.OnQualify, opts.SearchPath, s)
 
 	if opts.IsolateTables {
 		expression = IsolateTableSelects(expression, s, dialect)
