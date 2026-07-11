@@ -357,10 +357,17 @@ func (c *TokenizerCore) lineCommentSuppressed(commentStart string) bool {
 	}
 	after := c.current - 1 + len([]rune(commentStart))
 	if after >= c.size {
-		return false // EOF right after the marker — a valid (empty) comment.
+		return false // EOF right after the marker — a valid (empty) comment (verified vs MySQL 8.4).
 	}
 	next := c.sql[after]
-	return !unicode.IsSpace(next) && !unicode.IsControl(next)
+	// MySQL honors only ASCII whitespace/control after `--`; a non-ASCII space such as NBSP
+	// (U+00A0) does NOT start a comment (verified vs MySQL 8.4: `SELECT 1--<NBSP>2` errors,
+	// it is not `SELECT 1`). Restrict the comment trigger to ASCII, so a non-ASCII byte
+	// leaves `--` as two `-` operators.
+	if next < 0x80 && (unicode.IsSpace(next) || unicode.IsControl(next)) {
+		return false // ASCII whitespace/control follows — it is a comment.
+	}
+	return true // not a comment marker here — fall through to `-` operators.
 }
 
 func (c *TokenizerCore) scanComment(commentStart string) bool {

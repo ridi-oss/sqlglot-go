@@ -38,6 +38,12 @@ func TestMySQLDashDashComment(t *testing.T) {
 		{"mysql comment with newline", "mysql", "SELECT 1--\n2", []string{"SELECT", "1", "2"}},
 		{"mysql comment with tab", "mysql", "SELECT 1--\t2", []string{"SELECT", "1"}},
 		{"mysql trailing marker at EOF", "mysql", "SELECT 1 --", []string{"SELECT", "1"}},
+		// Adjacent `--` at EOF is a comment on a real MySQL (verified vs 8.4: `SELECT 1--` => 1).
+		{"mysql adjacent marker at EOF", "mysql", "SELECT 1--", []string{"SELECT", "1"}},
+		// Only ASCII whitespace/control triggers the comment. A non-ASCII space (NBSP, U+00A0)
+		// does not, so `--` stays two operators (MySQL 8.4 errors on `SELECT 1--<NBSP>2`, i.e.
+		// it is not `SELECT 1`; NBSP is then skipped as ordinary whitespace, leaving 1 - -2).
+		{"mysql non-ascii space after marker", "mysql", "SELECT 1--\u00a02", []string{"SELECT", "1", "-", "-", "2"}},
 		{"mysql triple dash", "mysql", "SELECT a---b", []string{"SELECT", "a", "-", "-", "-", "b"}},
 		{"mysql normal comment mid-query", "mysql", "SELECT 1 -- c\nFROM t", []string{"SELECT", "1", "FROM", "t"}},
 		// Postgres is unchanged: `--` is always a comment (standard SQL), so `--2` is dropped.

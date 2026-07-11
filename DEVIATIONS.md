@@ -169,10 +169,12 @@ dialect, so it tokenizes MySQL `SELECT 1--2` as `SELECT 1` (dropping `--2` as a 
 pinned reference: `tokenize("SELECT 1--2", dialect="mysql")` → `[SELECT, 1]`.
 
 **What sqlglot-go does:** for MySQL, `--` begins a line comment only when the next character is
-**whitespace/control or EOF**; otherwise it is two `-` operators. `SELECT 1--2` → `SELECT 1 - -2`
+**ASCII whitespace/control or EOF**; otherwise it is two `-` operators. `SELECT 1--2` → `SELECT 1 - -2`
 (tokens `[SELECT, 1, -, -, 2]`). Implemented via `TokenizerConfig.LineCommentRequiresSpace{"--": true}` on
 the MySQL dialect + a guard in `tokens.TokenizerCore.lineCommentSuppressed`; base and Postgres are
-untouched (Postgres `--` stays an unconditional comment, per the SQL standard).
+untouched (Postgres `--` stays an unconditional comment, per the SQL standard). Verified against MySQL 8.4:
+`SELECT 1--` (marker at EOF) is a comment; `SELECT 1--<NBSP>2` errors (a non-ASCII space like U+00A0 does
+**not** trigger the comment — only ASCII whitespace/control does), so the trigger is ASCII-restricted.
 
 **Why we diverge (correctness):** this matches the real server. MySQL's manual: *"the `--` comment style
 requires the second dash to be followed by at least one whitespace or control character (such as a space,
