@@ -233,13 +233,15 @@ func TestScope(t *testing.T) {
 		}
 	}
 
+	// Upstream v30.12.0 omits the DML root. R3 contributes exactly one
+	// successful target-only root while preserving all existing nested scopes.
 	dmlCases := []struct {
 		sql  string
 		want int
 	}{
-		{"UPDATE customers SET total_spent = (SELECT 1 FROM t1) WHERE EXISTS (SELECT 1 FROM t2)", 3},
-		{"UPDATE tbl1 SET col = 1 WHERE EXISTS (SELECT 1 FROM tbl2 WHERE tbl1.id = tbl2.id)", 1},
-		{"UPDATE tbl1 SET col = 0", 0},
+		{"UPDATE customers SET total_spent = (SELECT 1 FROM t1) WHERE EXISTS (SELECT 1 FROM t2)", 4},
+		{"UPDATE tbl1 SET col = 1 WHERE EXISTS (SELECT 1 FROM tbl2 WHERE tbl1.id = tbl2.id)", 2},
+		{"UPDATE tbl1 SET col = 0", 1},
 	}
 	for _, tc := range dmlCases {
 		if got := len(traverseScope(parseOne(t, tc.sql))); got != tc.want {

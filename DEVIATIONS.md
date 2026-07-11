@@ -7,8 +7,8 @@ porters know exactly where — and why — the two disagree. It complements the 
 ledgers, which carry the fine detail.
 
 Deviations are grouped by how *observable* they are. Only **§1 changes same-dialect parse→generate
-output** vs upstream; everything else is either cross-dialect-only, output-preserving, or a
-not-yet-ported scope boundary.
+output** vs upstream; everything else is either cross-dialect-only, output-preserving, a
+not-yet-ported boundary, or a Go-only analysis API / scope extension.
 
 ---
 
@@ -237,6 +237,45 @@ These currently produce a raw-text `Command` (round-trips verbatim, fails closed
   `TBLPROPERTIES`/`USING`) live in Hive's `PropertyParsers` overlay, deliberately kept out of the shared
   base registry until a paired parser+generator slice, so base/mysql/postgres/presto keep failing them
   closed (`parser/dialect_hive_overrides.go`).
+
+---
+
+## 6. Go-only analysis API extensions
+
+### 6.1 Top-level UPDATE/DELETE/MERGE scopes
+
+**What upstream does:** in v30.12.0, `traverse_scope` traverses the CTE and nested-query scopes under
+an `Update`, `Delete`, or `Merge`, then returns without yielding a scope for the DML root itself
+(`.reference/sqlglot-v30.12.0/sqlglot/optimizer/scope.py:700-706`).
+
+**What sqlglot-go does:** the public analysis APIs, `TraverseScope` and `BuildScope`, and the
+package-private `traverseScope` analysis traversal additionally yield a root `Scope` over the original
+`Update`, `Delete`, or `Merge` AST, but only after resolving its complete source graph. Sources are registered in
+deterministic order and comprise the physical write target plus `FROM` / `USING` sources and
+recursively attached `JOIN` `Table` / `Subquery` sources. Existing CTE and nested-query scopes are
+preserved and attached: unqualified read-side table references bind to `WITH` CTE scopes, and source
+subqueries bind to their child scopes.
+
+**Fail-closed guarantee:** if a source has a malformed or unsupported shape, traversal logs a warning
+and omits only the DML-root scope. It retains all CTE and nested-query child scopes already traversed,
+never emits a root with a partial source set, and never panics. A missing source can hide columns from
+lineage or access analysis and produce a wrong-ALLOW result, so this deliberate Go extension favors
+complete-or-none DML-root scope emission.
+
+**Optimizer containment:** `QualifyTables`, `QualifyColumns`, `ValidateQualifyColumns`, and
+`IsolateTableSelects` use a separate internal compatibility traversal that reproduces pinned
+v30.12.0 behavior. It excludes the entire R3-only augmentation: both the DML-root scope and any
+source-query scopes traversed solely to bind that root. Filtering only the root is incorrect because
+upstream's generic DML walk is shape-dependent, as verified by differential tests: `UPDATE` `FROM` /
+`JOIN` source subqueries can remain unvisited, while `DELETE` / `MERGE` `USING` subqueries can be
+traversed and qualified. Preserving that asymmetry avoids same-dialect output drift and
+correlated-subquery validation panics. This optimizer-only compatibility route does not weaken the
+public analysis path's complete-or-none source-set guarantee for lineage and access analysis.
+
+**Tests and parse/generate status:** DML scope and source-subquery optimizer-parity regressions are
+covered in `optimizer/scope_dml_test.go`. No `upstream_extensions.jsonl` entry applies because this
+extension changes neither parsing nor SQL generation; it exposes additional analysis scopes over the
+existing AST and grammar.
 
 ---
 

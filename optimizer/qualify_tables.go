@@ -103,7 +103,7 @@ func QualifyTables(expression exp.Expression, db any, catalog any, dialect any, 
 		}
 	}
 
-	for _, scope := range traverseScope(expression) {
+	for _, scope := range traverseScopeForOptimizer(expression) {
 		localColumns := scope.LocalColumns()
 		canonicalAliases := map[string]string{}
 

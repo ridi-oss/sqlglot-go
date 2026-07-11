@@ -12,7 +12,7 @@ func IsolateTableSelects(expression exp.Expression, schemaArg any, dialect any) 
 		panic(err)
 	}
 
-	for _, scope := range traverseScope(expression) {
+	for _, scope := range traverseScopeForOptimizer(expression) {
 		selected := scope.selectedSourcesMap()
 		if len(selected) == 1 {
 			continue

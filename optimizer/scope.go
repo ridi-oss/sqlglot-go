@@ -1,6 +1,7 @@
 package optimizer
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
@@ -58,6 +59,9 @@ type Scope struct {
 	canBeCorrelated bool
 
 	sourceOrder []string
+	// DML traversal interleaves source and scalar subqueries in AST order. Keep
+	// that exact child sequence for Scope.Traverse without duplicating TableScopes.
+	dmlChildScopes []*Scope
 
 	collected               bool
 	scansAllSubscopeColumns bool
@@ -180,14 +184,32 @@ func (s *Scope) branch(expression exp.Expression, opts scopeOptions) *Scope {
 	})
 }
 
+type scopeTraversalMode int
+
+const (
+	scopeTraversalAnalysis scopeTraversalMode = iota
+	scopeTraversalOptimizer
+)
+
 func TraverseScope(expression exp.Expression) []*Scope { return traverseScope(expression) }
 
 func traverseScope(expression exp.Expression) []*Scope {
+	return traverseScopeWithMode(expression, scopeTraversalAnalysis)
+}
+
+// Transformation and validation passes must use this compatibility traversal because the
+// Go-only R3 analysis traversal intentionally emits more scopes than pinned upstream, including
+// source-subquery scopes created solely to bind DML sources.
+func traverseScopeForOptimizer(expression exp.Expression) []*Scope {
+	return traverseScopeWithMode(expression, scopeTraversalOptimizer)
+}
+
+func traverseScopeWithMode(expression exp.Expression, mode scopeTraversalMode) []*Scope {
 	if !isTraversable(expression) {
 		return nil
 	}
 	out := []*Scope{}
-	_traverseScope(newScope(expression, scopeOptions{}), &out)
+	_traverseScope(newScope(expression, scopeOptions{}), &out, mode)
 	return out
 }
 
@@ -201,43 +223,42 @@ func buildScope(expression exp.Expression) *Scope {
 	return nil
 }
 
-func _traverseScope(scope *Scope, out *[]*Scope) {
+func _traverseScope(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 	expression := scope.Expression
 	if expression == nil {
 		return
 	}
 
 	if expression.Kind() == exp.KindSelect {
-		_traverseSelect(scope, out)
+		_traverseSelect(scope, out, mode)
 	} else if expression.Is(exp.TraitSetOperation) {
-		_traverseCtes(scope, out)
-		_traverseUnion(scope, out)
+		_traverseCtes(scope, out, mode)
+		_traverseUnion(scope, out, mode)
 		return
 	} else if expression.Kind() == exp.KindSubquery {
 		if scope.IsRoot() {
-			_traverseSelect(scope, out)
+			_traverseSelect(scope, out, mode)
 		} else {
-			_traverseSubqueries(scope, out)
+			_traverseSubqueries(scope, out, mode)
 		}
 	} else if expression.Kind() == exp.KindTable {
-		_traverseTables(scope, out)
+		_traverseTables(scope, out, mode)
 	} else if expression.Is(exp.TraitUDTF) {
-		_traverseUdtfs(scope, out)
+		_traverseUdtfs(scope, out, mode)
 	} else if expression.Is(exp.TraitDDL) {
 		ddlExpression := asExpression(expression.Arg("expression"))
 		if ddlExpression != nil && ddlExpression.Is(exp.TraitQuery) {
-			_traverseCtes(scope, out)
-			_traverseScope(newScope(ddlExpression, scopeOptions{cteSources: scope.CTESources}), out)
+			_traverseCtes(scope, out, mode)
+			_traverseScope(newScope(ddlExpression, scopeOptions{cteSources: scope.CTESources}), out, mode)
 		}
 		return
 	} else if expression.Is(exp.TraitDML) {
-		_traverseCtes(scope, out)
-		for _, query := range findAllInScope(expression, exp.TraitQuery) {
-			parent := query.Parent()
-			if parent == nil || (parent.Kind() != exp.KindCTE && parent.Kind() != exp.KindSubquery) {
-				_traverseScope(newScope(query, scopeOptions{cteSources: scope.CTESources}), out)
-			}
+		_traverseCtes(scope, out, mode)
+		if mode == scopeTraversalAnalysis && isDMLRootKind(expression.Kind()) {
+			_traverseDML(scope, out, mode)
+			return
 		}
+		_traverseDMLQueries(scope, out, mode)
 		return
 	} else {
 		logWarning("Cannot traverse scope %s with type '%s'", expression.ToS(), exp.ClassName(expression.Kind()))
@@ -247,13 +268,13 @@ func _traverseScope(scope *Scope, out *[]*Scope) {
 	*out = append(*out, scope)
 }
 
-func _traverseSelect(scope *Scope, out *[]*Scope) {
-	_traverseCtes(scope, out)
-	_traverseTables(scope, out)
-	_traverseSubqueries(scope, out)
+func _traverseSelect(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
+	_traverseCtes(scope, out, mode)
+	_traverseTables(scope, out, mode)
+	_traverseSubqueries(scope, out, mode)
 }
 
-func _traverseUnion(scope *Scope, out *[]*Scope) {
+func _traverseUnion(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 	var prevScope *Scope
 	unionScopeStack := []*Scope{scope}
 	setOp := scope.Expression
@@ -270,14 +291,14 @@ func _traverseUnion(scope *Scope, out *[]*Scope) {
 		})
 
 		if isSetOperation(expression) {
-			_traverseCtes(newScope, out)
+			_traverseCtes(newScope, out, mode)
 			unionScopeStack = append(unionScopeStack, newScope)
 			expressionStack = append(expressionStack, expression.Expr(), expression.This())
 			continue
 		}
 
 		before := len(*out)
-		_traverseScope(newScope, out)
+		_traverseScope(newScope, out, mode)
 		var childScope *Scope
 		if len(*out) > before {
 			childScope = (*out)[len(*out)-1]
@@ -294,7 +315,7 @@ func _traverseUnion(scope *Scope, out *[]*Scope) {
 	}
 }
 
-func _traverseCtes(scope *Scope, out *[]*Scope) {
+func _traverseCtes(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 	sources := map[string]any{}
 	sourceOrder := []string{}
 
@@ -315,7 +336,7 @@ func _traverseCtes(scope *Scope, out *[]*Scope) {
 			cteSources:   sources,
 			outerColumns: cte.AliasColumnNames(),
 			scopeType:    ScopeTypeCTE,
-		}), out)
+		}), out, mode)
 
 		var childScope *Scope
 		if len(*out) > before {
@@ -335,7 +356,424 @@ func _traverseCtes(scope *Scope, out *[]*Scope) {
 	}
 }
 
-func _traverseTables(scope *Scope, out *[]*Scope) {
+type dmlSourceCandidate struct {
+	expression exp.Expression
+	location   string
+	isTarget   bool
+}
+
+type dmlSourceValidationError struct {
+	location string
+	reason   string
+}
+
+func isDMLRootKind(kind exp.Kind) bool {
+	return kind == exp.KindUpdate || kind == exp.KindDelete || kind == exp.KindMerge
+}
+
+func _traverseDML(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
+	scope.dmlChildScopes = append(scope.dmlChildScopes, scope.CTEScopes...)
+	candidates, validationErr := collectDMLSourceCandidates(scope.Expression)
+	if validationErr != nil {
+		logWarning(
+			"Cannot build %s root scope: invalid %s (%s)",
+			exp.ClassName(scope.Expression.Kind()),
+			validationErr.location,
+			validationErr.reason,
+		)
+		_traverseDMLQueries(scope, out, mode)
+		return
+	}
+
+	sourceSubqueries := map[exp.Expression]bool{}
+	for _, candidate := range candidates {
+		if candidate.expression.Kind() == exp.KindSubquery {
+			sourceSubqueries[candidate.expression] = true
+		}
+	}
+
+	queryScopes := map[exp.Expression]*Scope{}
+	processedSourceSubqueries := map[exp.Expression]bool{}
+	for _, query := range findAllInScope(scope.Expression, exp.TraitQuery) {
+		parent := query.Parent()
+		if parent != nil && (parent.Kind() == exp.KindCTE || parent.Kind() == exp.KindSubquery) {
+			continue
+		}
+
+		isSourceSubquery := sourceSubqueries[query]
+		if isSourceSubquery && processedSourceSubqueries[query] {
+			continue
+		}
+		childScope, wrapperScope := traverseDMLQuery(scope, query, isSourceSubquery, out, mode)
+		if isSourceSubquery {
+			processedSourceSubqueries[query] = true
+		}
+		if childScope == nil {
+			continue
+		}
+		queryScopes[query] = childScope
+		if isSourceSubquery {
+			attachDMLSourceScope(scope, childScope, wrapperScope)
+		} else {
+			scope.SubqueryScopes = append(scope.SubqueryScopes, childScope)
+			scope.dmlChildScopes = append(scope.dmlChildScopes, childScope)
+		}
+	}
+
+	// A source can be attached through a defensive, undeclared argument key. ArgKeys does
+	// not expose such keys to walkInScope, so make sure every validated source Subquery is
+	// still traversed exactly once.
+	for _, candidate := range candidates {
+		subquery := candidate.expression
+		if subquery.Kind() != exp.KindSubquery || processedSourceSubqueries[subquery] {
+			continue
+		}
+		childScope, wrapperScope := traverseDMLQuery(scope, subquery, true, out, mode)
+		processedSourceSubqueries[subquery] = true
+		if childScope == nil {
+			continue
+		}
+		queryScopes[subquery] = childScope
+		attachDMLSourceScope(scope, childScope, wrapperScope)
+	}
+
+	if bindingErr := bindDMLSources(scope, candidates, queryScopes); bindingErr != nil {
+		logWarning(
+			"Cannot build %s root scope: invalid %s (%s)",
+			exp.ClassName(scope.Expression.Kind()),
+			bindingErr.location,
+			bindingErr.reason,
+		)
+		return
+	}
+
+	*out = append(*out, scope)
+}
+
+func attachDMLSourceScope(scope *Scope, childScope *Scope, wrapperScope *Scope) {
+	scope.DerivedTableScopes = append(scope.DerivedTableScopes, childScope)
+	scope.TableScopes = append(scope.TableScopes, childScope)
+	scope.dmlChildScopes = append(scope.dmlChildScopes, wrapperScope)
+}
+
+// _traverseDMLQueries mirrors the pinned v30.12.0 generic DML walk. Its query
+// discovery is intentionally shape-dependent; do not replace it with a source walk.
+func _traverseDMLQueries(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
+	for _, query := range findAllInScope(scope.Expression, exp.TraitQuery) {
+		parent := query.Parent()
+		if parent == nil || (parent.Kind() != exp.KindCTE && parent.Kind() != exp.KindSubquery) {
+			_traverseScope(newScope(query, scopeOptions{cteSources: scope.CTESources}), out, mode)
+		}
+	}
+}
+
+func traverseDMLQuery(scope *Scope, query exp.Expression, isSourceSubquery bool, out *[]*Scope, mode scopeTraversalMode) (*Scope, *Scope) {
+	before := len(*out)
+	if isSourceSubquery {
+		wrapperScope := newScope(query, scopeOptions{
+			parent:       scope,
+			scopeType:    ScopeTypeDerivedTable,
+			cteSources:   scope.CTESources,
+			outerColumns: query.AliasColumnNames(),
+		})
+		_traverseScope(wrapperScope, out, mode)
+		if len(wrapperScope.SubqueryScopes) > 0 {
+			childScope := wrapperScope.SubqueryScopes[len(wrapperScope.SubqueryScopes)-1]
+			configureDMLSourceScope(childScope, scope, query)
+			return childScope, wrapperScope
+		}
+
+		// A Subquery used as a DML source has a From/Join parent, so the regular
+		// Subquery boundary logic intentionally leaves its inner query to the outer
+		// table traversal. DML uses a dedicated source collector instead, therefore
+		// traverse that inner query here while retaining the already-created wrapper.
+		if len(*out) > before && (*out)[len(*out)-1] == wrapperScope {
+			*out = (*out)[:len(*out)-1]
+		}
+		inner := query.This()
+		if isNilDMLExpression(inner) || !inner.Is(exp.TraitQuery) {
+			*out = append(*out, wrapperScope)
+			return nil, wrapperScope
+		}
+		innerBefore := len(*out)
+		_traverseScope(wrapperScope.branch(inner, scopeOptions{
+			scopeType:    ScopeTypeDerivedTable,
+			outerColumns: query.AliasColumnNames(),
+		}), out, mode)
+		if len(*out) == innerBefore {
+			*out = append(*out, wrapperScope)
+			return nil, wrapperScope
+		}
+		childScope := (*out)[len(*out)-1]
+		configureDMLSourceScope(childScope, scope, query)
+		wrapperScope.SubqueryScopes = append(wrapperScope.SubqueryScopes, childScope)
+		*out = append(*out, wrapperScope)
+		return childScope, wrapperScope
+	}
+
+	_traverseScope(newScope(query, scopeOptions{cteSources: scope.CTESources}), out, mode)
+	if len(*out) == before {
+		return nil, nil
+	}
+	return (*out)[len(*out)-1], nil
+}
+
+func configureDMLSourceScope(childScope *Scope, parent *Scope, subquery exp.Expression) {
+	childScope.Parent = parent
+	childScope.ScopeType = ScopeTypeDerivedTable
+	childScope.OuterColumns = append([]string(nil), subquery.AliasColumnNames()...)
+	childScope.canBeCorrelated = false
+}
+
+func collectDMLSourceCandidates(root exp.Expression) ([]dmlSourceCandidate, *dmlSourceValidationError) {
+	candidates := []dmlSourceCandidate{}
+	visited := map[exp.Expression]bool{}
+
+	var addCandidate func(exp.Expression, string, bool) *dmlSourceValidationError
+	addCandidate = func(expression exp.Expression, location string, isTarget bool) *dmlSourceValidationError {
+		if isNilDMLExpression(expression) {
+			return &dmlSourceValidationError{location: location, reason: "missing Table or Subquery"}
+		}
+		if expression.Kind() != exp.KindTable && expression.Kind() != exp.KindSubquery {
+			return &dmlSourceValidationError{
+				location: location,
+				reason:   fmt.Sprintf("expected Table or Subquery, got %s", exp.ClassName(expression.Kind())),
+			}
+		}
+		if visited[expression] {
+			return nil
+		}
+		visited[expression] = true
+		candidates = append(candidates, dmlSourceCandidate{
+			expression: expression,
+			location:   location,
+			isTarget:   isTarget,
+		})
+
+		joins, err := strictDMLExpressionList(expression.Arg("joins"), false, location+".joins")
+		if err != nil {
+			return err
+		}
+		for i, join := range joins {
+			joinLocation := fmt.Sprintf("%s.joins[%d]", location, i)
+			if join.Kind() != exp.KindJoin {
+				return &dmlSourceValidationError{
+					location: joinLocation,
+					reason:   fmt.Sprintf("expected Join, got %s", exp.ClassName(join.Kind())),
+				}
+			}
+			if err := addCandidate(join.This(), joinLocation+".this", false); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	target := root.This()
+	if !isNilDMLExpression(target) && target.Kind() == exp.KindSchema {
+		target = target.This()
+	}
+	if err := addCandidate(target, "this", true); err != nil {
+		return nil, err
+	}
+
+	fromUnderscore := root.Arg("from_")
+	fromFallback := root.Arg("from")
+	if fromUnderscore != nil && fromFallback != nil {
+		return nil, &dmlSourceValidationError{
+			location: "from_",
+			reason:   "both from_ and defensive from fallback are present",
+		}
+	}
+	fromValue := fromUnderscore
+	fromLocation := "from_"
+	if fromValue == nil {
+		fromValue = fromFallback
+		fromLocation = "from"
+	}
+	if fromValue != nil {
+		fromExpression, ok := fromValue.(exp.Expression)
+		if !ok || isNilDMLExpression(fromExpression) {
+			return nil, &dmlSourceValidationError{location: fromLocation, reason: "expected From"}
+		}
+		if fromExpression.Kind() != exp.KindFrom {
+			return nil, &dmlSourceValidationError{
+				location: fromLocation,
+				reason:   fmt.Sprintf("expected From, got %s", exp.ClassName(fromExpression.Kind())),
+			}
+		}
+		if err := addCandidate(fromExpression.This(), fromLocation+".this", false); err != nil {
+			return nil, err
+		}
+		fromExpressions, err := strictDMLExpressionList(fromExpression.Arg("expressions"), false, fromLocation+".expressions")
+		if err != nil {
+			return nil, err
+		}
+		for i, expression := range fromExpressions {
+			if err := addCandidate(expression, fmt.Sprintf("%s.expressions[%d]", fromLocation, i), false); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	rootJoins, err := strictDMLExpressionList(root.Arg("joins"), false, "joins")
+	if err != nil {
+		return nil, err
+	}
+	for i, join := range rootJoins {
+		location := fmt.Sprintf("joins[%d]", i)
+		if join.Kind() != exp.KindJoin {
+			return nil, &dmlSourceValidationError{
+				location: location,
+				reason:   fmt.Sprintf("expected Join, got %s", exp.ClassName(join.Kind())),
+			}
+		}
+		if err := addCandidate(join.This(), location+".this", false); err != nil {
+			return nil, err
+		}
+	}
+
+	usingRequired := root.Kind() == exp.KindMerge
+	usingExpressions, err := strictDMLExpressionList(root.Arg("using"), true, "using")
+	if err != nil {
+		return nil, err
+	}
+	if usingRequired && len(usingExpressions) == 0 {
+		return nil, &dmlSourceValidationError{location: "using", reason: "missing required Table or Subquery"}
+	}
+	for i, expression := range usingExpressions {
+		location := "using"
+		if len(usingExpressions) > 1 {
+			location = fmt.Sprintf("using[%d]", i)
+		}
+		if err := addCandidate(expression, location, false); err != nil {
+			return nil, err
+		}
+	}
+
+	return candidates, nil
+}
+
+func strictDMLExpressionList(value any, allowScalar bool, location string) ([]exp.Expression, *dmlSourceValidationError) {
+	if value == nil {
+		return nil, nil
+	}
+
+	var expressions []exp.Expression
+	switch values := value.(type) {
+	case exp.Expression:
+		if !allowScalar {
+			return nil, &dmlSourceValidationError{location: location, reason: "expected expression list"}
+		}
+		expressions = []exp.Expression{values}
+	case []exp.Expression:
+		expressions = values
+	case []any:
+		expressions = make([]exp.Expression, 0, len(values))
+		for i, value := range values {
+			expression, ok := value.(exp.Expression)
+			if !ok || isNilDMLExpression(expression) {
+				return nil, &dmlSourceValidationError{
+					location: fmt.Sprintf("%s[%d]", location, i),
+					reason:   "expected non-nil expression",
+				}
+			}
+			expressions = append(expressions, expression)
+		}
+	default:
+		return nil, &dmlSourceValidationError{location: location, reason: "expected expression list"}
+	}
+
+	for i, expression := range expressions {
+		if isNilDMLExpression(expression) {
+			return nil, &dmlSourceValidationError{
+				location: fmt.Sprintf("%s[%d]", location, i),
+				reason:   "expected non-nil expression",
+			}
+		}
+	}
+	return expressions, nil
+}
+
+func isNilDMLExpression(expression exp.Expression) bool {
+	if expression == nil {
+		return true
+	}
+	if node, ok := expression.(*exp.Node); ok {
+		return node == nil
+	}
+	return false
+}
+
+func bindDMLSources(scope *Scope, candidates []dmlSourceCandidate, queryScopes map[exp.Expression]*Scope) *dmlSourceValidationError {
+	taken := copySources(scope.Sources)
+	bound := map[string]any{}
+	boundOrder := []string{}
+
+	for _, candidate := range candidates {
+		expression := candidate.expression
+		var source any
+		var sourceName string
+
+		if expression.Kind() == exp.KindSubquery {
+			childScope := queryScopes[expression]
+			if childScope == nil {
+				return &dmlSourceValidationError{
+					location: candidate.location,
+					reason:   "Subquery did not produce a child scope",
+				}
+			}
+			sourceName = getSourceAlias(expression)
+			if candidate.isTarget {
+				// The write target must remain the physical AST relation even when it is
+				// subquery-shaped; only read-side Subqueries bind to child scopes.
+				source = expression
+			} else {
+				source = childScope
+			}
+		} else {
+			tableName := expression.Name()
+			sourceName = expression.AliasOrName()
+			source = expression
+
+			if !candidate.isTarget && expression.DbName() == "" {
+				if cteSource, ok := scope.Sources[tableName]; ok {
+					pivots := expressionsFor(expression, "pivots")
+					if len(pivots) > 0 {
+						sourceName = pivots[0].Alias()
+					} else {
+						source = cteSource
+					}
+				}
+			}
+		}
+
+		key := sourceName
+		if _, alreadyBound := bound[key]; alreadyBound || dmlSourceCollision(scope.Sources[key], source) {
+			key = findNewName(taken, sourceName)
+		}
+		bound[key] = source
+		boundOrder = append(boundOrder, key)
+		taken[key] = source
+	}
+
+	for _, name := range boundOrder {
+		scope.Sources[name] = bound[name]
+		scope.sourceOrder = appendSourceOrder(scope.sourceOrder, name)
+	}
+	return nil
+}
+
+func dmlSourceCollision(existing any, source any) bool {
+	if existing == nil {
+		return false
+	}
+	existingScope, existingIsScope := existing.(*Scope)
+	sourceScope, sourceIsScope := source.(*Scope)
+	return !existingIsScope || !sourceIsScope || existingScope != sourceScope
+}
+
+func _traverseTables(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 	sources := map[string]any{}
 	sourceOrder := []string{}
 	expressions := []exp.Expression{}
@@ -425,7 +863,7 @@ func _traverseTables(scope *Scope, out *[]*Scope) {
 			lateralSources: lateralSources,
 			outerColumns:   expression.AliasColumnNames(),
 			scopeType:      scopeType,
-		}), out)
+		}), out, mode)
 
 		var childScope *Scope
 		if len(*out) > before {
@@ -446,17 +884,17 @@ func _traverseTables(scope *Scope, out *[]*Scope) {
 	}
 }
 
-func _traverseSubqueries(scope *Scope, out *[]*Scope) {
+func _traverseSubqueries(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 	for _, subquery := range scope.Subqueries() {
 		before := len(*out)
-		_traverseScope(scope.branch(subquery, scopeOptions{scopeType: ScopeTypeSubquery}), out)
+		_traverseScope(scope.branch(subquery, scopeOptions{scopeType: ScopeTypeSubquery}), out, mode)
 		if len(*out) > before {
 			scope.SubqueryScopes = append(scope.SubqueryScopes, (*out)[len(*out)-1])
 		}
 	}
 }
 
-func _traverseUdtfs(scope *Scope, out *[]*Scope) {
+func _traverseUdtfs(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 	udtfExpressions := []exp.Expression{}
 	if scope.Expression.Kind() == exp.KindUnnest {
 		udtfExpressions = scope.Expression.Expressions()
@@ -474,7 +912,7 @@ func _traverseUdtfs(scope *Scope, out *[]*Scope) {
 		_traverseScope(scope.branch(expression, scopeOptions{
 			scopeType:    ScopeTypeSubquery,
 			outerColumns: expression.AliasColumnNames(),
-		}), out)
+		}), out, mode)
 		if len(*out) > before {
 			childScope := (*out)[len(*out)-1]
 			key := getSourceAlias(expression)
@@ -900,6 +1338,10 @@ func (s *Scope) IsCTE() bool          { return s.ScopeType == ScopeTypeCTE }
 func (s *Scope) IsRoot() bool         { return s.ScopeType == ScopeTypeRoot }
 func (s *Scope) IsUDTF() bool         { return s.ScopeType == ScopeTypeUDTF }
 
+func isDMLRootScope(scope *Scope) bool {
+	return scope != nil && scope.IsRoot() && scope.Expression != nil && isDMLRootKind(scope.Expression.Kind())
+}
+
 func (s *Scope) IsCorrelatedSubquery() bool {
 	return s.canBeCorrelated && len(s.ExternalColumns()) > 0
 }
@@ -946,10 +1388,14 @@ func (s *Scope) Traverse() []*Scope {
 		scope := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		result = append(result, scope)
-		stack = append(stack, scope.CTEScopes...)
-		stack = append(stack, scope.UnionScopes...)
-		stack = append(stack, scope.TableScopes...)
-		stack = append(stack, scope.SubqueryScopes...)
+		if isDMLRootScope(scope) {
+			stack = append(stack, scope.dmlChildScopes...)
+		} else {
+			stack = append(stack, scope.CTEScopes...)
+			stack = append(stack, scope.UnionScopes...)
+			stack = append(stack, scope.TableScopes...)
+			stack = append(stack, scope.SubqueryScopes...)
+		}
 	}
 	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
 		result[i], result[j] = result[j], result[i]

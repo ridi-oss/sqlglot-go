@@ -53,7 +53,7 @@ func QualifyColumns(expression exp.Expression, schemaArg any, expandAliasRefs bo
 		pseudocolumns = map[string]bool{}
 	}
 
-	for _, scope := range traverseScope(expression) {
+	for _, scope := range traverseScopeForOptimizer(expression) {
 		if d.PreferCTEAliasColumn {
 			PushdownCTEAliasColumns(scope)
 		}
@@ -98,7 +98,7 @@ func QualifyColumns(expression exp.Expression, schemaArg any, expandAliasRefs bo
 
 func ValidateQualifyColumns(expression exp.Expression, sql string) exp.Expression {
 	var allUnqualifiedColumns []exp.Expression
-	for _, scope := range traverseScope(expression) {
+	for _, scope := range traverseScopeForOptimizer(expression) {
 		if scope.Expression != nil && scope.Expression.Kind() == exp.KindSelect {
 			unqualifiedColumns := scope.UnqualifiedColumns()
 			if externalColumns := scope.ExternalColumns(); len(externalColumns) > 0 && !scope.IsCorrelatedSubquery() && len(scope.Pivots()) == 0 {
