@@ -248,6 +248,38 @@ func TestQualifyTablesSearchPath(t *testing.T) {
 		expression := qualify(t, "SELECT * FROM t1", failOnSearchPathLookupSchema{}, nil, "legacy", "cat")
 		assertParts(t, soleTable(t, expression), "legacy", "cat")
 	})
+
+	// The search-path probe is a 2-part Table{this, db} (no catalog), yet it must still resolve
+	// against a 3-level catalog.schema.table mapping — stamping db by proven existence while
+	// leaving catalog for the caller to supply. A depth-3 lineage consumer depends on this match;
+	// if s.Find required the catalog level, searchPathMode would never stamp and the consumer
+	// would silently over-deny. Locks the schema/db-only division documented in the PR review.
+	t.Run("depth-3 schema matches db-only probe", func(t *testing.T) {
+		depth3, err := schema.NewMappingSchema(schema.M(
+			"cat", schema.M(
+				"public", schema.M(
+					"users", schema.M("rrn", "INT"),
+				),
+				"analytics", schema.M(
+					"events", schema.M("id", "INT"),
+				),
+			),
+		), nil, true)
+		if err != nil {
+			t.Fatalf("NewMappingSchema: %v", err)
+		}
+		if got := depth3.SupportedTableArgs(); len(got) != 3 || got[0] != "this" || got[1] != "db" || got[2] != "catalog" {
+			t.Fatalf("SupportedTableArgs() = %v, want [this db catalog]", got)
+		}
+
+		searchPath := []string{"public", "analytics"}
+		// First candidate schema in the path proves the table -> db stamped, catalog untouched.
+		assertParts(t, soleTable(t, qualify(t, "SELECT * FROM users", depth3, searchPath, nil, nil)), "public", "")
+		// Second candidate schema (search-path order is honored on a 3-level mapping too).
+		assertParts(t, soleTable(t, qualify(t, "SELECT * FROM events", depth3, searchPath, nil, nil)), "analytics", "")
+		// Unknown table stays fail-closed: neither db nor catalog is stamped.
+		assertParts(t, soleTable(t, qualify(t, "SELECT * FROM missing", depth3, searchPath, nil, nil)), "", "")
+	})
 }
 
 func TestQualifyTablesFixtures(t *testing.T) {
