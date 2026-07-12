@@ -188,15 +188,21 @@ over-eagerly comments it out; a consumer that relies on the token stream to dist
 (`/*! ... */` and `/*!NNNNN ... */`) from the token stream exactly like ordinary block comments. The body
 is retained only as comment metadata; it is never parsed as SQL, regardless of the gate. sqlglot-go's bare
 `mysql` behavior remains identical. Activation is explicitly opt-in through a dialect setting such as
-`"mysql, mysql_version=8.0.33"`; leaving `mysql_version` unset preserves upstream behavior and corpus parity.
+`"mysql, mysql_version=80035"`; leaving `mysql_version` unset preserves upstream behavior and corpus parity.
 
-**Version and gate semantics:** `mysql_version` accepts dotted MySQL versions and suffix-bearing forms (for
-example `8.0.33` and vendor-suffixed variants), then converts the numeric major/minor/patch prefix to MySQL's
-five-digit comparable form (`8.0.33` → `80033`, `8.4.9` → `80409`). A bare `/*! ... */` body always activates
-when the setting is present. For `/*!NNNNN ... */`, the first five digits are the gate: the body activates
-when the configured comparable version is greater than or equal to it (`50000` and `80033` activate at
-8.0.33; `80034` and `99999` do not). Active bodies are tokenized as SQL and the wrapper plus gate disappear;
-inactive bodies remain comment metadata, including their leading `!` and digits.
+**Version and gate semantics:** `mysql_version` is MySQL's `MYSQL_VERSION_ID` integer — the comparable
+value `major*10000 + minor*100 + patch` (`80035` for MySQL 8.0.35). This is exactly the `/*!NNNNN` gate form
+and precisely what the C API `mysql_get_server_version()` returns, so a client passes the integer it already
+has; a dotted version string is intentionally **not** accepted (it silently mis-parsed as a major version and
+over-activated near-boundary gates). A bare `/*! ... */` body always activates when the setting is present.
+For `/*!NNNNN ... */`, the first five digits are the gate: the body activates when the configured
+`MYSQL_VERSION_ID` is greater than or equal to it (`50000` and `80033` activate at `80035`; `80036` and
+`99999` do not). Active bodies are tokenized as SQL and the wrapper plus gate disappear; inactive bodies
+remain comment metadata, including their leading `!` and digits.
+
+**Scope:** only `/*!` version comments are activated. MySQL optimizer-hint comments (`/*+ ... */`) are left
+as ordinary comments (stripped), matching upstream — hints do not change the set of columns/tables a
+statement reads, so this is correct for the lineage/grant-hash consumers this extension serves.
 
 Only the MySQL dialect advertises the executable-comment capability. `mysql_version` is nevertheless a
 recognized setting for every dialect string so shared configuration can pass it uniformly: base and

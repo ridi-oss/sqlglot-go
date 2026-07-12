@@ -42,7 +42,11 @@ func executableCommentSQL(t *testing.T, sql, dialect string) string {
 // TestMySQLVersionExecutableComments is an original NON-UPSTREAM opt-in behavioral-extension
 // regression test. See DEVIATIONS.md §1.5.
 func TestMySQLVersionExecutableComments(t *testing.T) {
-	versioned := "mysql, mysql_version=8.0.33"
+	// mysql_version is the MYSQL_VERSION_ID integer (80033 == MySQL 8.0.33). The bare-integer
+	// input + the "newer gate" case below (/*!80034 must stay INACTIVE) is the regression for the
+	// mis-parse where a bare integer was read as a major version (80033 -> 800330000), which wrongly
+	// activated near-boundary gates like /*!80034.
+	versioned := "mysql, mysql_version=80033"
 
 	t.Run("tokenize default remains comment metadata", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -128,8 +132,8 @@ func TestMySQLVersionExecutableComments(t *testing.T) {
 func TestMySQLVersionIsInertOutsideMySQL(t *testing.T) {
 	const sql = "SELECT 1 /*!50000 + 100 */"
 	for _, dialect := range []string{
-		"base, mysql_version=8.0.33",
-		"postgres, mysql_version=8.0.33",
+		"base, mysql_version=80033",
+		"postgres, mysql_version=80033",
 	} {
 		t.Run(dialect, func(t *testing.T) {
 			wantTokens := []executableCommentToken{{text: "SELECT"}, {text: "1", comments: []string{"!50000 + 100 "}}}

@@ -13,15 +13,14 @@ func TestMySQLVersionSetting(t *testing.T) {
 		dialect string
 		want    int
 	}{
-		{name: "major minor patch", dialect: "mysql, mysql_version=8.0.33", want: 80033},
-		{name: "major minor", dialect: "mysql, mysql_version=8.4", want: 80400},
-		{name: "mysql 5 major minor patch", dialect: "mysql, mysql_version=5.7.33", want: 50733},
-		{name: "mysql 5 major minor", dialect: "mysql, mysql_version=5.7", want: 50700},
-		{name: "major only", dialect: "mysql, mysql_version=8", want: 80000},
-		{name: "patch suffix", dialect: "mysql, mysql_version=8.4.9-1.el9", want: 80409},
-		{name: "major suffix", dialect: "mysql, mysql_version=8-log", want: 80000},
-		{name: "minor suffix", dialect: "mysql, mysql_version=8.4-log", want: 80400},
-		{name: "whitespace", dialect: " mysql , mysql_version = 8.0.33 ", want: 80033},
+		// mysql_version is the MYSQL_VERSION_ID integer verbatim (the /*!NNNNN gate form
+		// and what mysql_get_server_version() returns) — not a major version, not dotted.
+		{name: "version id 8.0.35", dialect: "mysql, mysql_version=80035", want: 80035},
+		{name: "version id 8.0.33", dialect: "mysql, mysql_version=80033", want: 80033},
+		{name: "version id 8.4.0", dialect: "mysql, mysql_version=80400", want: 80400},
+		{name: "version id 5.7.44", dialect: "mysql, mysql_version=50744", want: 50744},
+		{name: "version id 5.7.0", dialect: "mysql, mysql_version=50700", want: 50700},
+		{name: "whitespace", dialect: " mysql , mysql_version = 80035 ", want: 80035},
 	}
 
 	for _, tt := range tests {
@@ -60,11 +59,10 @@ func TestMySQLVersionSettingErrors(t *testing.T) {
 		{name: "missing value delimiter", dialect: "mysql, mysql_version", wantError: `dialect setting "mysql_version" requires a value`},
 		{name: "empty", dialect: "mysql, mysql_version=", wantError: "mysql_version"},
 		{name: "non numeric start", dialect: "mysql, mysql_version=release-8.0.33", wantError: "mysql_version"},
-		{name: "missing minor", dialect: "mysql, mysql_version=8.", wantError: "mysql_version"},
-		{name: "missing patch", dialect: "mysql, mysql_version=8.4.", wantError: "mysql_version"},
-		{name: "doubled dot", dialect: "mysql, mysql_version=8..4", wantError: "mysql_version"},
-		{name: "oversized minor", dialect: "mysql, mysql_version=8.100", wantError: "mysql_version"},
-		{name: "oversized patch", dialect: "mysql, mysql_version=8.4.100", wantError: "mysql_version"},
+		{name: "dotted not supported", dialect: "mysql, mysql_version=8.0.33", wantError: "mysql_version"},
+		{name: "dotted major minor", dialect: "mysql, mysql_version=8.4", wantError: "mysql_version"},
+		{name: "version id with suffix", dialect: "mysql, mysql_version=80035-log", wantError: "mysql_version"},
+		{name: "trailing dot", dialect: "mysql, mysql_version=8.", wantError: "mysql_version"},
 		{name: "overflow", dialect: "mysql, mysql_version=" + strings.Repeat("9", 100), wantError: "mysql_version"},
 		{name: "unknown setting", dialect: "mysql, future_setting=1", wantError: `unsupported dialect setting "future_setting" (supported: normalization_strategy, mysql_version)`},
 	}
@@ -84,8 +82,8 @@ func TestMySQLVersionSettingErrors(t *testing.T) {
 
 func TestMySQLVersionSettingAcceptedButInertForOtherDialects(t *testing.T) {
 	for _, dialect := range []string{
-		", mysql_version=8.0.33",
-		"postgres, mysql_version=8.0.33",
+		", mysql_version=80033",
+		"postgres, mysql_version=80033",
 	} {
 		d, err := dialects.GetOrRaise(dialect)
 		if err != nil {
@@ -100,8 +98,8 @@ func TestMySQLVersionSettingAcceptedButInertForOtherDialects(t *testing.T) {
 	}
 
 	for _, dialect := range []string{
-		", mysql_version=8.",
-		"postgres, mysql_version=8.",
+		", mysql_version=8.0",
+		"postgres, mysql_version=8.0",
 	} {
 		if _, err := dialects.GetOrRaise(dialect); err == nil {
 			t.Fatalf("GetOrRaise(%q) succeeded, want malformed mysql_version error", dialect)

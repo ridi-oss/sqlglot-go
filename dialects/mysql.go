@@ -8,59 +8,33 @@ import (
 	"github.com/sjincho/sqlglot-go/tokens"
 )
 
+// parseMySQLVersion parses the mysql_version setting into MySQL's MYSQL_VERSION_ID —
+// the comparable integer major*10000 + minor*100 + patch (e.g. 80035 for MySQL 8.0.35).
+// This is exactly the /*!NNNNN version-comment gate form and what the C API
+// mysql_get_server_version() returns, so a client passes the integer it already has.
+// The value must be a plain decimal integer; a dotted version string is not accepted.
 func parseMySQLVersion(value string) (int, error) {
 	value = strings.TrimSpace(value)
 	invalid := func(reason string) (int, error) {
 		return 0, fmt.Errorf("invalid mysql_version %q: %s", value, reason)
 	}
 	if value == "" {
-		return invalid("expected a decimal major version")
+		return invalid("expected a MYSQL_VERSION_ID integer")
 	}
 
 	maxInt := int(^uint(0) >> 1)
-	parseComponent := func(start int) (component, end int, ok bool) {
-		if start >= len(value) || value[start] < '0' || value[start] > '9' {
-			return 0, start, false
+	id := 0
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return invalid("expected a MYSQL_VERSION_ID integer, e.g. 80035 for MySQL 8.0.35")
 		}
-		for end = start; end < len(value) && value[end] >= '0' && value[end] <= '9'; end++ {
-			digit := int(value[end] - '0')
-			if component > (maxInt-digit)/10 {
-				return 0, end, false
-			}
-			component = component*10 + digit
+		digit := int(value[i] - '0')
+		if id > (maxInt-digit)/10 {
+			return invalid("MYSQL_VERSION_ID overflows int")
 		}
-		return component, end, true
+		id = id*10 + digit
 	}
-
-	major, pos, ok := parseComponent(0)
-	if !ok {
-		return invalid("expected a decimal major version without overflow")
-	}
-	minor, patch := 0, 0
-	if pos < len(value) && value[pos] == '.' {
-		minor, pos, ok = parseComponent(pos + 1)
-		if !ok {
-			return invalid("expected a decimal minor version without overflow")
-		}
-		if minor > 99 {
-			return invalid("minor version must be at most 99")
-		}
-		if pos < len(value) && value[pos] == '.' {
-			patch, _, ok = parseComponent(pos + 1)
-			if !ok {
-				return invalid("expected a decimal patch version without overflow")
-			}
-			if patch > 99 {
-				return invalid("patch version must be at most 99")
-			}
-		}
-	}
-
-	tail := minor*100 + patch
-	if major > (maxInt-tail)/10000 {
-		return invalid("comparable version overflows int")
-	}
-	return major*10000 + tail, nil
+	return id, nil
 }
 
 func MySQL() *Dialect {
