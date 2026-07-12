@@ -35,6 +35,10 @@ func (s *orderedNameSet) add(name string) {
 }
 
 func QualifyColumns(expression exp.Expression, schemaArg any, expandAliasRefs bool, expandStars bool, inferSchema *bool, allowPartialQualification bool, dialect any) exp.Expression {
+	return qualifyColumns(expression, schemaArg, expandAliasRefs, expandStars, inferSchema, allowPartialQualification, dialect, nil)
+}
+
+func qualifyColumns(expression exp.Expression, schemaArg any, expandAliasRefs bool, expandStars bool, inferSchema *bool, allowPartialQualification bool, dialect any, report map[exp.Expression]ResolvedSource) exp.Expression {
 	s, err := schema.EnsureSchema(schemaArg, dialect, true)
 	if err != nil {
 		panic(err)
@@ -53,7 +57,21 @@ func QualifyColumns(expression exp.Expression, schemaArg any, expandAliasRefs bo
 		pseudocolumns = map[string]bool{}
 	}
 
-	for _, scope := range traverseScopeForOptimizer(expression) {
+	optimizerScopes := traverseScopeForOptimizer(expression)
+	if report != nil {
+		// R3's DML-root scopes — the DML target plus its FROM/USING/JOIN sources — live only in
+		// the analysis traversal; the optimizer traversal deliberately omits them for
+		// upstream-faithful qualification. So a DML root must populate the report from the analysis
+		// traversal, or its sources would classify as Unresolved even with R3 present. For a
+		// non-DML root the two traversals are identical, so reuse the optimizer scopes (no second
+		// pass) — preserving R2's single-traversal benefit for the common SELECT case.
+		if isDMLRootKind(expression.Kind()) {
+			populateResolutionReport(expression, report)
+		} else {
+			populateResolutionReportForScopes(expression, optimizerScopes, report)
+		}
+	}
+	for _, scope := range optimizerScopes {
 		if d.PreferCTEAliasColumn {
 			PushdownCTEAliasColumns(scope)
 		}

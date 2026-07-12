@@ -27,7 +27,9 @@ type QualifyOpts struct {
 	Identify                  bool
 	CanonicalizeTableAliases  bool
 	OnQualify                 func(exp.Expression)
-	SQL                       string
+	// ResolutionReport receives source classifications; nil disables all report work.
+	ResolutionReport map[exp.Expression]ResolvedSource
+	SQL              string
 }
 
 func DefaultQualifyOpts() QualifyOpts {
@@ -62,7 +64,9 @@ func Qualify(expression exp.Expression, opts QualifyOpts) exp.Expression {
 	}
 
 	if opts.QualifyColumns {
-		expression = QualifyColumns(expression, s, opts.ExpandAliasRefs, opts.ExpandStars, opts.InferSchema, opts.AllowPartialQualification, dialect)
+		expression = qualifyColumns(expression, s, opts.ExpandAliasRefs, opts.ExpandStars, opts.InferSchema, opts.AllowPartialQualification, dialect, opts.ResolutionReport)
+	} else if opts.ResolutionReport != nil {
+		populateResolutionReport(expression, opts.ResolutionReport)
 	}
 
 	if opts.QuoteIdentifiers {

@@ -313,6 +313,38 @@ id for its reconciliation lifecycle.
 
 ---
 
+## Opt-in behavioral extensions beyond upstream
+
+### Qualify resolution report
+
+The Go-only `optimizer.SourceKind`, `optimizer.ResolvedSource`, and
+`optimizer.QualifyOpts.ResolutionReport` API exposes the source resolution already performed by the
+qualify scope pass. It is additive: upstream's `Callable[[exp.Table], None]` callback shape remains
+unchanged as `QualifyOpts.OnQualify`, rather than being enriched with Go-only report data.
+
+Classification follows resolved scope relationships, not table-shaped syntax or name guessing. A
+selected source's dynamic type and `ScopeType` distinguish physical tables, CTEs, derived tables, and
+other scopes; physical identity comes from the resolved table's catalog, db, and name. `Unresolved` is
+intentionally the zero value so missing or unclassified results fail closed. Scalar and predicate
+subqueries are emitted from their existing `ScopeTypeSubquery` scopes.
+
+For a DML root (`UPDATE`/`DELETE`/`MERGE`), the report is populated from the R3 **analysis** traversal
+(`TraverseScope`), which carries the DML-root scope — so the DML target *and* its `FROM`/`USING`/`JOIN`
+read-sources classify (a physical source → Physical, a CTE/derived source → CTE/Derived), not just the
+target. Column qualification itself still uses the upstream-faithful optimizer traversal, which omits
+those DML-root scopes. A malformed/incomplete DML for which R3 omits the root scope falls back to
+supplementing only the exact grammatical target as Physical and leaving other root-level references
+Unresolved (fail-closed).
+
+A nil `ResolutionReport` performs no population and preserves all existing SQL and AST behavior. A
+caller-supplied map is populated during `Qualify`'s existing scope pass: a non-DML root reuses the
+`QualifyColumns` optimizer traversal (no second pass); a DML root uses the analysis traversal as above;
+and a minimal scope pass covers the column-qualification-disabled case. This is an analysis API, not a
+parse construct, so it does not add or change an entry in `testdata/upstream_extensions.jsonl` and no
+upstream-extension tripwire applies.
+
+---
+
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)
 
 The port's verified goal is **same-dialect round-trip** (read X → write X). Cross-dialect
