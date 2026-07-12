@@ -12,6 +12,12 @@ import (
 	"github.com/sjincho/sqlglot-go/tokens"
 )
 
+// Tokenize lexes sql under dialect into a token stream. It is a pure lexer, independent of the
+// parser, so it tokenizes input the parser would reject — and it never silently truncates: an
+// unterminated string, quoted identifier, block comment, or Postgres dollar-quote returns a
+// non-nil error, which a consumer should treat as fail-closed. Ordinary comments are attached to a
+// token's Comments (not emitted as stream tokens). For the byte-exact source lexeme of a token,
+// slice the source by its Start/End offsets rather than reading Token.Text (see tokens.Token).
 func Tokenize(sql string, dialect string) ([]tokens.Token, error) {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {

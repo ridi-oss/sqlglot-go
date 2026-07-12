@@ -1,9 +1,41 @@
 package dialects
 
 import (
+	"fmt"
+	"strings"
+
 	exp "github.com/sjincho/sqlglot-go/expressions"
 	"github.com/sjincho/sqlglot-go/tokens"
 )
+
+// parseMySQLVersion parses the mysql_version setting into MySQL's MYSQL_VERSION_ID —
+// the comparable integer major*10000 + minor*100 + patch (e.g. 80035 for MySQL 8.0.35).
+// This is exactly the /*!NNNNN version-comment gate form and what the C API
+// mysql_get_server_version() returns, so a client passes the integer it already has.
+// The value must be a plain decimal integer; a dotted version string is not accepted.
+func parseMySQLVersion(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	invalid := func(reason string) (int, error) {
+		return 0, fmt.Errorf("invalid mysql_version %q: %s", value, reason)
+	}
+	if value == "" {
+		return invalid("expected a MYSQL_VERSION_ID integer")
+	}
+
+	maxInt := int(^uint(0) >> 1)
+	id := 0
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return invalid("expected a MYSQL_VERSION_ID integer, e.g. 80035 for MySQL 8.0.35")
+		}
+		digit := int(value[i] - '0')
+		if id > (maxInt-digit)/10 {
+			return invalid("MYSQL_VERSION_ID overflows int")
+		}
+		id = id*10 + digit
+	}
+	return id, nil
+}
 
 func MySQL() *Dialect {
 	d := Base()
@@ -92,6 +124,7 @@ func MySQL() *Dialect {
 	cfg.Quotes["\""] = "\""
 	cfg.Identifiers = map[rune]string{'`': "`"}
 	cfg.Comments["#"] = ""
+	cfg.MySQLExecutableComments = true
 	// MySQL requires `--` to be followed by whitespace/control (or EOF) to start a line
 	// comment; otherwise it is two `-` operators (`1--2` == `1 - -2`). Upstream sqlglot
 	// mis-tokenizes this — see DEVIATIONS §1.4. `#` needs no such guard (`#comment` is a

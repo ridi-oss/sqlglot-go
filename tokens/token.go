@@ -6,13 +6,21 @@ import (
 	"strings"
 )
 
+// Token is one lexeme from Tokenize. Text is the DECODED value — for a string/quoted identifier
+// the surrounding quotes are stripped and escapes resolved, so Text is NOT the raw source. To
+// recover the exact source lexeme (e.g. for byte-exact hashing), slice the original source by
+// Start/End, not Text. Start and End are INCLUSIVE rune offsets into the original source string
+// passed to Tokenize (the tokenizer operates on []rune(sql)); string([]rune(sql)[Start:End+1])
+// yields the verbatim lexeme, and this holds for every token kind (STRING, quoted identifier,
+// NUMBER, keyword, VAR, operator). Ordinary comments are attached to Comments rather than emitted
+// as tokens.
 type Token struct {
 	TokenType TokenType
 	Text      string
 	Line      int
 	Col       int
-	Start     int
-	End       int
+	Start     int // inclusive rune offset into the original source
+	End       int // inclusive rune offset into the original source
 	Comments  []string
 }
 

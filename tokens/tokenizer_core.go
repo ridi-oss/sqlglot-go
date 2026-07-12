@@ -16,6 +16,7 @@ var digitChars = map[rune]bool{
 }
 
 type TokenizerCore struct {
+	config TokenizerConfig
 	sql    []rune
 	size   int
 	tokens []Token
@@ -36,6 +37,8 @@ type TokenizerCore struct {
 	formatStrings                    map[string]FormatString
 	identifiers                      map[rune]string
 	commentsConfig                   map[string]string
+	mysqlExecutableComments          bool
+	mysqlVersion                     *int
 	lineCommentRequiresSpace         map[string]bool
 	stringEscapes                    map[rune]bool
 	byteStringEscapes                map[rune]bool
@@ -62,12 +65,15 @@ type TokenizerCore struct {
 
 func NewTokenizerCore(cfg TokenizerConfig) *TokenizerCore {
 	return &TokenizerCore{
+		config:                           cfg,
 		singleTokens:                     cfg.SingleTokens,
 		keywords:                         cfg.Keywords,
 		quotes:                           cfg.Quotes,
 		formatStrings:                    cfg.FormatStrings,
 		identifiers:                      cfg.Identifiers,
 		commentsConfig:                   cfg.Comments,
+		mysqlExecutableComments:          cfg.MySQLExecutableComments,
+		mysqlVersion:                     cfg.MySQLVersion,
 		lineCommentRequiresSpace:         cfg.LineCommentRequiresSpace,
 		stringEscapes:                    cfg.StringEscapes,
 		byteStringEscapes:                cfg.ByteStringEscapes,
@@ -382,6 +388,33 @@ func (c *TokenizerCore) scanComment(commentStart string) bool {
 	if commentEnd != "" {
 		c.advance(commentStartSize, false)
 
+		activeMySQLComment := false
+		if commentStart == "/*" && c.mysqlExecutableComments && c.mysqlVersion != nil && c.char == '!' {
+			activeMySQLComment = true
+			gate := -1
+			if c.current+5 <= c.size {
+				gate = 0
+				for i := 0; i < 5; i++ {
+					digit := c.sql[c.current+i]
+					if digit < '0' || digit > '9' {
+						gate = -1
+						break
+					}
+					gate = gate*10 + int(digit-'0')
+				}
+			}
+
+			if gate >= 0 {
+				activeMySQLComment = gate <= *c.mysqlVersion
+				if activeMySQLComment {
+					c.advance(5, false)
+				}
+			}
+		}
+
+		bodyStart := c.current
+		bodyStartLine := c.line
+		bodyStartCol := c.col
 		commentCount := 1
 		commentEndSize := len([]rune(commentEnd))
 
@@ -399,6 +432,34 @@ func (c *TokenizerCore) scanComment(commentStart string) bool {
 				c.advance(commentStartSize, false)
 				commentCount++
 			}
+		}
+
+		if activeMySQLComment {
+			bodyEnd := c.current - 1
+			bodyTokens, err := NewTokenizerCore(c.config).Tokenize(string(c.sql[bodyStart:bodyEnd]))
+			if err != nil {
+				panic(err)
+			}
+			for i := range bodyTokens {
+				nestedLine := bodyTokens[i].Line
+				bodyTokens[i].Start += bodyStart
+				bodyTokens[i].End += bodyStart
+				bodyTokens[i].Line += bodyStartLine - 1
+				if nestedLine == 1 {
+					bodyTokens[i].Col += bodyStartCol
+				}
+			}
+			if len(bodyTokens) > 0 {
+				if len(c.comments) > 0 {
+					comments := append([]string(nil), c.comments...)
+					bodyTokens[0].Comments = append(comments, bodyTokens[0].Comments...)
+					c.comments = nil
+				}
+				c.tokens = append(c.tokens, bodyTokens...)
+				c.prevTokenLine = bodyTokens[len(bodyTokens)-1].Line
+			}
+			c.advance(commentEndSize-1, false)
+			return true
 		}
 
 		textRunes := []rune(c.text())

@@ -182,6 +182,51 @@ tab, newline, and so on)."* So `1--2` evaluates to `1 - (-2) = 3` on a real MySQ
 over-eagerly comments it out; a consumer that relies on the token stream to distinguish `SELECT 1--2` from
 `SELECT 1` would otherwise conflate them. Regression test: `tokenizer_mysql_comment_test.go`.
 
+### 1.5 MySQL executable/version comment activation (opt-in, `mysql_version`)
+
+**What upstream and the default do:** pinned sqlglot v30.12.0 strips MySQL executable comments
+(`/*! ... */` and `/*!NNNNN ... */`) from the token stream exactly like ordinary block comments. The body
+is retained only as comment metadata; it is never parsed as SQL, regardless of the gate. sqlglot-go's bare
+`mysql` behavior remains identical. Activation is explicitly opt-in through a dialect setting such as
+`"mysql, mysql_version=80035"`; leaving `mysql_version` unset preserves upstream behavior and corpus parity.
+
+**Version and gate semantics:** `mysql_version` is MySQL's `MYSQL_VERSION_ID` integer — the comparable
+value `major*10000 + minor*100 + patch` (`80035` for MySQL 8.0.35). This is exactly the `/*!NNNNN` gate form
+and precisely what the C API `mysql_get_server_version()` returns, so a client passes the integer it already
+has; a dotted version string is intentionally **not** accepted (it silently mis-parsed as a major version and
+over-activated near-boundary gates). A bare `/*! ... */` body always activates when the setting is present.
+For `/*!NNNNN ... */`, the first five digits are the gate: the body activates when the configured
+`MYSQL_VERSION_ID` is greater than or equal to it (`50000` and `80033` activate at `80035`; `80036` and
+`99999` do not). Active bodies are tokenized as SQL and the wrapper plus gate disappear; inactive bodies
+remain comment metadata, including their leading `!` and digits.
+
+**Scope:** only `/*!` version comments are activated. MySQL optimizer-hint comments (`/*+ ... */`) are left
+as ordinary comments (stripped), matching upstream — hints do not change the set of columns/tables a
+statement reads, so this is correct for the lineage/grant-hash consumers this extension serves.
+
+Only the MySQL dialect advertises the executable-comment capability. `mysql_version` is nevertheless a
+recognized setting for every dialect string so shared configuration can pass it uniformly: base and
+Postgres accept it but leave the body inactive/comment-only. Malformed versions still error for every
+dialect. `SettingsString` intentionally omits this tokenizer-only, per-call state because that method
+serializes identifier-resolution/qualify state.
+
+**Generation caveat:** activation is semantic, not a byte-preserving comment rewrite. An active
+`SELECT 1 /*!50000 + 100 */` parses and regenerates as `SELECT 1 + 100`; likewise a hidden select item such
+as `SELECT 1 /*!50000, rrn */ FROM t` regenerates as `SELECT 1, rrn FROM t`. Inactive/default wrappers pass
+through the existing comment sanitizer, normally rendering with a space after `/*`, for example
+`SELECT 1 /* !99999 + 100 */`. Do not expect the original `/*!...*/` bytes to survive regeneration.
+
+This behavior was checked against MySQL 8.4.9: gate `50000` executes, gate `99999` does not, and the hidden
+column form executes and exposes the extra select item. The implementation lives in `dialects/dialect.go`,
+`dialects/mysql.go`, `tokens/tokenizer.go`, and `tokens/tokenizer_core.go`; low-level tokenizer tests live
+beside those packages, and the public regression is `mysql_version_comment_test.go`.
+
+**Why this is an opt-in behavioral extension:** the accepted SQL grammar is unchanged — both implementations
+already recognize the wrapper as a comment, and its body uses the existing SQL grammar when explicitly
+activated. The extension changes whether comment-contained SQL participates in the token stream for a
+configured server version. Therefore no `testdata/upstream_extensions.jsonl` row is appropriate; that ledger
+tracks grammar accepted beyond the pinned upstream parser, not opt-in executable-comment semantics.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream

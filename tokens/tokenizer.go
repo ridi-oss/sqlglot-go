@@ -18,6 +18,11 @@ type TokenizerConfig struct {
 	FormatStrings map[string]FormatString
 	Identifiers   map[rune]string
 	Comments      map[string]string
+	// MySQLExecutableComments and MySQLVersion implement the NON-UPSTREAM, opt-in
+	// executable-comment behavior documented in DEVIATIONS §1.5. A false capability
+	// or nil version preserves upstream comment stripping and attachment.
+	MySQLExecutableComments bool
+	MySQLVersion            *int
 	// LineCommentRequiresSpace holds line-comment starts (keys of Comments) that only
 	// begin a comment when immediately followed by whitespace/control or EOF. MySQL
 	// requires this for `--` — `1--2` is arithmetic `1 - -2`, not `1` + comment. See

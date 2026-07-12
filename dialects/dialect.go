@@ -43,8 +43,11 @@ type Dialect struct {
 	// TokenizerFactory supports Athena's classify-and-re-tokenize router while preserving
 	// Dialect.NewTokenizer's concrete *tokens.Tokenizer return type. A nil factory uses the
 	// ordinary compiled TokenizerConfig path.
-	TokenizerFactory         func() *tokens.Tokenizer
-	TokenizerConfig          tokens.TokenizerConfig
+	TokenizerFactory func() *tokens.Tokenizer
+	TokenizerConfig  tokens.TokenizerConfig
+	// MySQLVersion is NON-UPSTREAM tokenizer state (DEVIATIONS.md §1.5): the parsed
+	// MySQL five-digit comparable value. Nil is the default-off sentinel.
+	MySQLVersion             *int
 	NormalizationStrategy    NormalizationStrategy
 	DPipeIsStringConcat      bool
 	StrictStringConcat       bool
@@ -657,8 +660,9 @@ func CanonicalString(dialect any) (string, error) {
 // Dialect.get_or_raise(DialectType): it accepts nil (base), a string (bare name or the
 // comma-separated settings form, e.g. "mysql, normalization_strategy=mysql_case_insensitive"),
 // or an already-built *Dialect (returned as-is). Each string resolution returns a fresh
-// *Dialect, so a per-call setting override cannot leak across callers. The only supported
-// string setting is normalization_strategy (upstream also has "version", not modeled here).
+// *Dialect, so a per-call setting override cannot leak across callers. The supported string
+// settings are normalization_strategy and mysql_version (upstream also has "version", not
+// modeled here).
 func GetOrRaise(dialect any) (*Dialect, error) {
 	switch v := dialect.(type) {
 	case nil:
@@ -702,8 +706,17 @@ func getOrRaiseString(name string) (*Dialect, error) {
 				return nil, err
 			}
 			d.NormalizationStrategy = ns
+		case "mysql_version":
+			if !hasVal {
+				return nil, fmt.Errorf("dialect setting %q requires a value", key)
+			}
+			version, err := parseMySQLVersion(val)
+			if err != nil {
+				return nil, err
+			}
+			d.MySQLVersion = &version
 		default:
-			return nil, fmt.Errorf("unsupported dialect setting %q (supported: normalization_strategy)", key)
+			return nil, fmt.Errorf("unsupported dialect setting %q (supported: normalization_strategy, mysql_version)", key)
 		}
 	}
 	return d, nil
@@ -713,7 +726,9 @@ func (d *Dialect) NewTokenizer() *tokens.Tokenizer {
 	if d.TokenizerFactory != nil {
 		return d.TokenizerFactory()
 	}
-	return tokens.NewTokenizerWithConfig(d.TokenizerConfig)
+	cfg := d.TokenizerConfig
+	cfg.MySQLVersion = d.MySQLVersion
+	return tokens.NewTokenizerWithConfig(cfg)
 }
 
 // asciiLower / asciiUpper case-fold ONLY the ASCII letters A-Z <-> a-z
@@ -865,6 +880,18 @@ func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
 		}
 	}
 	return e
+}
+
+// IsReservedKeyword reports whether word is a reserved keyword in this dialect — a word that
+// cannot be an unquoted identifier. It is the case-safe accessor for ReservedKeywords (which is
+// stored lowercase-keyed): a consumer folding keyword case must fold ONLY reserved words, since a
+// non-reserved keyword can be a case-sensitive identifier (e.g. on MySQL lower_case_table_names=0).
+// Only MySQL populates a reserved set today; other dialects return false.
+func (d *Dialect) IsReservedKeyword(word string) bool {
+	if d.ReservedKeywords == nil {
+		return false
+	}
+	return d.ReservedKeywords[strings.ToLower(word)]
 }
 
 func (d *Dialect) CaseSensitive(text string) bool {
