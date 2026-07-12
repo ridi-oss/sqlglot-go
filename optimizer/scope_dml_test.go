@@ -733,7 +733,7 @@ func TestDMLScopeOptimizerContainment(t *testing.T) {
 		t.Run(tc.name+" qualify tables", func(t *testing.T) {
 			expression := parseOne(t, tc.sql)
 			target := expression.This()
-			QualifyTables(expression, nil, nil, "", false, nil)
+			QualifyTables(expression, nil, nil, "", false, nil, nil, nil)
 			if expression.Kind() != tc.kind || expression.This() != target || target.Kind() != exp.KindTable {
 				t.Fatalf("QualifyTables rewrote the DML target shape")
 			}
