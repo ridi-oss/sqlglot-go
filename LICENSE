@@ -4,7 +4,7 @@ sqlglot-go is a Go port of sqlglot (https://github.com/tobymao/sqlglot).
 The original work and this derivative are both licensed under the MIT License.
 
 Copyright (c) 2023 Toby Mao (sqlglot, the original Python work)
-Copyright (c) 2026 Seongjin Cho (sqlglot-go, the Go port)
+Copyright (c) 2026 RIDI Corporation (sqlglot-go, the Go port)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
