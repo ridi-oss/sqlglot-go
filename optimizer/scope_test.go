@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/generator"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
 )
 
 func parseOne(t *testing.T, sql string) exp.Expression {

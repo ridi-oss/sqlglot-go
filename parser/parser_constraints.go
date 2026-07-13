@@ -3,8 +3,8 @@ package parser
 import (
 	"strings"
 
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/tokens"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 // constraintParsers etc. below are declared without initializers and populated inside

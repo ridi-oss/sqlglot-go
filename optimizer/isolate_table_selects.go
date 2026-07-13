@@ -1,9 +1,9 @@
 package optimizer
 
 import (
-	sqlerrors "github.com/ridi/sqlglot-go/errors"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/schema"
+	sqlerrors "github.com/ridi-oss/sqlglot-go/errors"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/schema"
 )
 
 func IsolateTableSelects(expression exp.Expression, schemaArg any, dialect any) exp.Expression {

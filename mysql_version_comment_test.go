@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	"github.com/ridi/sqlglot-go/generator"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	"github.com/ridi-oss/sqlglot-go/generator"
 )
 
 type executableCommentToken struct {

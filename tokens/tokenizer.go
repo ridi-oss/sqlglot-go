@@ -3,7 +3,7 @@ package tokens
 import (
 	"strings"
 
-	"github.com/ridi/sqlglot-go/trie"
+	"github.com/ridi-oss/sqlglot-go/trie"
 )
 
 type FormatString struct {

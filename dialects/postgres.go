@@ -1,8 +1,8 @@
 package dialects
 
 import (
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/tokens"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 func Postgres() *Dialect {

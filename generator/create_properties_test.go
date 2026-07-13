@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ridi/sqlglot-go/dialects"
-	sqlerrors "github.com/ridi/sqlglot-go/errors"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	sqlerrors "github.com/ridi-oss/sqlglot-go/errors"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
 )
 
 func createTable(name string) exp.Expression {

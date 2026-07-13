@@ -1,9 +1,9 @@
 package parser
 
 import (
-	sqlerrors "github.com/ridi/sqlglot-go/errors"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/tokens"
+	sqlerrors "github.com/ridi-oss/sqlglot-go/errors"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 // mysqlOperationModifiers ports parsers/mysql.py:290-299 (MySQLParser.OPERATION_MODIFIERS):

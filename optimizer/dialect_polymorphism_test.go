@@ -3,11 +3,11 @@ package optimizer_test
 import (
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	"github.com/ridi/sqlglot-go/dialects"
-	"github.com/ridi/sqlglot-go/generator"
-	"github.com/ridi/sqlglot-go/optimizer"
-	"github.com/ridi/sqlglot-go/schema"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	"github.com/ridi-oss/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/optimizer"
+	"github.com/ridi-oss/sqlglot-go/schema"
 )
 
 // TestDialectTypePolymorphism verifies that NormalizeIdentifiers and Qualify accept a

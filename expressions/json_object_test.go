@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	exp "github.com/ridi/sqlglot-go/expressions"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 // TestJSONObjectKinds is a NEW file (rather than an addition to

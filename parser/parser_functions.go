@@ -1,9 +1,9 @@
 package parser
 
 import (
-	"github.com/ridi/sqlglot-go/dialects"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/tokens"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 func seqGet[T any](s []T, i int) T {

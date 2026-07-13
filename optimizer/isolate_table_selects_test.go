@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	"github.com/ridi/sqlglot-go/generator"
-	"github.com/ridi/sqlglot-go/optimizer"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	"github.com/ridi-oss/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/optimizer"
 )
 
 func TestIsolateTableSelectsFixtures(t *testing.T) {

@@ -12,11 +12,11 @@ package sqlglot_test
 import (
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	"github.com/ridi/sqlglot-go/dialects"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/generator"
-	"github.com/ridi/sqlglot-go/optimizer"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/optimizer"
 )
 
 // normalizeVia runs the exact downstream path (parse -> normalize_identifiers ->

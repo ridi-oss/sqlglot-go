@@ -3,9 +3,9 @@ package generator_test
 import (
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	"github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/generator"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	"github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
 )
 
 func TestTrinoJSONQueryRoundTrip(t *testing.T) {

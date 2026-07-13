@@ -103,7 +103,7 @@ confirm a claimed bug against `.reference/` before "fixing" it — some findings
 
 ## Conventions
 
-- Go 1.23. Module `github.com/ridi/sqlglot-go`. Zero third-party deps (stdlib + `testing` only).
+- Go 1.23. Module `github.com/ridi-oss/sqlglot-go`. Zero third-party deps (stdlib + `testing` only).
 - Comments in **English**, US spelling (`canceled`, `color`, `catalog`).
 - `gofmt` + `go vet` clean; `go test ./...` green before any commit/push.
 - Package layout mirrors the Python module layout (`expressions/`, `optimizer/`, `dialects/`,

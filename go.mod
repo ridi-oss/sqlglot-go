@@ -1,3 +1,3 @@
-module github.com/ridi/sqlglot-go
+module github.com/ridi-oss/sqlglot-go
 
 go 1.23

@@ -3,8 +3,8 @@ package parser_test
 import (
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	exp "github.com/ridi/sqlglot-go/expressions"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 // TestColonPlaceholder covers the PLACEHOLDER_PARSERS COLON entry (parser.py:1175-1183):

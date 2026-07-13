@@ -1,8 +1,8 @@
 package optimizer
 
 import (
-	"github.com/ridi/sqlglot-go/dialects"
-	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 func SimplifyParens(expression exp.Expression, dialect *dialects.Dialect) exp.Expression {

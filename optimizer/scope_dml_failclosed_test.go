@@ -3,7 +3,7 @@ package optimizer
 import (
 	"testing"
 
-	exp "github.com/ridi/sqlglot-go/expressions"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 // TestDMLScopeBuildScopeNilOnOmittedRoot covers the fail-open a review found: when the DML

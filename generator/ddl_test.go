@@ -32,9 +32,9 @@ package generator_test
 import (
 	"testing"
 
-	"github.com/ridi/sqlglot-go/dialects"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
 )
 
 func genSQL(t *testing.T, d *dialects.Dialect, e exp.Expression) string {

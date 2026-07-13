@@ -3,11 +3,11 @@ package sqlglot_test
 import (
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/generator"
-	"github.com/ridi/sqlglot-go/optimizer"
-	"github.com/ridi/sqlglot-go/schema"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/optimizer"
+	"github.com/ridi-oss/sqlglot-go/schema"
 )
 
 type athenaLineageCase struct {

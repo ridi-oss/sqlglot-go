@@ -3,8 +3,8 @@ package dialects_test
 import (
 	"testing"
 
-	"github.com/ridi/sqlglot-go/dialects"
-	"github.com/ridi/sqlglot-go/tokens"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 func TestHiveConfigAndTokenizer(t *testing.T) {

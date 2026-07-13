@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	exp "github.com/ridi/sqlglot-go/expressions"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 func seqGet[T any](s []T, i int) (T, bool) {

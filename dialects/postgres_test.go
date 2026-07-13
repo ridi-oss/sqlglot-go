@@ -3,12 +3,12 @@ package dialects_test
 import (
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	"github.com/ridi/sqlglot-go/dialects"
-	"github.com/ridi/sqlglot-go/generator"
-	"github.com/ridi/sqlglot-go/optimizer"
-	"github.com/ridi/sqlglot-go/schema"
-	"github.com/ridi/sqlglot-go/tokens"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	"github.com/ridi-oss/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/optimizer"
+	"github.com/ridi-oss/sqlglot-go/schema"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 func TestPostgresConfigAndTokenizer(t *testing.T) {

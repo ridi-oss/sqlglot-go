@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/ridi/sqlglot-go/expressions"
+import "github.com/ridi-oss/sqlglot-go/expressions"
 
 func init() {
 	dispatch[expressions.KindJSONObject] = (*Generator).jsonObjectSQL

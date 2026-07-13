@@ -1,8 +1,8 @@
 package parser
 
 import (
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/tokens"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 // The MySQL FUNCTION_PARSERS["GROUP_CONCAT"] and STATEMENT_PARSERS[REPLACE] entries are

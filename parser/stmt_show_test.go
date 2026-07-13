@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	exp "github.com/ridi/sqlglot-go/expressions"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 // showRoundTrip parses sql under the mysql dialect, asserts it becomes an exp.Show, and asserts

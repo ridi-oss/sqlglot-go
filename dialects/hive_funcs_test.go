@@ -4,9 +4,9 @@ import (
 	"sort"
 	"testing"
 
-	sqlglot "github.com/ridi/sqlglot-go"
-	"github.com/ridi/sqlglot-go/dialects"
-	exp "github.com/ridi/sqlglot-go/expressions"
+	sqlglot "github.com/ridi-oss/sqlglot-go"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 var hiveOverlayKeys = []string{

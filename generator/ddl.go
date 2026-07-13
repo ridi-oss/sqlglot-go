@@ -3,7 +3,7 @@ package generator
 import (
 	"strings"
 
-	"github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/expressions"
 )
 
 // init registers the ALTER TABLE/VIEW/INDEX and DROP node family (ddl.py:241-401), plus

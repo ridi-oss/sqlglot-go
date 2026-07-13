@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ridi/sqlglot-go/dialects"
-	exp "github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/schema"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/schema"
 )
 
 func QualifyTables(expression exp.Expression, db any, catalog any, dialect any, canonicalizeTableAliases bool, onQualify func(exp.Expression), searchPath []string, s schema.Schema) exp.Expression {

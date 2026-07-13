@@ -4,12 +4,12 @@ import (
 	fmtstd "fmt"
 	"strings"
 
-	"github.com/ridi/sqlglot-go/dialects"
-	sqlerrors "github.com/ridi/sqlglot-go/errors"
-	"github.com/ridi/sqlglot-go/expressions"
-	"github.com/ridi/sqlglot-go/generator"
-	"github.com/ridi/sqlglot-go/parser"
-	"github.com/ridi/sqlglot-go/tokens"
+	"github.com/ridi-oss/sqlglot-go/dialects"
+	sqlerrors "github.com/ridi-oss/sqlglot-go/errors"
+	"github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
+	"github.com/ridi-oss/sqlglot-go/parser"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 // Tokenize lexes sql under dialect into a token stream. It is a pure lexer, independent of the
