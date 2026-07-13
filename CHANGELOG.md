@@ -18,6 +18,24 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.6.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.5.0...v0.6.0) (2026-07-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* the import path is now github.com/ridi-oss/sqlglot-go.
+
+### Features
+
+* move Go module path to github.com/ridi-oss/sqlglot-go ([16c71dc](https://github.com/ridi-oss/sqlglot-go/commit/16c71dcdb0c3d8bc991b705b4a583350f38f3032))
+
+
+### Documentation
+
+* add CONTRIBUTING, SECURITY, and CODE_OF_CONDUCT ([0d95f2f](https://github.com/ridi-oss/sqlglot-go/commit/0d95f2f1a9389cb8f2911432916c0ea58f738354))
+* add status badges to README ([964a0df](https://github.com/ridi-oss/sqlglot-go/commit/964a0df4b8d1c40abc5493f57196f6e3a509f471))
+* adopt release-please in CHANGELOG and release process ([d329b32](https://github.com/ridi-oss/sqlglot-go/commit/d329b32518b6cb32fb28c4171781d47436716033))
+
 ## [0.5.0] - 2026-07-12
 
 Proxy-monster enabler slices: opt-in analysis APIs and beyond-upstream grammar, each faithful
