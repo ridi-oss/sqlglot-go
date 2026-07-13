@@ -1,8 +1,8 @@
 package parser
 
 import (
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // jsonKeyValueSeparatorTokens ports JSON_KEY_VALUE_SEPARATOR_TOKENS (parser.py:1681):

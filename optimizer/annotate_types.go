@@ -1,8 +1,8 @@
 package optimizer
 
 import (
-	"github.com/sjincho/sqlglot-go/dialects"
-	"github.com/sjincho/sqlglot-go/schema"
+	"github.com/ridi/sqlglot-go/dialects"
+	"github.com/ridi/sqlglot-go/schema"
 )
 
 type TypeAnnotator struct {

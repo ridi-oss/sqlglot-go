@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // substringSQL ports _substring_sql (generators/postgres.py:106-114). Postgres always
 // renders the ANSI SUBSTRING(<this> FROM <start> FOR <length>) form, and always in that

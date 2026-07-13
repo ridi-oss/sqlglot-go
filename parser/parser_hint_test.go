@@ -3,8 +3,8 @@ package parser_test
 import (
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	sqlglot "github.com/ridi/sqlglot-go"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // TestHintRebalance ports the parity_gaps.txt case `SELECT /*+ REBALANCE */ * FROM foo`:

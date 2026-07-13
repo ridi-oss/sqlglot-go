@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/generator"
-	"github.com/sjincho/sqlglot-go/schema"
+	sqlglot "github.com/ridi/sqlglot-go"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/generator"
+	"github.com/ridi/sqlglot-go/schema"
 )
 
 func finalDMLRoot(t *testing.T, scopes []*Scope, kind exp.Kind) *Scope {

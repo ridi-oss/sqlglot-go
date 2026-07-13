@@ -3,7 +3,7 @@ package parser_test
 import (
 	"testing"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // TestParseAnalyzeStructured ports the top level of _parse_analyze (parser.py:8975-9038),

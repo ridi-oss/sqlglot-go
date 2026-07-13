@@ -8,7 +8,7 @@ package generator_test
 import (
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
+	sqlglot "github.com/ridi/sqlglot-go"
 )
 
 // TestMySQLRenameFuncFallback guards that base and postgres keep each Kind's default

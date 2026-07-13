@@ -1,8 +1,8 @@
 package optimizer
 
 import (
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/schema"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/schema"
 )
 
 type QualifyOpts struct {

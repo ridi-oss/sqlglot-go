@@ -3,7 +3,7 @@ package expressions_test
 import (
 	"testing"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 func TestRegisteredFunctions(t *testing.T) {

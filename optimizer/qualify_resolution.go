@@ -3,7 +3,7 @@ package optimizer
 import (
 	"fmt"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // SourceKind classifies an AST report entry by its resolved scope source.

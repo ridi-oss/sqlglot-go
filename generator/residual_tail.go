@@ -3,8 +3,8 @@ package generator
 import (
 	"fmt"
 
-	"github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	"github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // bitstringSQL ports bitstring_sql (generator.py:1568-1572): re-quote a bit-string literal

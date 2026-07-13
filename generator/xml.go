@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // xmlElementSQL ports xmlelement_sql (generator.py:5873-5876):
 // XMLELEMENT(NAME name[, expr, ...]) / XMLELEMENT(EVALNAME expr[, expr, ...]).

@@ -3,7 +3,7 @@ package parser_test
 import (
 	"testing"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // TestParseUse ports the USE cases from parser.py:3735-3741 (_parse_use):

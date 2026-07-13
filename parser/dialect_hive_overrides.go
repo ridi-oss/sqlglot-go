@@ -1,8 +1,8 @@
 package parser
 
 import (
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // Upstream Hive inherits the base PROPERTY_PARSERS and overrides SERDEPROPERTIES and USING at

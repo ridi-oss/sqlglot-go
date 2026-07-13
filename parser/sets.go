@@ -1,6 +1,6 @@
 package parser
 
-import "github.com/sjincho/sqlglot-go/tokens"
+import "github.com/ridi/sqlglot-go/tokens"
 
 var idVarTokens = map[tokens.TokenType]bool{
 	tokens.SESSION:                 true,

@@ -1,6 +1,6 @@
 package parser
 
-import "github.com/sjincho/sqlglot-go/tokens"
+import "github.com/ridi/sqlglot-go/tokens"
 
 // The option-sets below port parser.py:1553-1743 (the STATEMENT_PARSERS-adjacent class
 // vars consumed by the SET/SHOW/USE/DESCRIBE/TRANSACTION/ANALYZE/GRANT/TRUNCATE family

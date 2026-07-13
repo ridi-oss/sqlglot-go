@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose new coverage or an API addition
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Note the scope: sqlglot-go ports the **parse → AST → generate** core plus `qualify`/`scope`
+        for **base + MySQL + Postgres**. The rest of the optimizer, cross-dialect transpilation, and
+        other dialects are out of scope for now (see [ROADMAP.md](../ROADMAP.md)).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do, and what is missing or awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: The API or behavior you have in mind. Does upstream sqlglot do this already?
+    validations:
+      required: true
+  - type: checkboxes
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - label: Faithful port of existing upstream behavior
+        - label: Behavior beyond upstream (would need a DEVIATIONS.md entry)

@@ -3,8 +3,8 @@ package parser
 import (
 	"strings"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // parsePropertyBefore ports _parse_property_before (parser.py:2767-2790). The property

@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // sliceSQL ports slice_sql (generator.py:5667-5673): `start:end` with an optional
 // `:step` suffix, and a bare `start:` when both end and step are empty.

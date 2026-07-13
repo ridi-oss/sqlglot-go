@@ -3,8 +3,8 @@ package expressions_test
 import (
 	"testing"
 
-	_ "github.com/sjincho/sqlglot-go"
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	_ "github.com/ridi/sqlglot-go"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 func TestDataTypeBuilder(t *testing.T) {

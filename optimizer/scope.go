@@ -5,8 +5,8 @@ import (
 	"log"
 	"strings"
 
-	sqlerrors "github.com/sjincho/sqlglot-go/errors"
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	sqlerrors "github.com/ridi/sqlglot-go/errors"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 type ScopeType int

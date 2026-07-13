@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Zero third-party Go deps today; this keeps the toolchain/go directive current
+  # and picks up any future module additions.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    open-pull-requests-limit: 5

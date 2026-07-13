@@ -3,7 +3,7 @@ package parser_test
 import (
 	"testing"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // TestParseCache/TestParseUncache port _parse_cache/_parse_uncache (parser.py:3743-3770):

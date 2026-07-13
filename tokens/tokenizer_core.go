@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	sqlerrors "github.com/sjincho/sqlglot-go/errors"
-	"github.com/sjincho/sqlglot-go/trie"
+	sqlerrors "github.com/ridi/sqlglot-go/errors"
+	"github.com/ridi/sqlglot-go/trie"
 )
 
 var digitChars = map[rune]bool{

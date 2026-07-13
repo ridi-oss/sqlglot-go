@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // jsonExtractQuoteSQL ports jsonextractquote_sql (generator.py:5605-5607). It is a plain
 // expression nested in Trino/Athena JSON_QUERY's quote arg, not a dialect TRANSFORMS entry.

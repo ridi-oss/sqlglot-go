@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // TestGrantRevokeStructured ports parser.py:9690-9784 (_parse_grant/_parse_revoke and

@@ -3,8 +3,8 @@ package dialects_test
 import (
 	"testing"
 
-	"github.com/sjincho/sqlglot-go/dialects"
-	"github.com/sjincho/sqlglot-go/tokens"
+	"github.com/ridi/sqlglot-go/dialects"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 func athenaTokens(t *testing.T, sql string) []tokens.Token {

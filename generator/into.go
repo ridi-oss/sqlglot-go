@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // intoSQL ports into_sql (generator.py:2724-2727): `INTO [TEMPORARY|UNLOGGED] <this>`, e.g.
 // postgres's `SELECT * INTO UNLOGGED foo FROM ...` (unlogged, kinds.go:472). Upstream also

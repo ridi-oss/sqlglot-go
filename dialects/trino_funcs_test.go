@@ -3,9 +3,9 @@ package dialects_test
 import (
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	"github.com/sjincho/sqlglot-go/dialects"
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	sqlglot "github.com/ridi/sqlglot-go"
+	"github.com/ridi/sqlglot-go/dialects"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 func TestTrinoFunctionsAreExactPrestoSuperset(t *testing.T) {

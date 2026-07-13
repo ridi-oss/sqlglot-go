@@ -3,7 +3,7 @@ package generator_test
 import (
 	"testing"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // TestAnalyzeAuxiliarySQL locks the three renderers used by MySQL ANALYZE

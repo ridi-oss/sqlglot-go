@@ -3,7 +3,7 @@ package generator
 import (
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/expressions"
 )
 
 // The "ddl" cluster: CREATE FUNCTION/PROCEDURE/INDEX/TRIGGER structured rendering, plus the

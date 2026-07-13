@@ -3,7 +3,7 @@ package generator
 import (
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/expressions"
 )
 
 var sqlNameOverrides = map[expressions.Kind]string{

@@ -129,7 +129,7 @@ differential-check against the pinned Python):
 ## MySQL grammar + tokenizer correctness + typed dialect + Node.Meta — DONE (PR #2)
 
 **DONE (2026-07).** Branch `sjincho/parity/mysql-grammar-tokenizer-meta`, PR
-[sjincho/sqlglot-go#2](https://github.com/sjincho/sqlglot-go/pull/2) — reviewed (Codex gpt-5.6-sol xhigh +
+[ridi/sqlglot-go#2](https://github.com/ridi/sqlglot-go/pull/2) — reviewed (Codex gpt-5.6-sol xhigh +
 Opus, each verified vs the pinned reference), `go test ./...` / `go vet` / `gofmt` green. Motivated by the
 proxy-monster suggestions review; five slices, each a faithful port, an API restoration, or a documented
 correctness fix:

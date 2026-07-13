@@ -3,7 +3,7 @@ package generator
 import (
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/expressions"
 )
 
 // propertyLocation mirrors exp.Properties.Location (expressions/properties.py:572-586).

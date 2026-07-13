@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // parseMySQLVersion parses the mysql_version setting into MySQL's MYSQL_VERSION_ID —

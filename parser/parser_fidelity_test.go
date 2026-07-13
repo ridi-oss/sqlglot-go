@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	sqlglot "github.com/ridi/sqlglot-go"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 func parseOneErr(sql string) (exp.Expression, error) {

@@ -9,9 +9,9 @@ package dialects_test
 import (
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	"github.com/sjincho/sqlglot-go/dialects"
-	"github.com/sjincho/sqlglot-go/generator"
+	sqlglot "github.com/ridi/sqlglot-go"
+	"github.com/ridi/sqlglot-go/dialects"
+	"github.com/ridi/sqlglot-go/generator"
 )
 
 // dialectRoundTrip parses sql under dialect and regenerates it in that same dialect, failing

@@ -1,8 +1,8 @@
 package parser
 
 import (
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // lambdaArgTerminators ports LAMBDA_ARG_TERMINATORS (parser.py:1006): the fast-path guard

@@ -3,8 +3,8 @@ package parser
 import (
 	"strings"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // Upstream keeps parser callbacks in per-dialect class tables: the base statement,

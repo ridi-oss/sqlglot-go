@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/expressions"
 )
 
 // subsecondPrecision ports subsecond_precision (time.py:668-688): given an ISO-8601 timestamp

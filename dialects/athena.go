@@ -3,7 +3,7 @@ package dialects
 import (
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/tokens"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // Athena is an outer routing dialect rather than a Trino subtype. Its tokenizer

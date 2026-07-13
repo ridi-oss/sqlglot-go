@@ -1,0 +1,4 @@
+# Default owners for everything in the repo. Requested for review on every PR.
+# TODO(ridi): replace @sjincho with the owning RIDI team (e.g. @ridi/data-platform)
+# once the repo is under the ridi org and the team exists.
+* @sjincho

@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/dialects"
-	sqlerrors "github.com/sjincho/sqlglot-go/errors"
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/schema"
+	"github.com/ridi/sqlglot-go/dialects"
+	sqlerrors "github.com/ridi/sqlglot-go/errors"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/schema"
 )
 
 type aliasRef struct {

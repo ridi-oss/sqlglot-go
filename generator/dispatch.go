@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // dispatch is declared with an empty-map var initializer (rather than left nil and only
 // ever assigned inside init()) so it's guaranteed to be a valid, non-nil map as soon as

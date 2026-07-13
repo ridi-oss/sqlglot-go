@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/dialects"
-	sqlerrors "github.com/sjincho/sqlglot-go/errors"
-	"github.com/sjincho/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/dialects"
+	sqlerrors "github.com/ridi/sqlglot-go/errors"
+	"github.com/ridi/sqlglot-go/expressions"
 )
 
 const sentinelLineBreak = "__SQLGLOT_GO_SENTINEL_LINE_BREAK__"

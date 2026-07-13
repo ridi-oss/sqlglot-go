@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 type NormalizationStrategy int

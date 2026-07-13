@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 func init() {
 	dispatch[expressions.KindTransaction] = (*Generator).transactionSQL

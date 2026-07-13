@@ -1,5 +1,11 @@
 # sqlglot-go
 
+[![CI](https://github.com/ridi/sqlglot-go/actions/workflows/ci.yml/badge.svg)](https://github.com/ridi/sqlglot-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ridi/sqlglot-go.svg)](https://pkg.go.dev/github.com/ridi/sqlglot-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ridi/sqlglot-go)](https://goreportcard.com/report/github.com/ridi/sqlglot-go)
+[![Release](https://img.shields.io/github/v/release/ridi/sqlglot-go)](https://github.com/ridi/sqlglot-go/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 A Go port of the **parse → AST → generate** core of
 [tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.12.0, plus the `qualify` and `scope`
 optimizer passes that column **qualification and lineage** are built on. Ported file-by-file from the
@@ -62,7 +68,7 @@ case-folding, to match real engines).
 ## Quick start
 
 ```bash
-go get github.com/sjincho/sqlglot-go
+go get github.com/ridi/sqlglot-go
 ```
 
 ```go
@@ -71,10 +77,10 @@ package main
 import (
 	"fmt"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	"github.com/sjincho/sqlglot-go/generator"
-	"github.com/sjincho/sqlglot-go/optimizer"
-	"github.com/sjincho/sqlglot-go/schema"
+	sqlglot "github.com/ridi/sqlglot-go"
+	"github.com/ridi/sqlglot-go/generator"
+	"github.com/ridi/sqlglot-go/optimizer"
+	"github.com/ridi/sqlglot-go/schema"
 )
 
 func main() {

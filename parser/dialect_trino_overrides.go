@@ -1,8 +1,8 @@
 package parser
 
 import (
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // trinoParserOverrideSet returns fresh maps for each parser class. AthenaTrinoParser inherits the

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	"github.com/sjincho/sqlglot-go/generator"
+	sqlglot "github.com/ridi/sqlglot-go"
+	"github.com/ridi/sqlglot-go/generator"
 )
 
 func parseOne(t *testing.T, sql string) string {

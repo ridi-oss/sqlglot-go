@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/sjincho/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/expressions"
 )
 
 // init registers the CREATE-table constraint node family (see expressions/kinds.go's block

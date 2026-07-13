@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // lambdaSQL ports lambda_sql (generator.py:2861-2864): the flat, comma-joined parameter
 // list - parenthesized when there's more than one - followed by " -> " and the lambda

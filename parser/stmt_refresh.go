@@ -1,8 +1,8 @@
 package parser
 
 import (
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // parseRefresh ports _parse_refresh (parser.py:8702-8714). REFRESH without TABLE or MATERIALIZED

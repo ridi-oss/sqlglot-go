@@ -3,7 +3,7 @@ package generator
 import (
 	"strings"
 
-	"github.com/sjincho/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/expressions"
 )
 
 // range-ops cluster: generator methods for the Kinds parseRange/parseIs/columnOperators

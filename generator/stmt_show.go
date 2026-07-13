@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // showSQL ports generator.py:6027-6029 (base Generator.show_sql stub) and, for MySQL,
 // generators/mysql.py:699-748 MySQLGenerator.show_sql verbatim. Base/Postgres never actually

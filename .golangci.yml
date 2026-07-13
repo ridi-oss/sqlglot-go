@@ -1,0 +1,15 @@
+# golangci-lint v2 config. The CI job runs with only-new-issues, so this governs
+# newly-introduced code; the 1:1-ported tree is not retroactively churned.
+version: "2"
+
+linters:
+  # v2 default set (errcheck, govet, ineffassign, staticcheck, unused) plus:
+  enable:
+    - misspell
+  settings:
+    misspell:
+      locale: US
+
+formatters:
+  enable:
+    - gofmt

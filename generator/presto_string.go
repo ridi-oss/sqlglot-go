@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // unicodeStringSQL ports unicodestring_sql (generator.py:1630) for Presto, whose
 // UNICODE_START/UNICODE_END are "U&'" and "'" (see expressions/query.py:494 UnicodeString

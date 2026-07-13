@@ -103,7 +103,7 @@ confirm a claimed bug against `.reference/` before "fixing" it — some findings
 
 ## Conventions
 
-- Go 1.23. Module `github.com/sjincho/sqlglot-go`. Zero third-party deps (stdlib + `testing` only).
+- Go 1.23. Module `github.com/ridi/sqlglot-go`. Zero third-party deps (stdlib + `testing` only).
 - Comments in **English**, US spelling (`canceled`, `color`, `catalog`).
 - `gofmt` + `go vet` clean; `go test ./...` green before any commit/push.
 - Package layout mirrors the Python module layout (`expressions/`, `optimizer/`, `dialects/`,
@@ -111,18 +111,19 @@ confirm a claimed bug against `.reference/` before "fixing" it — some findings
 
 ## Releasing
 
-[CHANGELOG.md](./CHANGELOG.md) is kept in [Keep a Changelog](https://keepachangelog.com/) form and
-versioned with [SemVer](https://semver.org/) (pre-1.0: additive API changes bump the minor; breaking
-changes to an exported signature are called out under _Changed_). Every user-visible change lands
-under `## [Unreleased]` as it merges.
+Releases are automated with [**release-please**](https://github.com/googleapis/release-please), driven
+by [**Conventional Commits**](https://www.conventionalcommits.org/) and versioned with
+[SemVer](https://semver.org/). Config: `release-please-config.json` + `.release-please-manifest.json`;
+workflow: `.github/workflows/release-please.yml`. Pre-1.0, `bump-minor-pre-major` is set, so both
+features and breaking changes bump the **minor** (`fix` bumps the patch).
 
-To cut a release `X.Y.Z`:
+- **PRs are squash-merged, and the PR title is the commit** — so the **PR title must be a Conventional
+  Commit** (`feat:`, `fix:`, `feat!:`, `docs:`, `ci:`, `chore:`, …). `.github/workflows/pr-title.yml`
+  lints it. `CHANGELOG.md` sections come from `changelog-sections` in the config.
+- On each push to `main`, release-please opens/updates a **release PR** (`chore(main): release X.Y.Z`)
+  that bumps `.release-please-manifest.json` and prepends the generated `CHANGELOG.md` section.
+- **To cut the release, merge that release PR.** release-please then tags `vX.Y.Z` and publishes the
+  GitHub release automatically. Nothing is tagged by hand.
 
-1. Ensure `main` is green (`go test ./...`, `go vet ./...`, `gofmt -l .`) and all intended changes are
-   under `## [Unreleased]`.
-2. **Move** the `[Unreleased]` entries into a new `## [X.Y.Z] - YYYY-MM-DD` section (leave
-   `[Unreleased]` empty), and add the `[X.Y.Z]: …/compare/vPREV...vX.Y.Z` link at the bottom.
-3. Pick `X.Y.Z` from the moved entries: a `Changed`/`Removed` (breaking) bumps the minor pre-1.0;
-   otherwise additive `Added` bumps the minor, and a `Fixed`-only release bumps the patch.
-4. Commit (`docs: release vX.Y.Z`), then annotated-tag `git tag -a vX.Y.Z -m "vX.Y.Z"` and push
-   `main` + the tag. Confirm the exact version with Seongjin before tagging.
+Do **not** hand-edit `CHANGELOG.md` or create version tags manually — release-please owns both.
+Entries for v0.5.0 and earlier predate release-please and were written by hand.

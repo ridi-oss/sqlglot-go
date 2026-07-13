@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // dayOfMonthSQL/dayOfWeekSQL/dayOfYearSQL/weekOfYearSQL port generators/mysql.py:170-173's
 // `_remove_ts_or_ds_to_date(rename_func("DAYOFMONTH"))` etc. This port never wraps the "this"

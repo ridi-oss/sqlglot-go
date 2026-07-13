@@ -3,9 +3,9 @@ package parser_test
 import (
 	"testing"
 
-	sqlglot "github.com/sjincho/sqlglot-go"
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/generator"
+	sqlglot "github.com/ridi/sqlglot-go"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/generator"
 )
 
 func parseOne(t *testing.T, sql string) exp.Expression {

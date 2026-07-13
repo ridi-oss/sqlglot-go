@@ -3,7 +3,7 @@ package parser
 import (
 	"strings"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
+	exp "github.com/ridi/sqlglot-go/expressions"
 )
 
 // parseCommand ports _parse_command (parser.py:2184-2190): the generic fallback for any

@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // groupConcatSQL ports groupconcat_sql (dialects/dialect.py:2423-2467), dialect-gated per
 // its only override in this codebase's scope, generators/postgres.py:313-315: postgres

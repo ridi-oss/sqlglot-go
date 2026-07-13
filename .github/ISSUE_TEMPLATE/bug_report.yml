@@ -1,0 +1,45 @@
+name: Bug report
+description: A parse/generate/qualify/scope result that is wrong or crashes
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If the same behavior reproduces in upstream
+        [tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.12.0, it is likely a faithful port of
+        an upstream issue — please note that below (and consider reporting it upstream too).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: sqlglot-go version or commit SHA
+      placeholder: v0.6.0
+    validations:
+      required: true
+  - type: dropdown
+    id: dialect
+    attributes:
+      label: Dialect
+      options: [base, mysql, postgres, other]
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input SQL
+      description: A minimal SQL statement that reproduces the problem.
+      render: sql
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected vs. what happened
+      description: Expected output/AST/scope vs. the actual result (paste both).
+    validations:
+      required: true
+  - type: textarea
+    id: upstream
+    attributes:
+      label: Upstream behavior (optional)
+      description: What does pinned Python sqlglot 30.12.0 do with the same input, if you checked?

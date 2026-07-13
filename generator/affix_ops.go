@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // collateSQL ports generator.py:4102-4105 collate_sql. Upstream gates the alternate
 // function-call form (`COLLATE(this, expr)`) behind COLLATE_IS_FUNC, which is False for base

@@ -1,3 +1,47 @@
-# Local toolchain for sqlglot-go, managed by mise (https://mise.jdx.dev). Run `mise install`.
+# Local toolchain + tasks for sqlglot-go, managed by mise (https://mise.jdx.dev).
+# Run `mise install` once; then `mise run <task>` (e.g. `mise run check`; `mise tasks` to list).
 [tools]
 go = "1.23"
+
+[tasks.build]
+description = "Compile all packages"
+run = "go build ./..."
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
+
+[tasks.test-race]
+description = "Run tests with the race detector"
+run = "go test -race ./..."
+
+[tasks.vet]
+description = "go vet"
+run = "go vet ./..."
+
+[tasks.fmt]
+description = "Format the tree with gofmt"
+run = "gofmt -w ."
+
+[tasks.fmt-check]
+description = "Fail if any file needs gofmt"
+run = '''
+out="$(gofmt -l .)"
+if [ -n "$out" ]; then echo "these files need gofmt:"; echo "$out"; exit 1; fi
+'''
+
+[tasks.lint]
+description = "golangci-lint (install: https://golangci-lint.run)"
+run = "golangci-lint run"
+
+[tasks.tidy]
+description = "Sync go.mod"
+run = "go mod tidy"
+
+[tasks.reference]
+description = "Fetch the pinned upstream sqlglot source into .reference/ (gitignored)"
+run = "./scripts/fetch-reference.sh"
+
+[tasks.check]
+description = "build + vet + gofmt-check + race tests (the pre-push gate)"
+depends = ["build", "vet", "fmt-check", "test-race"]

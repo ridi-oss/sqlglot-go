@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // chrSQL ports chr_sql (generator.py:6190-6194): NAME(<comma-joined expressions>[ USING
 // <charset>]). Base/postgres keep the default "CHR" name; mysql renames it to "CHAR"

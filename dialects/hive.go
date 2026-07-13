@@ -3,8 +3,8 @@ package dialects
 import (
 	"strings"
 
-	exp "github.com/sjincho/sqlglot-go/expressions"
-	"github.com/sjincho/sqlglot-go/tokens"
+	exp "github.com/ridi/sqlglot-go/expressions"
+	"github.com/ridi/sqlglot-go/tokens"
 )
 
 // Hive ports the Hive dialect's parser and tokenizer surface. Generator transforms, type

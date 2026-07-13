@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // jsonExtractArgs returns the positional argument list for the *function* rendering of an
 // exp.JSONExtract/JSONExtractScalar node: `this`, `expression`, then the variadic `expressions`

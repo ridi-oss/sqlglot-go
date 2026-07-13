@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	sqlerrors "github.com/sjincho/sqlglot-go/errors"
+	sqlerrors "github.com/ridi/sqlglot-go/errors"
 )
 
 func mustTokenize(t *testing.T, tokenizer *Tokenizer, sql string) []Token {

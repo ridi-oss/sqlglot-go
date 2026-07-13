@@ -1,6 +1,6 @@
 package generator
 
-import "github.com/sjincho/sqlglot-go/expressions"
+import "github.com/ridi/sqlglot-go/expressions"
 
 // varianceSQL ports rename_func("VAR_SAMP") applied to exp.Variance
 // (generators/postgres.py:384). Base and mysql keep the default VARIANCE name via
