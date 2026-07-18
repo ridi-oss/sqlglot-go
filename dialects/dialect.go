@@ -815,6 +815,48 @@ func isRelationLevelIdentifier(e exp.Expression) bool {
 	return false
 }
 
+// isInformationSchemaRelationPart reports whether e is a relation-level identifier that names or
+// qualifies the INFORMATION_SCHEMA virtual schema: its schema name, the table name under it, or a
+// column's table-qualifier under it. MySQL matches INFORMATION_SCHEMA case-insensitively regardless of
+// lower_case_table_names — uniquely among schemas; performance_schema/mysql/sys stay case-sensitive
+// (live-verified on MySQL 8.0.46, lctn=0: `INFORMATION_SCHEMA.tables`, `information_schema.TABLES`, and
+// mixed case all resolve, while `PERFORMANCE_SCHEMA`/`MySQL`/`SYS` error). So under the lctn=0 strategy
+// these parts must fold even though sibling relation-level identifiers are preserved. It reads the
+// sibling db (never e's own kind), so a CTE/derived reference is never mistaken for information_schema.
+// See DEVIATIONS.md §1.2.
+func isInformationSchemaRelationPart(e exp.Expression) bool {
+	p := e.Parent()
+	if p == nil {
+		return false
+	}
+	var db exp.Expression
+	switch p.Kind() {
+	case exp.KindTable, exp.KindColumn:
+		db, _ = p.Arg("db").(exp.Expression)
+	default:
+		return false
+	}
+	if db == nil || db.Kind() != exp.KindIdentifier {
+		return false
+	}
+	// Match with MySQL's own fold (MySQLLower / utf8mb3_general_ci), not Go's Unicode fold: MySQL
+	// recognizes the virtual schema case-insensitively via that collation (e.g. İ U+0130 → i) and NOT
+	// via characters Go folds but MySQL keeps distinct (e.g. ſ U+017F). "information_schema" is already
+	// MySQLLower-folded, so compare the folded name to it directly.
+	if name, _ := db.Arg("this").(string); MySQLLower(name) != "information_schema" {
+		return false
+	}
+	switch e.ArgKey() {
+	case "db":
+		return true // the schema name itself
+	case "this":
+		return p.Kind() == exp.KindTable // the table under information_schema
+	case "table":
+		return p.Kind() == exp.KindColumn // a column's information_schema-qualified table
+	}
+	return false
+}
+
 // FoldIdentifierName applies the dialect's normalization strategy to a bare identifier NAME
 // (a plain string with no AST node/parent), returning the folded form. It is the string-level
 // counterpart to NormalizeIdentifier — which derives an identifier's role from its parent — for
@@ -856,8 +898,11 @@ func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
 	case MySQLCaseSensitiveTableNames:
 		// Role-aware (models lctn=0): relation-level identifiers — table/db/catalog names, column
 		// QUALIFIERS, and table-alias/CTE names — stay case-sensitive; column-level identifiers (leaf
-		// column names, CTE output-column lists, column aliases) fold with MySQLLower.
-		if !isRelationLevelIdentifier(e) {
+		// column names, CTE output-column lists, column aliases) fold with MySQLLower. EXCEPTION:
+		// INFORMATION_SCHEMA is a virtual schema MySQL matches case-insensitively regardless of lctn
+		// (DEVIATIONS.md §1.2), so its schema name and the table names under it fold even though they
+		// are relation-level.
+		if !isRelationLevelIdentifier(e) || isInformationSchemaRelationPart(e) {
 			this, _ := e.Arg("this").(string)
 			e.Set("this", MySQLLower(this))
 		}

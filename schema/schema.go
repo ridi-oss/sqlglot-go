@@ -346,6 +346,12 @@ func (m *MappingSchema) normalizeMapping(schema *Mapping) (*Mapping, error) {
 	normalizedMapping := NewMapping()
 	flattened := flattenSchema(schema, dictDepth(schema)-1)
 	errorMsg := "Table %s must match the schema's nesting level: %d."
+	// seenPrefixes maps a normalized relation prefix to the raw prefix it came from; a second raw
+	// prefix folding onto it is a Kind-1 collision (see the loop body). Prefixes are encoded with %q
+	// (injective for arbitrary strings) rather than a separator-join, which would collide if a key
+	// contained the separator.
+	type prefixOrigin struct{ raw, display string }
+	seenPrefixes := map[string]prefixOrigin{}
 	for _, keys := range flattened {
 		columnsValue, err := nestedGet(schema, keys, keys, true)
 		if err != nil {
@@ -366,25 +372,109 @@ func (m *MappingSchema) normalizeMapping(schema *Mapping) (*Mapping, error) {
 			}
 			return nil, sqlerrors.NewSchemaError(errorMsg, strings.Join(append(append([]string(nil), keys...), innerKeys...), "."), len(flattened[0]))
 		}
-		normalizedKeys := make([]string, 0, len(keys))
-		for _, key := range keys {
-			normalized, err := m.normalizeName(key, "", true, nil)
-			if err != nil {
-				return nil, err
-			}
-			normalizedKeys = append(normalizedKeys, normalized)
+		normalizedKeys, err := m.normalizeRelationKeys(keys, "")
+		if err != nil {
+			return nil, err
 		}
+		// Kind-1 injectivity (DEVIATIONS.md §1.2): two distinct raw spellings that fold to the same
+		// normalized key would silently merge (nestedSet is last-wins), collapsing two identities under
+		// one key. Fail closed instead. Check every relation prefix (catalog, then schema, then table)
+		// so the shallowest collision is reported.
+		for level := 1; level <= len(normalizedKeys); level++ {
+			cacheKey := fmt.Sprintf("%q", normalizedKeys[:level])
+			rawKey := fmt.Sprintf("%q", keys[:level])
+			if prev, seen := seenPrefixes[cacheKey]; seen {
+				if prev.raw != rawKey {
+					return nil, sqlerrors.NewSchemaError(
+						"duplicate normalized %s %q from %q and %q",
+						relationLevelName(level-1, len(normalizedKeys)),
+						normalizedKeys[level-1], prev.display, strings.Join(keys[:level], "."))
+				}
+			} else {
+				seenPrefixes[cacheKey] = prefixOrigin{raw: rawKey, display: strings.Join(keys[:level], ".")}
+			}
+		}
+		seenColumns := map[string]string{}
 		for _, columnName := range columns.Keys() {
 			columnType, _ := columns.Get(columnName)
 			normalizedColumn, err := m.normalizeName(columnName, "", false, nil)
 			if err != nil {
 				return nil, err
 			}
+			if prev, seen := seenColumns[normalizedColumn]; seen {
+				return nil, sqlerrors.NewSchemaError(
+					"duplicate normalized column %q on %q from %q and %q",
+					normalizedColumn, strings.Join(normalizedKeys, "."), prev, columnName)
+			}
+			seenColumns[normalizedColumn] = columnName
 			path := append(append([]string(nil), normalizedKeys...), normalizedColumn)
 			nestedSet(normalizedMapping, path, columnType)
 		}
 	}
 	return normalizedMapping, nil
+}
+
+// normalizeRelationKeys folds a catalog/schema/table key path with the dialect's strategy while giving
+// each key its relation ROLE and its sibling context. It assembles a real exp.Table from the parts
+// (rather than folding each bare string in isolation) so the role-aware MySQL lctn=0 strategy can
+// (a) preserve relation names — a detached identifier has no parent, and the strategy would misread it
+// as a foldable column (the bulk-mapping mis-fold bug) — and (b) apply the INFORMATION_SCHEMA
+// case-insensitivity exception, which needs the sibling db to fire. Non-role-aware strategies ignore
+// the parent, so their output is byte-identical to per-key folding.
+func (m *MappingSchema) normalizeRelationKeys(keys []string, dialect string) ([]string, error) {
+	dialectName := dialect
+	if dialectName == "" {
+		dialectName = m.dialectName
+	}
+	d, err := dialects.GetOrRaise(dialectName)
+	if err != nil {
+		return nil, err
+	}
+	n := len(keys)
+	if n == 0 {
+		return nil, nil
+	}
+	parts := make([]exp.Expression, n)
+	for i, key := range keys {
+		parts[i] = exp.ParseIdentifier(key, dialectName)
+		// schema.py:704 parity: record the relation role for a dialect whose normalize reads it.
+		parts[i].Meta()["is_table"] = true
+	}
+	// Assemble the deepest three parts (catalog, db, table) into a Table so each gains a parent (role)
+	// and the db sibling (info_schema).
+	args := exp.Args{"this": parts[n-1]}
+	if n >= 2 {
+		args["db"] = parts[n-2]
+	}
+	if n >= 3 {
+		args["catalog"] = parts[n-3]
+	}
+	exp.Table(args) // wires parent pointers for the deepest three parts; parts are mutated in place
+	normalized := make([]string, n)
+	for i := range n {
+		// The deepest three parts have the Table parent, so the role-aware strategy reads their role
+		// and the info_schema exception. Any shallower prefix (n>3, not reachable for SQL dialects) is
+		// parentless and folds exactly as the prior per-key path did — same ParseIdentifier +
+		// NormalizeIdentifier, so byte-identical for every strategy (no delimiter/quoting divergence).
+		d.NormalizeIdentifier(parts[i])
+		normalized[i] = parts[i].Name()
+	}
+	return normalized, nil
+}
+
+// relationLevelName names the relation level at index i (0-based, from the left) of an n-part key
+// path, for collision messages: the rightmost part is the table, then schema, then catalog.
+func relationLevelName(i, n int) string {
+	switch n - 1 - i {
+	case 0:
+		return "table"
+	case 1:
+		return "schema"
+	case 2:
+		return "catalog"
+	default:
+		return "identifier"
+	}
 }
 
 func (m *MappingSchema) normalizeTable(table any, dialect string, normalize *bool) (exp.Expression, error) {

@@ -55,12 +55,32 @@ func TestNormalizeIdentifiersMySQLStrategies(t *testing.T) {
 		// lctn=0: a column alias is column-level and folds.
 		{"lctn0 column alias folds", sensitive,
 			"SELECT rrn AS Foo FROM t", "SELECT rrn AS foo FROM t"},
+		// lctn=0: INFORMATION_SCHEMA is a virtual schema MySQL matches case-insensitively regardless of
+		// lctn (live-verified on MySQL 8.0.46), so its schema name AND the table names under it fold
+		// even though relation-level names are otherwise preserved here.
+		{"lctn0 information_schema folds schema+table", sensitive,
+			"SELECT TABLE_NAME FROM Information_Schema.Tables",
+			"SELECT table_name FROM information_schema.tables"},
+		{"lctn0 information_schema mixed case folds", sensitive,
+			"SELECT * FROM INFORMATION_SCHEMA.SCHEMATA",
+			"SELECT * FROM information_schema.schemata"},
+		// lctn=0: an information_schema-qualified column folds its db + table qualifier too.
+		{"lctn0 information_schema column qualifier folds", sensitive,
+			"SELECT Information_Schema.Tables.Table_Name FROM Information_Schema.Tables",
+			"SELECT information_schema.tables.table_name FROM information_schema.tables"},
+		// lctn=0: performance_schema / mysql / sys are ordinary on-disk DBs — case-SENSITIVE, preserved.
+		{"lctn0 performance_schema stays case-sensitive", sensitive,
+			"SELECT EVENT_NAME FROM Performance_Schema.Accounts",
+			"SELECT event_name FROM Performance_Schema.Accounts"},
 		// lctn=1/2: every identifier folds.
 		{"lctn1/2 folds all", insensitive,
 			"SELECT Users.RRN FROM Users", "SELECT users.rrn FROM users"},
 		{"lctn1/2 folds CTE name too", insensitive,
 			"WITH Users AS (SELECT rrn FROM other) SELECT rrn FROM Users",
 			"WITH users AS (SELECT rrn FROM other) SELECT rrn FROM users"},
+		// lctn=1/2: information_schema folds like everything else (no special-casing needed).
+		{"lctn1/2 information_schema folds", insensitive,
+			"SELECT * FROM Information_Schema.Tables", "SELECT * FROM information_schema.tables"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
