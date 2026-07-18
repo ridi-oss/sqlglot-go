@@ -22,8 +22,8 @@ jobs:
         # Oldest supported (go.mod) + latest stable. Zero third-party deps, so this is fast.
         go: ["1.23.x", "stable"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -34,8 +34,8 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: true
@@ -47,8 +47,8 @@ jobs:
           fi
       - run: go vet ./...
       - name: golangci-lint
-        # v7 of the action runs golangci-lint v2 (matches .golangci.yml version: "2").
-        uses: golangci/golangci-lint-action@v7
+        # v9 of the action runs golangci-lint v2 (matches .golangci.yml version: "2").
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           # Only fail on issues introduced by the PR, so pre-existing findings in the
