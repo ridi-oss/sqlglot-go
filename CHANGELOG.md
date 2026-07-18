@@ -18,6 +18,19 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.6.1](https://github.com/ridi-oss/sqlglot-go/compare/v0.6.0...v0.6.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* fold search-path/db/catalog identifiers role-aware in qualify_tables ([#18](https://github.com/ridi-oss/sqlglot-go/issues/18)) ([49965a3](https://github.com/ridi-oss/sqlglot-go/commit/49965a32c7427ae606f2cbe34a8d4464a8a65839))
+* match MySQL identifier normalization to the engine in bulk schema build ([#17](https://github.com/ridi-oss/sqlglot-go/issues/17)) ([f774e7d](https://github.com/ridi-oss/sqlglot-go/commit/f774e7d61bc2b951eb4b356051ff9a1da04c100a))
+
+
+### Documentation
+
+* set sqlglot-go port copyright holder to RIDI Corporation ([#15](https://github.com/ridi-oss/sqlglot-go/issues/15)) ([404884d](https://github.com/ridi-oss/sqlglot-go/commit/404884da8c828e78a16b4d89d3c3ee3d3b5b735f))
+
 ## [0.6.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.5.0...v0.6.0) (2026-07-13)
 
 
