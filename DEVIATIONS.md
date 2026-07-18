@@ -92,8 +92,21 @@ names are case-insensitive on every platform; database/table names are case-sens
      and `WITH Users AS (…) … FROM users` misses the CTE because CTE names are case-sensitive, while
      column names fold. (Folding `Column.table` — as if a qualifier were column-level — makes a
      qualified column against an unaliased mixed-case table, or a mixed-case CTE reference, resolve to
-     the wrong relation.) When the parent is absent (a `Copy()`, a schema identifier, or
-     `parse_identifier`), the identifier folds — the standalone-name default.
+     the wrong relation.) When the parent is absent (a lone `Copy()` or `parse_identifier` of a single
+     name), the identifier folds — the standalone-name default; bulk schema normalization does **not**
+     rely on that default (see *Bulk-schema normalization* below).
+
+     **`INFORMATION_SCHEMA` exception.** MySQL matches `INFORMATION_SCHEMA` case-**insensitively
+     regardless of lctn** — uniquely among schemas — because it is a virtual (synthesized) schema, not
+     an on-disk directory. Live-verified on MySQL 8.0.46 (lctn=0): `INFORMATION_SCHEMA.tables`,
+     `information_schema.TABLES`, and mixed case all resolve, as do its table names in any case; but
+     `PERFORMANCE_SCHEMA`, `MySQL`, and `SYS` are ordinary on-disk DBs and stay case-sensitive. So
+     `MySQLCaseSensitiveTableNames` folds a relation identifier — despite being relation-level — when it
+     names or qualifies `information_schema`: the schema name itself, a table name under it, and an
+     `exp.Column` `table` qualifier under it (see `isInformationSchemaRelationPart`, which reads the
+     sibling `db`, never the node's own kind). `performance_schema`/`mysql`/`sys` are left
+     case-sensitive. Under `MySQLCaseInsensitive` (lctn=1/2) everything folds anyway, so no special case
+     is needed there. Upstream models none of this (its MySQL is `CASE_SENSITIVE`, folding nothing).
 
 2. **The MySQL fold algorithm itself** — the exported **`dialects.MySQLLower`**
    (`dialects/mysql_casefold.go`) folds via `mysqlLowerMap`, a byte-exact port of MySQL's `.tolower`
@@ -117,6 +130,20 @@ would get distinct normalized keys — the same class of mask-miss this strategy
 CTE-derived columns). MariaDB is not a ported dialect; a faithful MariaDB variant would fold
 `TableAlias.this` when it is a CTE name. If you key security off normalized identifiers on **MariaDB**,
 treat CTE-derived columns with care.
+
+**Bulk-schema normalization (role-aware + fail-closed).** `schema.NewMappingSchema(mapping,
+normalize=true)` normalizes each catalog/schema/table key by assembling the key path into an `exp.Table`
+and normalizing *that* — not by folding each bare string in isolation. This gives every relation key its
+parent (so the role-aware lctn=0 strategy preserves it, instead of misreading a parentless identifier as
+a foldable column — the bug this fixes) and its sibling `db` (so the `INFORMATION_SCHEMA` exception fires
+on the schema side exactly as on the query side). Non-role-aware strategies ignore the parent, so their
+normalized keys stay byte-identical to per-key folding. **Kind-1 injectivity:** if two distinct raw keys
+fold to the same normalized key, `NewMappingSchema` **fails closed** (a `SchemaError` — `duplicate
+normalized {catalog,schema,table,column} …`) instead of silently merging the two identities (upstream
+`nested_set` is last-wins). This applies to **every** folding dialect (including Postgres), because a
+non-injective fold under a security key is a fail-open hazard; it is the only part of §1.2 that reaches
+beyond the MySQL strategies, and it only ever turns a silent merge into a loud error — never a
+parse→generate change.
 
 **Default is unchanged (faithful to upstream).** MySQL's default `NormalizationStrategy` stays
 `CASE_SENSITIVE` (upstream `mysql.py:25`) — no folding. The two MySQL strategies are **opt-in** via the
