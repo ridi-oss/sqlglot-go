@@ -18,6 +18,17 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.7.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.6.2...v0.7.0) (2026-07-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* the Table/Column schema-level qualifier is now the `schema` arg (was `db`), `Expression.DbName()` is now `SchemaName()`, and `QualifyOpts.DB` is now `QualifyOpts.DefaultSchema`.
+
+### Refactoring
+
+* rename Table/Column schema qualifier arg `db` → `schema` ([#23](https://github.com/ridi-oss/sqlglot-go/issues/23)) ([cbfcdaf](https://github.com/ridi-oss/sqlglot-go/commit/cbfcdaf0c7c16babc5777899c0e2a7acbbfdffa4))
+
 ## [0.6.2](https://github.com/ridi-oss/sqlglot-go/compare/v0.6.1...v0.6.2) (2026-07-18)
 
 
