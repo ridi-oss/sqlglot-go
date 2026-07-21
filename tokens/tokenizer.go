@@ -9,6 +9,17 @@ import (
 type FormatString struct {
 	End       string
 	TokenType TokenType
+	// DecodeUnicode marks a SQL-standard Unicode-escaped delimited form — Postgres
+	// `U&'...'` (string) and `U&"..."` (identifier). When set, scanString extracts the
+	// payload with delimiter-doubling only (no backslash string-escapes), decodes the
+	// backslash-Unicode escapes (`\XXXX`, `\+XXXXXX`, `\\`, surrogate pairs) into the real
+	// code points, and emits TokenType (STRING or IDENTIFIER) carrying the decoded text — so
+	// `U&"inf\006Frmation_schema"` becomes the identifier `information_schema`, matching what
+	// Postgres executes. A trailing custom `UESCAPE 'c'` is not consumed here, so those rare
+	// forms fall through and fail closed (parse error / Command) rather than decode wrongly.
+	// Beyond pinned upstream (which mis-tokenizes `U&'...'` as `U & '...'` and parse-errors on
+	// the identifier form). See DEVIATIONS §1.
+	DecodeUnicode bool
 }
 
 type TokenizerConfig struct {

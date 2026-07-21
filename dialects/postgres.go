@@ -71,6 +71,17 @@ func Postgres() *Dialect {
 	cfg.FormatStrings["e'"] = tokens.FormatString{End: "'", TokenType: tokens.BYTE_STRING}
 	cfg.FormatStrings["E'"] = tokens.FormatString{End: "'", TokenType: tokens.BYTE_STRING}
 	cfg.ByteStringEscapes = map[rune]bool{'\'': true, '\\': true}
+	// SQL-standard Unicode-escaped forms (standard_conforming_strings, on by default in
+	// Postgres): `U&'...'` string literals and `U&"..."` quoted identifiers, decoded into the
+	// real code points they denote so an AST consumer sees the actual string/identifier the
+	// server executes — e.g. `U&"inf\006Frmation_schema"` is the identifier information_schema.
+	// DecodeUnicode drives the extract+decode (tokens/unicode_escape.go). Beyond pinned
+	// upstream, which mis-tokenizes `U&'...'` as `U & '...'` (bitwise-AND of a column named U)
+	// and parse-errors the identifier form; see DEVIATIONS §1.
+	for _, prefix := range []string{"U&", "u&"} {
+		cfg.FormatStrings[prefix+"'"] = tokens.FormatString{End: "'", TokenType: tokens.STRING, DecodeUnicode: true}
+		cfg.FormatStrings[prefix+`"`] = tokens.FormatString{End: `"`, TokenType: tokens.IDENTIFIER, DecodeUnicode: true}
+	}
 	// dialects/postgres.py:65-67 BIT_STRINGS=[("b'","'"),("B'","'")] / HEX_STRINGS=
 	// [("x'","'"),("X'","'")] / BYTE_STRINGS=[("e'","'"),("E'","'")]; *_START take the
 	// FIRST tuple of each.

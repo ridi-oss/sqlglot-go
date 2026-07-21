@@ -637,6 +637,22 @@ func (c *TokenizerCore) scanString(start string) bool {
 	if quoteEnd, ok := c.quotes[start]; ok {
 		end = quoteEnd
 	} else if format, ok := c.formatStrings[start]; ok {
+		if format.DecodeUnicode {
+			// Postgres `U&'...'` / `U&"..."`: extract with delimiter-doubling only (backslash is
+			// the Unicode-escape introducer, not a string escape), then decode into real code
+			// points and emit the decoded STRING / IDENTIFIER. See FormatString.DecodeUnicode.
+			// An escape Postgres itself rejects fails closed here (like the invalid hex/bit-string
+			// payload check below), so a consumer never sees a value diverging from the server.
+			c.advance(len([]rune(start)), false)
+			endRune := []rune(format.End)[0]
+			raw := c.extractString(format.End, map[rune]bool{endRune: true}, false, true)
+			decoded, ok := decodeUnicodeEscapes(raw)
+			if !ok {
+				panic(&sqlerrors.TokenError{Msg: fmt.Sprintf("Invalid Unicode escape from %d:%d", c.line, c.start)})
+			}
+			c.add(format.TokenType, decoded)
+			return true
+		}
 		end = format.End
 		tokenType = format.TokenType
 		if tokenType == HEX_STRING {

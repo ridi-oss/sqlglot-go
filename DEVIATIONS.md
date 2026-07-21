@@ -254,6 +254,53 @@ activated. The extension changes whether comment-contained SQL participates in t
 configured server version. Therefore no `testdata/upstream_extensions.jsonl` row is appropriate; that ledger
 tracks grammar accepted beyond the pinned upstream parser, not opt-in executable-comment semantics.
 
+### 1.6 MySQL `RESET …` degrades to `Command` (not a bogus `Alias`)
+
+**What upstream does:** pinned sqlglot v30.12.0 does not tokenize MySQL `RESET` as a keyword, so
+`RESET MASTER` falls into the generic expression-statement path and parses as an `Alias` —
+`Alias(this=Column(RESET), alias=MASTER)`, i.e. the expression `RESET` aliased `AS MASTER`. Verified on the
+pinned reference: `parse_one("RESET MASTER", "mysql")` → `Alias`, `.sql()` = `RESET AS MASTER`. The sibling
+`RESET BINARY LOGS AND GTIDS` parse-errors.
+
+**What sqlglot-go does:** MySQL maps `RESET` to a `COMMAND` token (as Postgres already does), so the whole
+statement degrades to a raw `exp.Command{this: "RESET"}` — `RESET MASTER` / `RESET REPLICA` /
+`RESET BINARY LOGS AND GTIDS` all round-trip unchanged. `reset` as an ordinary identifier
+(`SELECT reset FROM t`) is unaffected.
+
+**Why we diverge (correctness):** `RESET …` is an administrative statement; upstream's `Alias` is a
+semantically wrong structural claim (there is no alias) that a tree consumer could read as a harmless aliased
+expression. A `Command` is the faithful "not structurally modelled" node and matches the real server's intent
+(and Postgres's own `RESET` handling here). Verified against MySQL 8.4 (`RESET MASTER` was removed there;
+`RESET REPLICA` / `RESET BINARY LOGS AND GTIDS` are valid — all degrade to `Command`). Implemented in
+`dialects/mysql.go`.
+
+### 1.7 Postgres `U&'…'` / `U&"…"` Unicode escapes are decoded
+
+**What upstream does:** pinned sqlglot leaves the Postgres `UNICODE_STRINGS` tokenizer set empty, so it
+mis-tokenizes `U&'\0067'` as `U & '\0067'` — a bitwise-AND of a column named `U` with an ordinary (undecoded)
+string literal — and parse-errors the quoted-identifier form (`… FROM U&"inf\006Frmation_schema".tables`).
+Verified on the pinned reference. (Where upstream *does* wire `UNICODE_STRINGS` — Presto/Oracle — it keeps the
+escapes raw in a `UnicodeString` node and never decodes them.)
+
+**What sqlglot-go does:** for Postgres, `U&'…'` (string) and `U&"…"` (quoted identifier) are recognized and
+their SQL-standard backslash-Unicode escapes are decoded into the real code points — `\XXXX`, `\+XXXXXX`,
+`\\`, and UTF-16 surrogate pairs — producing an ordinary decoded string `Literal` / quoted `Identifier`. So
+`U&'\0067\0072\0061\0064\0065'` is the string `'grade'` and `U&"inf\006Frmation_schema"` is the identifier
+`information_schema`, matching what the server executes. A trailing custom `UESCAPE 'c'` clause is not
+consumed, so those rare forms fail closed (parse error) rather than decode against the wrong escape character.
+Presto/Oracle `UnicodeString` handling is untouched.
+
+**Why we diverge (correctness):** `standard_conforming_strings` is on by default in Postgres, which evaluates
+`U&'…'`/`U&"…"` as decoded strings/identifiers — they are pure alternate spellings. Upstream's `U & '…'` is a
+wrong parse, and for an AST-based analyzer the identifier form is a real blind spot: a name (`set_config`, a
+system schema, a masked column) spelled with escapes is invisible to every name-based check while the DB runs
+it. Decoding surfaces the effective name. Verified against PostgreSQL 17.6 (`U&'\0067\0072\0061\0064\0065'` →
+`grade`; `U&"inf\006Frmation_schema"` resolves to the live `information_schema`). Implemented in
+`tokens/unicode_escape.go`, `tokens/tokenizer.go` (`FormatString.DecodeUnicode`), `tokens/tokenizer_core.go`,
+and `dialects/postgres.go`. The `U&"…"` identifier form is also registered in
+`testdata/upstream_extensions.jsonl` (`pg-unicode-identifier`, upstream parse-errors); regression tests:
+`unicode_escape_test.go` and `tokens/unicode_escape_test.go`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream
