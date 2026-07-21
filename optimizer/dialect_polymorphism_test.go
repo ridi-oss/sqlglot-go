@@ -5,6 +5,7 @@ import (
 
 	sqlglot "github.com/ridi-oss/sqlglot-go"
 	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/generator"
 	"github.com/ridi-oss/sqlglot-go/optimizer"
 	"github.com/ridi-oss/sqlglot-go/schema"
@@ -106,5 +107,75 @@ func TestDialectTypePolymorphism(t *testing.T) {
 	qFromString := qualifyOut(t, "mysql, normalization_strategy=mysql_case_insensitive")
 	if qFromDialect != qFromString {
 		t.Fatalf("Qualify string vs *Dialect disagree:\n  string  %q\n  dialect %q", qFromString, qFromDialect)
+	}
+}
+
+// TestDialectTypePolymorphismPasses covers the remaining passes whose dialect argument was
+// widened to DialectType — QualifyColumns, QuoteIdentifiers, QualifyTables, IsolateTableSelects
+// and NormalizeIdentifiersString. Each is exercised with the "mysql" string and the equivalent
+// *dialects.Dialect and must produce identical output, demonstrating the string -> *Dialect
+// polymorphism end to end.
+func TestDialectTypePolymorphismPasses(t *testing.T) {
+	mysqlStr := "mysql"
+	mysqlPtr := dialects.MySQL()
+
+	// A fresh parse per run: these passes mutate the expression in place.
+	parse := func(t *testing.T) exp.Expression {
+		t.Helper()
+		e, err := sqlglot.ParseOne("SELECT a FROM t", "mysql")
+		if err != nil {
+			t.Fatalf("ParseOne: %v", err)
+		}
+		return e
+	}
+	gen := func(t *testing.T, e exp.Expression) string {
+		t.Helper()
+		out, err := sqlglot.Generate(e, "mysql", generator.Options{})
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return out
+	}
+	sch := func(t *testing.T) schema.Schema {
+		t.Helper()
+		s, err := schema.EnsureSchema(schema.M("t", schema.M("a", "INT")), "mysql", true)
+		if err != nil {
+			t.Fatalf("EnsureSchema: %v", err)
+		}
+		return s
+	}
+
+	// parity runs fn(dialect) on a fresh parse for the string and *Dialect forms and compares.
+	parity := func(t *testing.T, name string, fn func(dialect dialects.DialectType) exp.Expression) {
+		t.Helper()
+		fromStr := gen(t, fn(mysqlStr))
+		fromPtr := gen(t, fn(mysqlPtr))
+		if fromStr != fromPtr {
+			t.Fatalf("%s string vs *Dialect disagree:\n  string  %q\n  dialect %q", name, fromStr, fromPtr)
+		}
+	}
+
+	parity(t, "QualifyColumns", func(d dialects.DialectType) exp.Expression {
+		return optimizer.QualifyColumns(parse(t), sch(t), true, true, nil, false, d)
+	})
+	parity(t, "QuoteIdentifiers", func(d dialects.DialectType) exp.Expression {
+		return optimizer.QuoteIdentifiers(parse(t), d, true)
+	})
+	parity(t, "QualifyTables", func(d dialects.DialectType) exp.Expression {
+		return optimizer.QualifyTables(parse(t), nil, nil, d, false, nil, nil, nil)
+	})
+	parity(t, "IsolateTableSelects", func(d dialects.DialectType) exp.Expression {
+		return optimizer.IsolateTableSelects(parse(t), nil, d)
+	})
+
+	// NormalizeIdentifiersString: a settings-carrying *Dialect (case-insensitive MySQL) must fold
+	// identically to its equivalent settings string, proving the strategy flows through the typed
+	// value — not just that a *Dialect is accepted.
+	ci := dialects.MySQL()
+	ci.NormalizationStrategy = dialects.MySQLCaseInsensitive
+	fromStr := gen(t, optimizer.NormalizeIdentifiersString("Col_A", "mysql, normalization_strategy=mysql_case_insensitive"))
+	fromPtr := gen(t, optimizer.NormalizeIdentifiersString("Col_A", ci))
+	if fromStr != fromPtr {
+		t.Fatalf("NormalizeIdentifiersString string vs *Dialect disagree:\n  string  %q\n  dialect %q", fromStr, fromPtr)
 	}
 }

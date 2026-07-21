@@ -12,7 +12,8 @@ import (
 type Args = map[string]any
 
 type GenerateOptions struct {
-	Dialect            string
+	// Dialect selects the output dialect; see DialectType (nil | string | *dialects.Dialect).
+	Dialect            DialectType
 	Pretty             bool
 	Identify           any
 	Normalize          bool

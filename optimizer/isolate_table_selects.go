@@ -1,12 +1,13 @@
 package optimizer
 
 import (
+	"github.com/ridi-oss/sqlglot-go/dialects"
 	sqlerrors "github.com/ridi-oss/sqlglot-go/errors"
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/schema"
 )
 
-func IsolateTableSelects(expression exp.Expression, schemaArg any, dialect any) exp.Expression {
+func IsolateTableSelects(expression exp.Expression, schemaArg schema.SchemaType, dialect dialects.DialectType) exp.Expression {
 	s, err := schema.EnsureSchema(schemaArg, dialect, true)
 	if err != nil {
 		panic(err)

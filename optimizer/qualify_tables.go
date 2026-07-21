@@ -16,7 +16,7 @@ import (
 // like `App` to `app` — and so the INFORMATION_SCHEMA exception can fire (a search-path/schema entry that
 // is information_schema folds). Quoting is respected exactly as NormalizeIdentifier does; non-role-aware
 // strategies ignore the parent, so their result is unchanged from a detached normalization.
-func normalizeRelationIdentifier(name any, argKey string, d *dialects.Dialect) exp.Expression {
+func normalizeRelationIdentifier(name exp.IdentifierName, argKey string, d *dialects.Dialect) exp.Expression {
 	// Copy so that when `name` is an existing Identifier node (shared with another AST) we neither
 	// reparent it onto the throwaway table below nor fold its text in place — upstream leaves the
 	// caller's node untouched. A string input already yields a fresh node; the copy is then cheap.
@@ -31,7 +31,7 @@ func normalizeRelationIdentifier(name any, argKey string, d *dialects.Dialect) e
 	return NormalizeIdentifiers(id, d)
 }
 
-func QualifyTables(expression exp.Expression, schemaName any, catalog any, dialect any, canonicalizeTableAliases bool, onQualify func(exp.Expression), searchPath []string, s schema.Schema) exp.Expression {
+func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, catalog exp.IdentifierName, dialect dialects.DialectType, canonicalizeTableAliases bool, onQualify func(exp.Expression), searchPath []string, s schema.Schema) exp.Expression {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
 		panic(err)

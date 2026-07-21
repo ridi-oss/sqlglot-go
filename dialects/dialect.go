@@ -638,10 +638,30 @@ func (d *Dialect) SettingsString() string {
 	return d.Name
 }
 
+// DialectType is the polymorphic dialect argument accepted throughout the public API,
+// mirroring upstream sqlglot's DialectType (dialect.py: Union[str, Dialect, Type[Dialect], None]).
+// A value is one of:
+//
+//   - nil       — the base, dialect-agnostic dialect
+//   - string    — a dialect name, optionally followed by comma-separated settings, e.g.
+//     "mysql" or "mysql, mysql_version=8.0.35, normalization_strategy=..."
+//   - *Dialect  — an already-resolved dialect (returned as-is by GetOrRaise)
+//
+// It is a type alias for any, so it is fully interchangeable with any: adding it to a
+// signature never breaks an existing string/*Dialect/nil caller. On a hot path prefer
+// passing a *Dialect (resolve once via GetOrRaise) — each string value is re-resolved into
+// a fresh *Dialect on every call, so reusing one avoids that repeated work.
+//
+// The underlying alias is declared in the root expressions package (as expressions.DialectType)
+// so that package's builders and the parse/generate hooks can name the same type without
+// importing dialects (which would form an import cycle, since dialects imports expressions).
+// This is the canonical public name; the two are identical and interchangeable.
+type DialectType = exp.DialectType
+
 // CanonicalString reduces a DialectType-style value (nil | string | *Dialect) to a string the
 // string-based resolvers understand, mirroring upstream sqlglot's polymorphic DialectType at
 // the boundaries that still thread a dialect as a string (schema, identifier parsing).
-func CanonicalString(dialect any) (string, error) {
+func CanonicalString(dialect DialectType) (string, error) {
 	switch v := dialect.(type) {
 	case nil:
 		return "", nil
@@ -663,7 +683,7 @@ func CanonicalString(dialect any) (string, error) {
 // *Dialect, so a per-call setting override cannot leak across callers. The supported string
 // settings are normalization_strategy and mysql_version (upstream also has "version", not
 // modeled here).
-func GetOrRaise(dialect any) (*Dialect, error) {
+func GetOrRaise(dialect DialectType) (*Dialect, error) {
 	switch v := dialect.(type) {
 	case nil:
 		return getOrRaiseString("")

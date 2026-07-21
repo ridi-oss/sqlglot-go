@@ -5,10 +5,9 @@ import (
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
-// NormalizeIdentifiers folds unquoted identifiers per the dialect's normalization strategy.
-// dialect is a DialectType-style value (nil | string | *dialects.Dialect), mirroring upstream
-// sqlglot's normalize_identifiers(expression, dialect: DialectType).
-func NormalizeIdentifiers(expression exp.Expression, dialect any) exp.Expression {
+// NormalizeIdentifiers folds unquoted identifiers per the dialect's normalization strategy,
+// mirroring upstream sqlglot's normalize_identifiers(expression, dialect: DialectType).
+func NormalizeIdentifiers(expression exp.Expression, dialect dialects.DialectType) exp.Expression {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
 		panic(err)
@@ -37,7 +36,7 @@ func NormalizeIdentifiers(expression exp.Expression, dialect any) exp.Expression
 	return expression
 }
 
-func NormalizeIdentifiersString(name string, dialect any) exp.Expression {
+func NormalizeIdentifiersString(name string, dialect dialects.DialectType) exp.Expression {
 	// ParseIdentifier only needs the dialect's tokenizer/quoting (strategy-independent), so
 	// resolve any->name for it; NormalizeIdentifiers still applies the full strategy.
 	d, err := dialects.GetOrRaise(dialect)

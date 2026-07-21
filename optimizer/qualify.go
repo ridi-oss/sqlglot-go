@@ -1,25 +1,28 @@
 package optimizer
 
 import (
+	"github.com/ridi-oss/sqlglot-go/dialects"
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/schema"
 )
 
 type QualifyOpts struct {
-	// Dialect is a DialectType-style value: nil (base), a string (bare name or the
-	// "name, normalization_strategy=..." settings form), or a *dialects.Dialect. Mirrors
-	// upstream sqlglot's polymorphic dialect argument; DefaultSchema/Catalog/Schema are likewise any.
-	Dialect any
+	// Dialect selects the dialect. See dialects.DialectType for the accepted forms
+	// (nil | string | *dialects.Dialect). Mirrors upstream sqlglot's polymorphic dialect argument.
+	Dialect dialects.DialectType
 	// DefaultSchema is the fixed schema-level qualifier stamped on unqualified tables — upstream's
 	// `db=` kwarg (renamed here for the same reason as the Table/Column `schema` arg; see
 	// DEVIATIONS.md §7). Named DefaultSchema, not Schema, because Schema below is the column-metadata
 	// mapping (upstream's `schema=`), mirroring upstream's own two distinct qualify() arguments.
-	DefaultSchema any
-	Catalog       any
+	// A name-or-identifier value; see expressions.IdentifierName.
+	DefaultSchema exp.IdentifierName
+	// Catalog is the fixed catalog-level qualifier; a name-or-identifier, see expressions.IdentifierName.
+	Catalog exp.IdentifierName
 	// SearchPath is an ordered, opt-in schema search path. Its zero value preserves
 	// upstream-compatible fixed DefaultSchema/Catalog qualification.
-	SearchPath                []string
-	Schema                    any
+	SearchPath []string
+	// Schema is the column-metadata schema. See schema.SchemaType for the accepted forms.
+	Schema                    schema.SchemaType
 	ExpandAliasRefs           bool
 	ExpandStars               bool
 	InferSchema               *bool

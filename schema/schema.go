@@ -10,18 +10,29 @@ import (
 )
 
 type Schema interface {
-	AddTable(table any, columnMapping any, dialect string, normalize *bool, matchDepth bool) error
-	ColumnNames(table any, onlyVisible bool, dialect string, normalize *bool) ([]string, error)
-	GetColumnType(table any, column any, dialect string, normalize *bool) (exp.Expression, error)
-	HasColumn(table any, column any, dialect string, normalize *bool) (bool, error)
-	GetUDFType(udf any, dialect string, normalize *bool) (exp.Expression, error)
+	AddTable(table any, columnMapping any, dialect dialects.DialectType, normalize *bool, matchDepth bool) error
+	ColumnNames(table any, onlyVisible bool, dialect dialects.DialectType, normalize *bool) ([]string, error)
+	GetColumnType(table any, column any, dialect dialects.DialectType, normalize *bool) (exp.Expression, error)
+	HasColumn(table any, column any, dialect dialects.DialectType, normalize *bool) (bool, error)
+	GetUDFType(udf any, dialect dialects.DialectType, normalize *bool) (exp.Expression, error)
 	SupportedTableArgs() []string
 	Empty() bool
 	Dialect() *dialects.Dialect
 	Find(table exp.Expression, raiseOnMissing bool, ensureDataTypes bool) (*Mapping, error)
 }
 
-func EnsureSchema(s any, dialect any, normalize bool) (Schema, error) {
+// SchemaType is the polymorphic column-schema argument, mirroring upstream sqlglot's SchemaType.
+// A value is one of:
+//
+//   - nil       — an empty schema
+//   - *Mapping  — a column-name→type mapping (build one with schema.M or NewMapping)
+//   - Schema    — an already-built Schema (e.g. *MappingSchema), returned as-is
+//
+// It is a type alias for any, so it is fully interchangeable with any: adding it to a
+// signature never breaks an existing caller.
+type SchemaType = any
+
+func EnsureSchema(s SchemaType, dialect dialects.DialectType, normalize bool) (Schema, error) {
 	if schema, ok := s.(Schema); ok {
 		return schema, nil
 	}
@@ -185,7 +196,6 @@ type MappingSchema struct {
 	mappingTrie        *trieNode
 	visible            *Mapping
 	normalize          bool
-	dialectName        string
 	dialect            *dialects.Dialect
 	supportedTableArgs []string
 	depthCache         int
@@ -193,17 +203,13 @@ type MappingSchema struct {
 	findCache          map[findCacheKey]*Mapping
 }
 
-func NewMappingSchema(schema *Mapping, dialect any, normalize bool) (*MappingSchema, error) {
-	// dialect is a DialectType-style value (nil | string | *dialects.Dialect). A *Dialect is
-	// stored verbatim (so Dialect() hands the caller's instance — with all its fields — back to
-	// the optimizer, mirroring upstream ensure_schema), while dialectName keeps a canonical
-	// string form so the string-threaded per-name normalization still re-resolves the same
-	// normalization strategy.
+func NewMappingSchema(schema *Mapping, dialect dialects.DialectType, normalize bool) (*MappingSchema, error) {
+	// dialect is a DialectType-style value (nil | string | *dialects.Dialect). It is resolved
+	// once to a *Dialect and stored verbatim (so Dialect() hands the caller's instance — with all
+	// its fields, mysql_version included — back to the optimizer, mirroring upstream ensure_schema).
+	// Every per-name normalization threads this resolved *Dialect directly (see dialectForCall),
+	// so no *Dialect state is ever lost to a canonical-string round-trip.
 	d, err := dialects.GetOrRaise(dialect)
-	if err != nil {
-		return nil, err
-	}
-	dialectName, err := dialects.CanonicalString(dialect)
 	if err != nil {
 		return nil, err
 	}
@@ -211,12 +217,11 @@ func NewMappingSchema(schema *Mapping, dialect any, normalize bool) (*MappingSch
 		schema = NewMapping()
 	}
 	m := &MappingSchema{
-		visible:     NewMapping(),
-		normalize:   normalize,
-		dialectName: dialectName,
-		dialect:     d,
-		typeCache:   map[string]exp.Expression{},
-		findCache:   map[findCacheKey]*Mapping{},
+		visible:   NewMapping(),
+		normalize: normalize,
+		dialect:   d,
+		typeCache: map[string]exp.Expression{},
+		findCache: map[findCacheKey]*Mapping{},
 	}
 	if normalize {
 		schema, err = m.normalizeMapping(schema)
@@ -230,6 +235,22 @@ func NewMappingSchema(schema *Mapping, dialect any, normalize bool) (*MappingSch
 }
 
 func (m *MappingSchema) Dialect() *dialects.Dialect { return m.dialect }
+
+// dialectForCall resolves a per-call dialect argument to a concrete *Dialect with no lossy
+// string round-trip: GetOrRaise returns a *Dialect instance as-is, so mysql_version and every
+// other field survive. An absent argument (nil, or the empty-string form) falls back to the
+// schema's own resolved dialect (m.dialect, likewise complete).
+func (m *MappingSchema) dialectForCall(dialect dialects.DialectType) (*dialects.Dialect, error) {
+	switch v := dialect.(type) {
+	case nil:
+		return m.dialect, nil
+	case string:
+		if v == "" {
+			return m.dialect, nil
+		}
+	}
+	return dialects.GetOrRaise(dialect)
+}
 
 func (m *MappingSchema) Empty() bool { return m == nil || m.mapping == nil || m.mapping.Len() == 0 }
 
@@ -329,7 +350,7 @@ func (m *MappingSchema) Find(table exp.Expression, raiseOnMissing bool, ensureDa
 		for _, key := range schema.Keys() {
 			value, _ := schema.Get(key)
 			if s, ok := value.(string); ok {
-				value, err = m.toDataType(s, "")
+				value, err = m.toDataType(s, m.dialect)
 				if err != nil {
 					return nil, err
 				}
@@ -372,7 +393,7 @@ func (m *MappingSchema) normalizeMapping(schema *Mapping) (*Mapping, error) {
 			}
 			return nil, sqlerrors.NewSchemaError(errorMsg, strings.Join(append(append([]string(nil), keys...), innerKeys...), "."), len(flattened[0]))
 		}
-		normalizedKeys, err := m.normalizeRelationKeys(keys, "")
+		normalizedKeys, err := m.normalizeRelationKeys(keys, m.dialect)
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +418,7 @@ func (m *MappingSchema) normalizeMapping(schema *Mapping) (*Mapping, error) {
 		seenColumns := map[string]string{}
 		for _, columnName := range columns.Keys() {
 			columnType, _ := columns.Get(columnName)
-			normalizedColumn, err := m.normalizeName(columnName, "", false, nil)
+			normalizedColumn, err := m.normalizeName(columnName, m.dialect, false, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -421,22 +442,14 @@ func (m *MappingSchema) normalizeMapping(schema *Mapping) (*Mapping, error) {
 // as a foldable column (the bulk-mapping mis-fold bug) — and (b) apply the INFORMATION_SCHEMA
 // case-insensitivity exception, which needs the sibling schema to fire. Non-role-aware strategies ignore
 // the parent, so their output is byte-identical to per-key folding.
-func (m *MappingSchema) normalizeRelationKeys(keys []string, dialect string) ([]string, error) {
-	dialectName := dialect
-	if dialectName == "" {
-		dialectName = m.dialectName
-	}
-	d, err := dialects.GetOrRaise(dialectName)
-	if err != nil {
-		return nil, err
-	}
+func (m *MappingSchema) normalizeRelationKeys(keys []string, d *dialects.Dialect) ([]string, error) {
 	n := len(keys)
 	if n == 0 {
 		return nil, nil
 	}
 	parts := make([]exp.Expression, n)
 	for i, key := range keys {
-		parts[i] = exp.ParseIdentifier(key, dialectName)
+		parts[i] = exp.ParseIdentifier(key, d)
 		// schema.py:704 parity: record the relation role for a dialect whose normalize reads it.
 		parts[i].Meta()["is_table"] = true
 	}
@@ -477,23 +490,19 @@ func relationLevelName(i, n int) string {
 	}
 }
 
-func (m *MappingSchema) normalizeTable(table any, dialect string, normalize *bool) (exp.Expression, error) {
-	dialectName := dialect
-	if dialectName == "" {
-		dialectName = m.dialectName
-	}
+func (m *MappingSchema) normalizeTable(table any, d *dialects.Dialect, normalize *bool) (exp.Expression, error) {
 	normalizeFlag := m.normalize
 	if normalize != nil {
 		normalizeFlag = *normalize
 	}
-	normalizedTable, err := maybeParseInto(table, dialectName, exp.KindTable, normalizeFlag)
+	normalizedTable, err := maybeParseInto(table, d, exp.KindTable, normalizeFlag)
 	if err != nil {
 		return nil, err
 	}
 	if normalizeFlag {
 		for _, part := range normalizedTable.Parts() {
 			if part.Kind() == exp.KindIdentifier {
-				normalized, err := normalizeName(part, dialectName, true, normalizeFlag)
+				normalized, err := normalizeName(part, d, true, normalizeFlag)
 				if err != nil {
 					return nil, err
 				}
@@ -504,27 +513,23 @@ func (m *MappingSchema) normalizeTable(table any, dialect string, normalize *boo
 	return normalizedTable, nil
 }
 
-func (m *MappingSchema) normalizeName(name any, dialect string, isTable bool, normalize *bool) (string, error) {
+func (m *MappingSchema) normalizeName(name any, d *dialects.Dialect, isTable bool, normalize *bool) (string, error) {
 	normalizeFlag := m.normalize
 	if normalize != nil {
 		normalizeFlag = *normalize
 	}
-	dialectName := dialect
-	if dialectName == "" {
-		dialectName = m.dialectName
-	}
-	identifier, err := normalizeName(name, dialectName, isTable, normalizeFlag)
+	identifier, err := normalizeName(name, d, isTable, normalizeFlag)
 	if err != nil {
 		return "", err
 	}
 	return identifier.Name(), nil
 }
 
-func normalizeName(identifier any, dialect string, isTable bool, normalize bool) (exp.Expression, error) {
+func normalizeName(identifier any, d *dialects.Dialect, isTable bool, normalize bool) (exp.Expression, error) {
 	var id exp.Expression
 	switch v := identifier.(type) {
 	case string:
-		id = exp.ParseIdentifier(v, dialect)
+		id = exp.ParseIdentifier(v, d)
 	case exp.Expression:
 		id = v
 	default:
@@ -539,20 +544,22 @@ func normalizeName(identifier any, dialect string, isTable bool, normalize bool)
 	// schema.py:704: identifier.meta["is_table"] = is_table, consulted by a dialect's
 	// normalize_identifier (only BigQuery reads it today; inert for base/mysql/pg).
 	id.Meta()["is_table"] = isTable
-	d, err := dialects.GetOrRaise(dialect)
-	if err != nil {
-		return nil, err
-	}
 	return d.NormalizeIdentifier(id), nil
 }
 
-func (m *MappingSchema) AddTable(table any, columnMapping any, dialect string, normalize *bool, matchDepth bool) error {
-	normalizedTable, err := m.normalizeTable(table, dialect, normalize)
+func (m *MappingSchema) AddTable(table any, columnMapping any, dialect dialects.DialectType, normalize *bool, matchDepth bool) error {
+	// Resolve the polymorphic dialect to a *Dialect once at the boundary (lossless — see
+	// dialectForCall) and thread that instance through the internal normalize helpers.
+	d, err := m.dialectForCall(dialect)
+	if err != nil {
+		return err
+	}
+	normalizedTable, err := m.normalizeTable(table, d, normalize)
 	if err != nil {
 		return err
 	}
 	if matchDepth && !m.Empty() && len(normalizedTable.Parts()) != m.depth() {
-		tableSQL, sqlErr := normalizedTable.SQL(exp.GenerateOptions{Dialect: m.dialectName})
+		tableSQL, sqlErr := normalizedTable.SQL(exp.GenerateOptions{Dialect: m.dialect})
 		if sqlErr != nil {
 			tableSQL = normalizedTable.Name()
 		}
@@ -565,7 +572,7 @@ func (m *MappingSchema) AddTable(table any, columnMapping any, dialect string, n
 	normalizedColumnMapping := NewMapping()
 	for _, key := range columnMapping.(*Mapping).Keys() {
 		value, _ := columnMapping.(*Mapping).Get(key)
-		normalizedKey, err := m.normalizeName(key, dialect, false, normalize)
+		normalizedKey, err := m.normalizeName(key, d, false, normalize)
 		if err != nil {
 			return err
 		}
@@ -587,8 +594,12 @@ func (m *MappingSchema) AddTable(table any, columnMapping any, dialect string, n
 	return nil
 }
 
-func (m *MappingSchema) ColumnNames(table any, onlyVisible bool, dialect string, normalize *bool) ([]string, error) {
-	normalizedTable, err := m.normalizeTable(table, dialect, normalize)
+func (m *MappingSchema) ColumnNames(table any, onlyVisible bool, dialect dialects.DialectType, normalize *bool) ([]string, error) {
+	d, err := m.dialectForCall(dialect)
+	if err != nil {
+		return nil, err
+	}
+	normalizedTable, err := m.normalizeTable(table, d, normalize)
 	if err != nil {
 		return nil, err
 	}
@@ -621,8 +632,12 @@ func (m *MappingSchema) ColumnNames(table any, onlyVisible bool, dialect string,
 	return out, nil
 }
 
-func (m *MappingSchema) GetColumnType(table any, column any, dialect string, normalize *bool) (exp.Expression, error) {
-	normalizedTable, err := m.normalizeTable(table, dialect, normalize)
+func (m *MappingSchema) GetColumnType(table any, column any, dialect dialects.DialectType, normalize *bool) (exp.Expression, error) {
+	d, err := m.dialectForCall(dialect)
+	if err != nil {
+		return nil, err
+	}
+	normalizedTable, err := m.normalizeTable(table, d, normalize)
 	if err != nil {
 		return nil, err
 	}
@@ -634,7 +649,7 @@ func (m *MappingSchema) GetColumnType(table any, column any, dialect string, nor
 			columnName = columnExpr
 		}
 	}
-	normalizedColumnName, err := m.normalizeName(columnName, dialect, false, normalize)
+	normalizedColumnName, err := m.normalizeName(columnName, d, false, normalize)
 	if err != nil {
 		return nil, err
 	}
@@ -648,14 +663,18 @@ func (m *MappingSchema) GetColumnType(table any, column any, dialect string, nor
 			return dataType, nil
 		}
 		if schemaType, ok := columnType.(string); ok {
-			return m.toDataType(schemaType, dialect)
+			return m.toDataType(schemaType, d)
 		}
 	}
 	return exp.DTypeUnknown.IntoExpr(nil), nil
 }
 
-func (m *MappingSchema) HasColumn(table any, column any, dialect string, normalize *bool) (bool, error) {
-	normalizedTable, err := m.normalizeTable(table, dialect, normalize)
+func (m *MappingSchema) HasColumn(table any, column any, dialect dialects.DialectType, normalize *bool) (bool, error) {
+	d, err := m.dialectForCall(dialect)
+	if err != nil {
+		return false, err
+	}
+	normalizedTable, err := m.normalizeTable(table, d, normalize)
 	if err != nil {
 		return false, err
 	}
@@ -667,7 +686,7 @@ func (m *MappingSchema) HasColumn(table any, column any, dialect string, normali
 			columnName = columnExpr
 		}
 	}
-	normalizedColumnName, err := m.normalizeName(columnName, dialect, false, normalize)
+	normalizedColumnName, err := m.normalizeName(columnName, d, false, normalize)
 	if err != nil {
 		return false, err
 	}
@@ -682,31 +701,21 @@ func (m *MappingSchema) HasColumn(table any, column any, dialect string, normali
 	return ok, nil
 }
 
-func (m *MappingSchema) GetUDFType(udf any, dialect string, normalize *bool) (exp.Expression, error) {
+func (m *MappingSchema) GetUDFType(udf any, dialect dialects.DialectType, normalize *bool) (exp.Expression, error) {
 	// TODO(slice 5): port udf_mapping/udf_trie/find_udf/get_udf_type/_normalize_udf(s).
 	return exp.DTypeUnknown.IntoExpr(nil), nil
 }
 
-func (m *MappingSchema) toDataType(schemaType, dialect string) (exp.Expression, error) {
+func (m *MappingSchema) toDataType(schemaType string, d *dialects.Dialect) (exp.Expression, error) {
 	if cached := m.typeCache[schemaType]; cached != nil {
 		return cached, nil
 	}
-	d := m.dialect
-	dialectName := m.dialectName
-	if dialect != "" {
-		resolved, err := dialects.GetOrRaise(dialect)
-		if err != nil {
-			return nil, err
-		}
-		d = resolved
-		dialectName = dialect
-	}
 	udt := d.SupportsUserDefinedTypes
-	expr, err := exp.DataTypeBuild(schemaType, dialectName, udt, true, nil)
+	expr, err := exp.DataTypeBuild(schemaType, d, udt, true, nil)
 	if err != nil {
 		inDialect := ""
-		if dialectName != "" {
-			inDialect = fmt.Sprintf(" in dialect %s", dialectName)
+		if name := d.SettingsString(); name != "" {
+			inDialect = fmt.Sprintf(" in dialect %s", name)
 		}
 		return nil, sqlerrors.NewSchemaError("Failed to build type '%s'%s.", schemaType, inDialect)
 	}
@@ -717,7 +726,7 @@ func (m *MappingSchema) toDataType(schemaType, dialect string) (exp.Expression, 
 	return expr, nil
 }
 
-func maybeParseInto(sqlOrExpr any, dialect string, into exp.Kind, copyValue bool) (exp.Expression, error) {
+func maybeParseInto(sqlOrExpr any, d *dialects.Dialect, into exp.Kind, copyValue bool) (exp.Expression, error) {
 	if expr, ok := sqlOrExpr.(exp.Expression); ok {
 		if copyValue {
 			return expr.Copy(), nil
@@ -727,7 +736,7 @@ func maybeParseInto(sqlOrExpr any, dialect string, into exp.Kind, copyValue bool
 	if exp.ParseIntoFunc == nil {
 		return nil, fmt.Errorf("expressions.ParseIntoFunc is not configured")
 	}
-	return exp.ParseIntoFunc(fmt.Sprint(sqlOrExpr), dialect, into, false)
+	return exp.ParseIntoFunc(fmt.Sprint(sqlOrExpr), d, into, false)
 }
 
 func reverseEach(in [][]string) [][]string {
