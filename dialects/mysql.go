@@ -149,21 +149,28 @@ func MySQL() *Dialect {
 	cfg.IdentifiersCanStartWithDigit = true
 
 	for keyword, tokenType := range map[string]tokens.TokenType{
-		"BLOB":             tokens.BLOB,
-		"CHARSET":          tokens.CHARACTER_SET,
-		"DISTINCTROW":      tokens.DISTINCT,
-		"EXPLAIN":          tokens.DESCRIBE,
-		"FORCE":            tokens.FORCE,
-		"IGNORE":           tokens.IGNORE,
-		"KEY":              tokens.KEY,
-		"LOCK TABLES":      tokens.COMMAND,
-		"LONGBLOB":         tokens.LONGBLOB,
-		"LONGTEXT":         tokens.LONGTEXT,
-		"MEDIUMBLOB":       tokens.MEDIUMBLOB,
-		"MEDIUMINT":        tokens.MEDIUMINT,
-		"MEDIUMTEXT":       tokens.MEDIUMTEXT,
-		"MEMBER OF":        tokens.MEMBER_OF,
-		"MOD":              tokens.MOD,
+		"BLOB":        tokens.BLOB,
+		"CHARSET":     tokens.CHARACTER_SET,
+		"DISTINCTROW": tokens.DISTINCT,
+		"EXPLAIN":     tokens.DESCRIBE,
+		"FORCE":       tokens.FORCE,
+		"IGNORE":      tokens.IGNORE,
+		"KEY":         tokens.KEY,
+		"LOCK TABLES": tokens.COMMAND,
+		"LONGBLOB":    tokens.LONGBLOB,
+		"LONGTEXT":    tokens.LONGTEXT,
+		"MEDIUMBLOB":  tokens.MEDIUMBLOB,
+		"MEDIUMINT":   tokens.MEDIUMINT,
+		"MEDIUMTEXT":  tokens.MEDIUMTEXT,
+		"MEMBER OF":   tokens.MEMBER_OF,
+		"MOD":         tokens.MOD,
+		// RESET (RESET MASTER / RESET REPLICA / RESET BINARY LOGS AND GTIDS) is a MySQL
+		// admin statement. Without this, RESET falls into the generic expression path and
+		// mis-parses as an Alias (`RESET AS MASTER`) — a semantically wrong structural claim.
+		// Tokenizing it as COMMAND degrades the whole statement to a raw exp.Command, matching
+		// how Postgres already handles RESET (postgres.go). See DEVIATIONS §1. divergence:
+		// upstream MySQL leaves RESET unmapped and produces the bogus Alias.
+		"RESET":            tokens.COMMAND,
 		"SEPARATOR":        tokens.SEPARATOR,
 		"SERIAL":           tokens.SERIAL,
 		"SIGNED":           tokens.BIGINT,
