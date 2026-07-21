@@ -144,14 +144,26 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 			} else {
 				newAliasName = nextAliasName()
 			}
-			if normalize && targetAlias != "" {
-				newAliasName = NormalizeIdentifiersString(newAliasName, dialect).Name()
-			}
 		} else {
 			return
 		}
 
 		alias.Set("this", exp.ToIdentifier(newAliasName))
+
+		// divergence (DEVIATIONS.md §1.2): fold the injected default alias WITH its relation-level
+		// role. Upstream folds a bare, parentless identifier — normalize_identifiers(new_alias_name)
+		// BEFORE it is attached under the TableAlias (qualify_tables.py:93). That works for its own
+		// strategies but starves the port's role-aware MySQLCaseSensitiveTableNames (lctn=0) of the
+		// parent it reads: a parentless alias is misread as column-level and folded to lowercase, so
+		// it no longer matches the case-preserved column qualifier and scope resolution can't bind
+		// (empty lineage). Normalizing AFTER the attach above gives the identifier its
+		// TableAlias("this") parent (isRelationLevelIdentifier), keeping a table alias case-sensitive
+		// while still honoring quoting for the ASCII strategies — output-identical to upstream for
+		// every strategy except the non-upstream role-aware one this fixes.
+		if normalize && !canonicalizeTableAliases && targetAlias != "" && alias.This() != nil {
+			NormalizeIdentifiers(alias.This(), dialect)
+			newAliasName = alias.This().Name()
+		}
 		if len(columns) > 0 {
 			copied := make([]exp.Expression, 0, len(columns))
 			for _, column := range columns {

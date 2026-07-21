@@ -354,6 +354,21 @@ non-blocking for the foundation, must be resolved by the noted slice):
   parser-visible DType enum and DataType nodes needed for CAST/`::` and column definitions;
   generator `.sql()` and rich `.type` assertions stay deferred.
 
+Resolved in the alias-role review pass (PM-escalated, now fixed + regression-tested):
+- QualifyTables' setAlias folded the injected default alias as a PARENTLESS identifier
+  (NormalizeIdentifiersString) BEFORE attaching it under the TableAlias — a faithful port of
+  upstream's `normalize_identifiers(new_alias_name).name` (qualify_tables.py:93), which also omits
+  the alias's role (it sets `is_table` only on db/catalog). Harmless upstream, but it starved the
+  port's non-upstream role-aware MySQLCaseSensitiveTableNames strategy (lctn=0, §1.2) of the parent
+  it reads: the alias for an unaliased mixed-case table was misclassified as column-level and
+  lowercased (`FROM Users` → `AS users`) while the column qualifier stayed `Users`, so scope
+  resolution could not bind and lineage came back empty. Fixed in optimizer/qualify_tables.go by
+  normalizing the alias AFTER `alias.Set("this", ...)`, giving it the TableAlias("this") parent
+  (isRelationLevelIdentifier). Output-identical to upstream for every strategy except the role-aware
+  one; quoting still honored. Test: TestQualifyTablesDefaultAliasRelationRole. (Rejected the initial
+  FoldIdentifierName(name, true) proposal: it folds unconditionally and would over-fold a quoted
+  mixed-case alias under the ASCII strategies, diverging from upstream.)
+
 Resolved in the foundation review pass (were latent, now fixed + regression-tested):
 - Replace()/Pop() silently no-op'd on single-value (non-list) args — the core tree-rewrite
   primitive every optimizer pass depends on. Fixed in expressions/core.go Replace (route
