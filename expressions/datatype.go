@@ -441,7 +441,7 @@ func maybeCopy(e Expression, copyValue bool) Expression {
 	return e
 }
 
-func DataTypeBuild(dtype any, dialect string, udt bool, copyValue bool, kwargs Args) (Expression, error) {
+func DataTypeBuild(dtype any, dialect DialectType, udt bool, copyValue bool, kwargs Args) (Expression, error) {
 	switch v := dtype.(type) {
 	case string:
 		return DataTypeFromStr(v, dialect, udt, kwargs)
@@ -458,7 +458,7 @@ func DataTypeBuild(dtype any, dialect string, udt bool, copyValue bool, kwargs A
 	return nil, fmt.Errorf("Invalid data type: %T. Expected str or DType", dtype)
 }
 
-func DataTypeFromStr(dtype, dialect string, udt bool, kwargs Args) (Expression, error) {
+func DataTypeFromStr(dtype string, dialect DialectType, udt bool, kwargs Args) (Expression, error) {
 	if strings.ToUpper(dtype) == "UNKNOWN" {
 		return applyKwargs(DataType(Args{"this": DTypeUnknown}), kwargs), nil
 	}

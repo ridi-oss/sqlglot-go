@@ -11,8 +11,16 @@ var safeIdentifierRE = regexp.MustCompile(`^[_a-zA-Z]\w*$`)
 
 func IsSafeIdentifier(name string) bool { return safeIdentifierRE.MatchString(name) }
 
-var MaybeParseFunc func(sql string, dialect string) (Expression, error)
-var ParseIntoFunc func(sql string, dialect string, into Kind, ignoreErrors bool) (Expression, error)
+// DialectType is an alias for any naming the polymorphic dialect argument accepted throughout
+// the public API — nil (base) | string (a name, optionally with settings) | *dialects.Dialect.
+// It is defined in this root package (which imports no other internal package) so every package,
+// including this one's builders and hooks below, can name it without importing dialects and
+// creating an import cycle. dialects.DialectType re-exports this type and carries the full
+// documentation; the two are the same type and fully interchangeable.
+type DialectType = any
+
+var MaybeParseFunc func(sql string, dialect DialectType) (Expression, error)
+var ParseIntoFunc func(sql string, dialect DialectType, into Kind, ignoreErrors bool) (Expression, error)
 
 func ToIdentifier(name any, quoted ...bool) Expression {
 	if name == nil {
@@ -100,7 +108,7 @@ func Convert(value any, copyValue bool) Expression {
 	panic(fmt.Sprintf("Cannot convert %v", value))
 }
 
-func MaybeParse(sqlOrExpression any, dialect string, copyValue bool) Expression {
+func MaybeParse(sqlOrExpression any, dialect DialectType, copyValue bool) Expression {
 	if expr, ok := sqlOrExpression.(Expression); ok {
 		if copyValue {
 			return expr.Copy()
@@ -120,7 +128,7 @@ func MaybeParse(sqlOrExpression any, dialect string, copyValue bool) Expression 
 	return expr
 }
 
-func maybeParseInto(sqlOrExpr any, dialect string, into Kind, copyValue bool) (Expression, error) {
+func maybeParseInto(sqlOrExpr any, dialect DialectType, into Kind, copyValue bool) (Expression, error) {
 	if expr, ok := sqlOrExpr.(Expression); ok {
 		return maybeCopy(expr, copyValue), nil
 	}
@@ -169,7 +177,7 @@ func Table_(table, schema, catalog any, quoted *bool, alias any) Expression {
 	return Table(args)
 }
 
-func ToTable(sqlPath any, dialect string, copyValue bool, kwargs Args) (Expression, error) {
+func ToTable(sqlPath any, dialect DialectType, copyValue bool, kwargs Args) (Expression, error) {
 	if expr, ok := sqlPath.(Expression); ok && expr.Kind() == KindTable {
 		return maybeCopy(expr, copyValue), nil
 	}
@@ -186,7 +194,18 @@ func ToTable(sqlPath any, dialect string, copyValue bool, kwargs Args) (Expressi
 	return applyKwargs(table, kwargs), nil
 }
 
-func ParseIdentifier(name any, dialect string) Expression {
+// IdentifierName is a polymorphic identifier-name argument — a table/schema/catalog name
+// part — mirroring the input upstream sqlglot's exp.to_identifier accepts. A value is one of:
+//
+//   - nil        — absent
+//   - string     — a bare name, folded/quoted per the dialect
+//   - Expression — an already-built Identifier node, used as-is
+//
+// It is a type alias for any, so it is fully interchangeable with any: adding it to a
+// signature never breaks an existing caller.
+type IdentifierName = any
+
+func ParseIdentifier(name IdentifierName, dialect DialectType) Expression {
 	if s, ok := name.(string); ok && safeIdentifierRE.MatchString(s) {
 		return Identifier(Args{"this": s, "quoted": false})
 	}
@@ -210,7 +229,7 @@ func splitNumWords(value, sep string, minNumWords int, fillFromStart bool) []str
 	return append(words, padding...)
 }
 
-func Condition(expression any, dialect string, copyValue bool) Expression {
+func Condition(expression any, dialect DialectType, copyValue bool) Expression {
 	return MaybeParse(expression, dialect, copyValue)
 }
 
