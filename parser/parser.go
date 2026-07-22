@@ -1896,7 +1896,16 @@ func (p *Parser) parseType(parseInterval, fallbackToIdentifier bool) exp.Express
 		return p.parseIdVar(false, nil)
 	}
 
-	return p.parseColumn()
+	// A non-reserved keyword type name (`type`, `format`, `schema`, `view`, `current_schema`, …)
+	// isn't an identifier token, so it falls through parseAtom to here — check the postgres
+	// space typed-literal fold on this parseColumn result too (the parseAtom path above covers the
+	// ordinary VAR/quoted-identifier names).
+	firstTok := p.curr
+	column := p.parseColumn()
+	if cast := p.pgTypedLiteralCast(column, firstTok); cast != nil {
+		return cast
+	}
+	return column
 }
 
 // primaryParsers ports the base PRIMARY_PARSERS (parser.py:1122-1173: STRING_PARSERS +
@@ -1993,7 +2002,14 @@ func (p *Parser) parseSessionParameter() exp.Expression {
 // bail is neutral either way (a STRING is not a column op, so parseColumnOps adds nothing).
 func (p *Parser) parseAtom() exp.Expression {
 	if identifierTokens[p.curr.TokenType] {
+		firstTok := p.curr
 		if column := p.parseColumn(); column != nil {
+			// Postgres user-type space typed-literal `<type-name> 'string'` — recognized here at
+			// the primary-expression level (not just in a projection alias), so it folds into a
+			// Cast in every position: projection, function argument, WHERE, SET, `::`, binary op.
+			if cast := p.pgTypedLiteralCast(column, firstTok); cast != nil {
+				return cast
+			}
 			return column
 		}
 	}
@@ -2351,13 +2367,124 @@ func (p *Parser) parseAlias(this exp.Expression, explicit bool) exp.Expression {
 	}
 	alias := p.parseIdVar(anyToken, aliasTokens)
 	if alias == nil {
-		alias = p.parseStringAsIdentifier()
+		// Postgres has no string aliases (its STRING_ALIASES is false, and real PG rejects both
+		// `SELECT 1 'x'` and `SELECT 1 AS 'x'` with a syntax error), so a trailing string is never
+		// folded into an identifier alias there — it is left for the caller to reject. Other dialects
+		// keep the string-as-identifier alias (MySQL/tsql/sqlite override STRING_ALIASES to true).
+		// The postgres user-type space typed-literal `<type-name> 'string'` is recognized earlier, at
+		// the primary-expression level (parseAtom → pgTypedLiteralCast), so it never reaches here as a
+		// name+string; the general non-postgres STRING_ALIASES port is out of scope.
+		if p.dialect.Name != "postgres" {
+			alias = p.parseStringAsIdentifier()
+		}
 	}
 	if alias != nil {
 		comments = append(comments, alias.PopComments()...)
 		this = p.expression(exp.AliasNode(exp.Args{"this": this, "alias": alias}), nil, comments)
 	}
 	return this
+}
+
+// pgReservedValueFunctionTokens are the Postgres reserved identity/session value-functions that this
+// port's tokenizer emits as dedicated tokens. A bare one is a value expression, never a type name, so
+// Postgres rejects `current_user 'x'` etc. as a syntax error. CURRENT_SCHEMA is deliberately excluded
+// — Postgres classifies it as usable as a type name (`SELECT current_schema 'x'` reaches type
+// resolution). (`user`/`current_role` are also PG-reserved but this port tokenizes them as VAR, so
+// they fold as accept-invalid — harmless: Postgres rejects them and a downstream consumer denies the
+// resulting Cast either way. That mirror-gap is a pre-existing tokenizer omission, not this feature.)
+var pgReservedValueFunctionTokens = map[tokens.TokenType]bool{
+	tokens.CURRENT_USER: true, tokens.CURRENT_USER_ID: true, tokens.SESSION_USER: true,
+	tokens.CURRENT_ROLE: true, tokens.CURRENT_CATALOG: true,
+}
+
+// pgTypedLiteralCast folds a Postgres `<type-name> 'string'` space typed-literal — recognized at the
+// primary-expression level for `column` just parsed from `firstTok` — into
+// Cast(Literal, DataType(user-defined)) plus any postfix ops, or returns nil when it does not apply.
+// It fires for postgres when the next token is a Postgres string constant, the leading token is not a
+// reserved value-function, and `column` is a genuine identifier-chain type name. The type name is
+// derived from `column` preserving each part's quoting (ColumnsToDot), so the Cast round-trips exactly
+// like `'x'::a.b` / `CAST('x' AS a.b)`; a comment between the name and the string is carried onto it.
+func (p *Parser) pgTypedLiteralCast(column exp.Expression, firstTok tokens.Token) exp.Expression {
+	if p.dialect.Name != "postgres" || column == nil || !isPGStringConstantToken(p.curr.TokenType) {
+		return nil
+	}
+	if pgReservedValueFunctionTokens[firstTok.TokenType] || !isPGTypeNameChain(column) {
+		return nil
+	}
+	dt, err := exp.DataTypeBuild(exp.ColumnsToDot(column), "", true, false, nil)
+	if err != nil {
+		return nil
+	}
+	strLit := p.parsePGTypedLiteralValue()
+	comments := column.PopComments()
+	comments = append(comments, strLit.PopComments()...)
+	cast := p.expression(exp.Cast(exp.Args{"this": strLit, "to": dt}), nil, comments)
+	// Postgres allows a `::`/`.:` cast directly after a space typed-literal (`public.foo 'x'::text`),
+	// but a postfix `.field`/`[…]`/`.*` requires parentheses around the literal — so apply only the
+	// cast operators here rather than the full parseColumnOps (which would accept, and regenerate,
+	// invalid `.field`/subscript forms). Anything else is left for the caller to reject.
+	for castColumnOperators[p.curr.TokenType] {
+		op := columnOperators[p.curr.TokenType]
+		p.advance()
+		to := p.parseDcolon()
+		if to == nil {
+			p.raiseError("Expected type")
+			break
+		}
+		cast = op(p, cast, to)
+	}
+	return cast
+}
+
+// isPGTypeNameChain reports whether `column` is a genuine (possibly qualified/quoted) type-NAME chain
+// usable as the type of a space typed-literal: a bare `Identifier`, a `Column` (its parts are always
+// identifiers), or a `Dot` whose every leaf is a plain identifier. It rejects a `Dot` built over an
+// arbitrary base by postfix `.field`/`.*`/`[…]` access (`(t2.a).city`, `foo().bar`, `arr[1].foo`,
+// `t.*`), which Postgres itself rejects here. Reserved bare value-function names are excluded by the
+// token check in pgTypedLiteralCast, not here (structural check only).
+func isPGTypeNameChain(column exp.Expression) bool {
+	switch column.Kind() {
+	case exp.KindIdentifier:
+		return true
+	case exp.KindColumn:
+		for _, part := range column.Parts() {
+			if part.Kind() != exp.KindIdentifier {
+				return false
+			}
+		}
+		return true
+	case exp.KindDot:
+		right, _ := column.Arg("expression").(exp.Expression)
+		left, _ := column.Arg("this").(exp.Expression)
+		if right == nil || right.Kind() != exp.KindIdentifier {
+			return false
+		}
+		return left != nil && isPGTypeNameChain(left)
+	}
+	return false
+}
+
+// isPGStringConstantToken reports whether tok begins a Postgres string constant valid as the value of
+// a space typed-literal: a plain string, an escape string (`E'…'` → BYTE_STRING), or a dollar-quoted
+// string (`$$…$$` / `$tag$…$tag$` → RAW_STRING). National (`N'…'`) and bit/hex (`B'…'`/`X'…'`) strings
+// are NOT valid here — Postgres rejects them in this position with a syntax error. (UNICODE_STRING is
+// included for completeness but is unreachable in postgres, which lexes `U&'…'` as a plain STRING.)
+func isPGStringConstantToken(tt tokens.TokenType) bool {
+	switch tt {
+	case tokens.STRING, tokens.BYTE_STRING, tokens.RAW_STRING, tokens.HEREDOC_STRING, tokens.UNICODE_STRING:
+		return true
+	}
+	return false
+}
+
+// parsePGTypedLiteralValue parses a SINGLE Postgres string constant (no adjacent-string concat: PG
+// rejects `a.b 'x' 'y'`). parseString handles every form except the escape string `E'…'`
+// (BYTE_STRING), which goes through parsePrimary — which does not adjacent-concat a non-STRING token.
+func (p *Parser) parsePGTypedLiteralValue() exp.Expression {
+	if p.curr.TokenType == tokens.BYTE_STRING {
+		return p.parsePrimary()
+	}
+	return p.parseString()
 }
 
 func (p *Parser) parseIdVar(anyToken bool, toks map[tokens.TokenType]bool) exp.Expression {

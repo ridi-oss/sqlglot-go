@@ -552,6 +552,68 @@ MySQL 8.0.33 — the production target — via a differential accept/reject swee
 runtime `secure-file-priv`, i.e. parses cleanly; each rejected form matches MySQL's `1064`/`3954`). Use the
 stable ledger ids for the reconciliation lifecycle.
 
+Ledger id [`pg-user-type-typed-literal`](./testdata/upstream_extensions.jsonl) registers the Postgres
+user-type **space typed-literal** — `<type-name> 'string'` with no `AS`, e.g. `public.evil_domain 'x'` or
+`"t" 'x'` — which pinned upstream parse-errors. In Postgres a bare string is **never** a valid column alias
+(`SELECT 1 'x'` and even `SELECT 1 AS 'x'` are syntax errors), so `<name> 'string'` is unambiguously a typed
+literal: the name is a type and the string is its value. This port folds it into
+`Cast(Literal, DataType(user-defined))` — the **same node** `'x'::a.b` / `CAST('x' AS a.b)` already produce
+(the type name derived from the parsed name via `ColumnsToDot`, preserving each part's quoting so the Cast
+round-trips exactly) — so a consumer detects the user-type coercion (a `DOMAIN`/type `CHECK` runs a user
+function on the shared session — a code-exec/error-oracle vector) structurally via `FindAll(KindDataType)`,
+the same walk it already uses for the `::`/CAST spellings. The space form normalizes to the canonical `CAST`
+spelling on output.
+
+**Recognized at the primary-expression level** (`parseAtom`, and `parseType`'s keyword-name fallback), NOT in
+alias parsing — so it folds into a `Cast` in *every* position a value can appear: a SELECT projection, a
+function argument, a `WHERE`/`HAVING` predicate, an `UPDATE … SET` value, `VALUES`, a binary-operator operand,
+and before a postfix `::` (`public.foo 'x'::text` → nested `Cast`). This is essential for the security use
+case — the coercion is detectable as a `DataType` wherever it hides, not only in a projection. Any postfix ops
+after the literal are re-applied to the `Cast`, and a trailing alias (`<type> 'x' AS bar` / `<type> 'x' bar`)
+is then handled by ordinary alias parsing.
+
+This also corrects a pre-existing port divergence: sqlglot-go's `parseAlias` calls `parseStringAsIdentifier`
+**unconditionally**, whereas upstream gates the string-as-alias behind `STRING_ALIASES` — `False` for
+base/postgres (`parser.py:1780`), overridden to `True` only by mysql/tsql/sqlite (`parsers/mysql.py:302`
+et al.). So the port previously accepted `public.evil_domain 'x'` as a string **alias** and round-tripped it
+to a *different* statement (`… AS "x"`). The **implicit** (no-`AS`) Postgres string-alias is now closed: a
+trailing string that is not a typed literal (`SELECT 1 'x'`, or a second string as in `public.foo 'a' 'b'`)
+fails closed. (The **explicit** `AS '…'` form — `SELECT 1 AS 'x'` — is a separate, pre-existing quirk: it
+still parses as a quoted-identifier `Alias` via `parseIdVar`'s any-token path, matching pinned upstream, even
+though real PG rejects it; that path is unchanged here and out of scope.) MySQL/base keep their
+string-as-identifier alias unchanged — MySQL's `SELECT 1 'x'` is a real string alias matching its
+`STRING_ALIASES = True`, so the port's existing unconditional handling is already correct there; the general
+non-Postgres `STRING_ALIASES` port is out of scope.
+
+The type name is validated structurally as a real identifier chain — a `Dot` built by postfix
+`.field`/`.*`/`[…]` access over an arbitrary base (`(t2.a).city`, `foo().bar`, `arr[1].foo`, `t.*`) is
+rejected (Postgres rejects each as a syntax error). A **bare reserved value-function** (`current_user`,
+`session_user`, `current_catalog`, …) is excluded by a check on the *leading token type* — not by blanket
+keyword membership, which would false-reject the ~57 non-reserved keywords (`type`, `format`, `schema`,
+`view`, `current_schema`, …) that Postgres accepts unquoted as type names. (`user` / `current_role` are also
+PG-reserved but this port lexes them as `VAR`, so they fold as *accept-invalid* — harmless: Postgres rejects
+them and a consumer denies the resulting `Cast` either way; a pre-existing tokenizer gap, not this feature.)
+The value accepts every Postgres string-constant form — plain, escape (`E'…'` → `ByteString`), and
+dollar-quoted (`$$…$$`/`$tag$…$tag$` → `RawString`) — but not national (`N'…'`) or bit/hex (`B'…'`/`X'…'`),
+which Postgres rejects in this production; a comment between the name and the string is carried onto the
+`Cast` (so `Cast.this` is the string-constant node — a `Literal` for a plain string, `ByteString`/`RawString`
+for the escape/dollar forms). Only a `::`/`.:` cast may directly follow the literal (`public.foo 'x'::text` →
+nested `Cast`); a postfix `.field`/`[…]`/`.*` (which Postgres requires parentheses for) fails closed. Verified
+against PostgreSQL 17.6 with a differential accept/reject sweep across all positions (each accepted form
+reaches type resolution — `type "…" does not exist` — i.e. parses as a typed literal; each rejected form is a
+PG `syntax error`).
+
+**Known limitations** (all *fail closed under the default `IMMEDIATE` error level* that `sqlglot.ParseOne`
+uses — a parse error, so a consumer denies them — or produce a still-detectable `Cast`; none is a
+detection bypass, they are grammar-completeness gaps left for a follow-up): a type name carrying a **type
+modifier** (`public.foo(3) 'x'`) parses as a function call, not a type-name chain, so it is not folded (parse
+error under `IMMEDIATE`); a **keyword-named user type** that this port lexes as a non-`VAR` statement keyword
+(e.g. a type actually named `alter`) likewise doesn't reach the fold; **newline-separated string
+continuation** (`public.foo 'a'\n'b'`, which Postgres concatenates) is parsed as a single string then fails
+on the second; and the two PG-reserved value-keywords this port lexes as `VAR` (`user`, `current_role`) fold
+as *accept-invalid* (Postgres rejects them; the resulting `Cast` is denied anyway). Use the stable ledger id
+for the reconciliation lifecycle.
+
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)
