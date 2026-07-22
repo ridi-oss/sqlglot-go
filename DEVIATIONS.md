@@ -424,6 +424,34 @@ ordinary expression parsing to disambiguate function calls from statements, whil
 partially consumed statement forms fail closed to a source-preserving `Command`. Use the stable ledger
 id for its reconciliation lifecycle.
 
+Ledger id [`mysql-describe-column`](./testdata/upstream_extensions.jsonl) registers MySQL's
+`{DESCRIBE|DESC|EXPLAIN} tbl_name [col_name | wild]` column/wildcard-filtered table describe, which pinned
+upstream rejects with a parse error. After a *plain* `DESCRIBE tbl` target is parsed, the MySQL parser
+consumes a single trailing `col_name` — a backtick-quoted identifier, or an unquoted **non-reserved** name
+(an unquoted reserved word like `NULL`/`ORDER`, which MySQL rejects here, is not consumed) — or a `wild`
+string, into a Go-only optional `column` arg, so `DESCRIBE users id` / `DESCRIBE users 'i%'` build
+`Describe{this: Table, column: ...}` instead of degrading to `Command`. The target stays `this` (a `Table`),
+so a consumer keying on `this.Kind()` classifies these as table-describes rather than fail-closed — closing a
+false-reject the `this.Kind()` discriminator would otherwise introduce for these common interactive-metadata
+statements.
+
+The col slot is deliberately a single identifier, **not** the general column-expression grammar: a
+parenthesized subquery, function call, cast, qualified/multi-part column, bracket, or literal is rejected
+(fail closed to `Command`), so a full `SELECT` (with its own table reads) can never be smuggled into the
+`column` arg behind `this = Table`. The grab is further gated so it fires only for a *bare* describe with no
+`style`/`format`/`kind` modifier and consumes no trailing clause: `EXPLAIN ANALYZE TABLE t` /
+`EXPLAIN FORMAT=JSON TABLE t` (which are explains of the MySQL `TABLE t` query — row-reading scans, not
+metadata), and any `PARTITION(...)` / `AS JSON` after a col, all stay `Command`. A statement target
+(`DESCRIBE SELECT ...`) never has a trailing token grabbed, and other dialects are untouched. The generator
+renders the column right after the table (`DESCRIBE users id`); the `DESC`/`EXPLAIN` leaders normalize to
+`DESCRIBE` as they already do for the bare form. Verified against MySQL 8.4. Use the stable ledger id for its
+reconciliation lifecycle.
+
+(Separately, and NOT changed here: the plain `EXPLAIN TABLE t` form — MySQL's `TABLE t` statement, a
+query-explain — already parses to `Describe{kind: "TABLE", this: Table(t)}` in both this port and pinned
+upstream. A consumer distinguishing query-explain from table-describe by `this.Kind()` must also treat
+`kind == "TABLE"` as a query-explain; this extension does not widen that pre-existing shape.)
+
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)

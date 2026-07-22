@@ -915,7 +915,7 @@ var argTypes = map[Kind][]argSpec{
 	KindShow:           {{"this", true}, {"history", false}, {"terse", false}, {"target", false}, {"offset", false}, {"starts_with", false}, {"limit", false}, {"from_", false}, {"like", false}, {"where", false}, {"db", false}, {"scope", false}, {"scope_kind", false}, {"full", false}, {"mutex", false}, {"query", false}, {"channel", false}, {"global_", false}, {"log", false}, {"position", false}, {"types", false}, {"privileges", false}, {"for_table", false}, {"for_group", false}, {"for_user", false}, {"for_role", false}, {"into_outfile", false}, {"json", false}, {"iceberg", false}},
 	KindUse:            {{"this", false}, {"expressions", false}, {"kind", false}},
 	KindKill:           {{"this", true}, {"kind", false}},
-	KindDescribe:       {{"this", true}, {"style", false}, {"kind", false}, {"properties", false}, {"expressions", false}, {"wrapped", false}, {"partition", false}, {"format", false}, {"as_json", false}},
+	KindDescribe:       {{"this", true}, {"style", false}, {"kind", false}, {"properties", false}, {"expressions", false}, {"wrapped", false}, {"partition", false}, {"format", false}, {"as_json", false}, {"column", false}},
 	KindLoadData:       {{"this", true}, {"local", false}, {"overwrite", false}, {"temp", false}, {"inpath", false}, {"files", false}, {"partition", false}, {"input_format", false}, {"serde", false}},
 	KindTransaction:    {{"this", false}, {"modes", false}, {"mark", false}},
 	KindCommit:         {{"chain", false}, {"this", false}, {"durability", false}},

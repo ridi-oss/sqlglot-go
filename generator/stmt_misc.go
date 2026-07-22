@@ -74,7 +74,13 @@ func (g *Generator) describeSQL(e expressions.Expression) string {
 	if boolValue(e.Arg("as_json")) {
 		asJSON = " AS JSON"
 	}
-	return "DESCRIBE" + style + format + " " + g.sqlKey(e, "this") + partition + asJSON
+	// MySQL `DESCRIBE tbl_name [col_name | wild]` — the column/wildcard filter renders right
+	// after the table (see parseDescribeStructured).
+	column := g.sqlKey(e, "column")
+	if column != "" {
+		column = " " + column
+	}
+	return "DESCRIBE" + style + format + " " + g.sqlKey(e, "this") + column + partition + asJSON
 }
 
 // loadDataSQL ports loaddata_sql (generator.py:3007-3033), minus the `files`

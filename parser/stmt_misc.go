@@ -123,13 +123,50 @@ func (p *Parser) parseDescribeStructured() exp.Expression {
 		this = p.parseDescribeThis()
 	}
 
-	properties := p.parseProperties()
-	var expressions []exp.Expression
-	if properties != nil {
-		expressions = properties.Expressions()
+	// MySQL `{DESCRIBE|DESC|EXPLAIN} tbl_name [col_name | wild]` — a single trailing column name
+	// or wildcard string that filters which columns the metadata lists. Extension beyond upstream
+	// (which parse-errors this form); see testdata/upstream_extensions.jsonl "mysql-describe-column"
+	// and DEVIATIONS.
+	//
+	// The col/wild filter only follows a PLAIN `DESCRIBE tbl` — never one carrying a leading
+	// ANALYZE/FORMAT/creatable modifier. Those are the query-explain forms: `EXPLAIN ANALYZE TABLE t`
+	// / `EXPLAIN FORMAT=JSON TABLE t` are explains of the `TABLE t` query (a table scan that reads
+	// rows), NOT metadata reads, so requiring style/format/kind to be absent keeps them fail-closed
+	// instead of misclassifying a query-explain as a table-describe. Also gated to a MySQL Table
+	// target (a statement target or other dialect never grabs a trailing token).
+	var column exp.Expression
+	if p.dialect.Name == "mysql" && style == nil && format == nil && kind == nil &&
+		this != nil && this.Kind() == exp.KindTable && p.curr.IsValid() {
+		if p.curr.TokenType == tokens.STRING {
+			column = p.parseString() // wild pattern, e.g. `DESCRIBE t 'i%'`
+		} else if p.curr.TokenType == tokens.IDENTIFIER || !p.dialect.IsReservedKeyword(p.curr.Text) {
+			// A single column name: a backtick-quoted identifier (any word is valid quoted) or an
+			// unquoted NON-reserved name — deliberately NOT the general parseColumn expression
+			// grammar, which would over-accept `a.b`, function calls, casts, literals, and
+			// (critically) a parenthesized subquery smuggling a full SELECT (with its own table
+			// reads) behind this=Table, which a consumer classifying by this.Kind() would not
+			// scope. parseIdVar consumes exactly one identifier token; a non-name token (`(`, a
+			// number) or an unquoted reserved word (NULL, ORDER, ...) — all of which real MySQL
+			// rejects at this position — is left for the leftover-token guard to fail closed.
+			if id := p.parseIdVar(false, nil); id != nil {
+				column = exp.Column(exp.Args{"this": id})
+			}
+		}
 	}
-	partition := p.parsePartition()
-	asJSON := p.matchTextSeq("AS", "JSON")
+
+	var expressions []exp.Expression
+	var partition exp.Expression
+	asJSON := false
+	// The col_name/wild form takes no further clauses — skip the generic property/partition/AS JSON
+	// parsers so a trailing `PARTITION(...)` / `AS JSON` fails closed (MySQL rejects both after a col).
+	if column == nil {
+		properties := p.parseProperties()
+		if properties != nil {
+			expressions = properties.Expressions()
+		}
+		partition = p.parsePartition()
+		asJSON = p.matchTextSeq("AS", "JSON")
+	}
 
 	if p.curr.IsValid() {
 		return nil
@@ -143,6 +180,7 @@ func (p *Parser) parseDescribeStructured() exp.Expression {
 		"partition":   partition,
 		"format":      format,
 		"as_json":     asJSON,
+		"column":      column,
 	}), nil, nil)
 }
 
