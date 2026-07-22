@@ -368,7 +368,11 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 	chunksLength := len(p.chunks)
 	for p.chunkIndex < chunksLength {
 		p.advanceChunk()
-		expressions = append(expressions, parseMethod())
+		stmt := parseMethod()
+		expressions = append(expressions, stmt)
+		// MySQL file-write INTO placement is validated per top-level statement so it also covers
+		// non-SELECT roots (UPDATE/DELETE/INSERT/CREATE) and EXPLAIN, not just parseExpressionStatement.
+		p.validateFileWriteIntoPlacement(stmt)
 		if p.index < p.tokensSize {
 			p.raiseError("Invalid expression / Unexpected token")
 		}
@@ -434,6 +438,35 @@ func (p *Parser) parseExpressionStatement() exp.Expression {
 	return p.parseQueryModifiers(expression)
 }
 
+// validateFileWriteIntoPlacement enforces MySQL's rule that a file-write INTO (OUTFILE/DUMPFILE)
+// may appear only at the end of a top-level query expression — never inside a subquery/derived
+// table, on a non-final UNION branch, or nested in an UPDATE/DELETE/INSERT/CREATE (MySQL error
+// 3954/1064). parseInto attaches the Into wherever the keyword appears and parseSetOperations
+// hoists a *final* set-op branch's write to the set-op node, so the only valid position is the
+// top-level query root's own `into` arg: the statement itself when it is a SELECT/UNION, or — for a
+// leading EXPLAIN/DESCRIBE — the query it explains. A file-write Into anywhere else is misplaced and
+// fails closed. Detection is never lost either way; this keeps the accepted grammar aligned with
+// MySQL. Called once per top-level statement (parseBatchStatements); MySQL-only.
+func (p *Parser) validateFileWriteIntoPlacement(stmt exp.Expression) {
+	if p.dialect.Name != "mysql" || stmt == nil {
+		return
+	}
+	root := stmt
+	if root.Kind() == exp.KindDescribe { // EXPLAIN/DESCRIBE <query>: the explained query is the root
+		root = asExpr(root.Arg("this"))
+	}
+	var rootInto exp.Expression
+	if root != nil && (root.Kind() == exp.KindSelect || isSetOperation(root.Kind())) {
+		rootInto = asExpr(root.Arg("into"))
+	}
+	for _, node := range stmt.FindAll(exp.KindInto) {
+		if isOutfileKeyword(node.Text("kind")) && node != rootInto {
+			p.raiseError("Misplaced INTO OUTFILE/DUMPFILE: it must be at the end of the top-level query")
+			return
+		}
+	}
+}
+
 func (p *Parser) parseSetOperations(this exp.Expression) exp.Expression {
 	for this != nil {
 		setop := p.parseSetOperation(this, false)
@@ -449,6 +482,13 @@ func (p *Parser) parseSetOperations(this exp.Expression) exp.Expression {
 				if e := asExpr(expression.Arg(arg)); e != nil {
 					this.Set(arg, e.Pop())
 				}
+			}
+			// A MySQL file-write INTO on the last branch applies to the whole query expression
+			// and must render at the trailing position (after ORDER BY/LIMIT), so hoist it to the
+			// set-operation node like the modifiers above. Only the file-write kinds are hoisted; a
+			// plain INTO (kind unset) is left on the branch, matching prior behavior.
+			if into := asExpr(expression.Arg("into")); into != nil && isOutfileKeyword(into.Text("kind")) {
+				this.Set("into", into.Pop())
 			}
 		}
 	}
@@ -662,19 +702,219 @@ func (p *Parser) parseQueryModifiers(this exp.Expression) exp.Expression {
 				}
 			}
 		}
+		// MySQL allows the file-write INTO at the trailing position too, e.g.
+		// `SELECT ... FROM t INTO OUTFILE '/path'` (the canonical spot). Upstream only
+		// parses INTO *before* FROM (parser.py:3967), so this grabs just the OUTFILE/
+		// DUMPFILE forms here (grammar extension); a plain trailing `INTO tbl/@var` is
+		// left alone, matching upstream. Guarded to Select nodes without an existing into.
+		if p.dialect.Name == "mysql" && this.Kind() == exp.KindSelect && this.Arg("into") == nil &&
+			p.curr.TokenType == tokens.INTO && isOutfileKeywordToken(p.next) {
+			if into := p.parseInto(); into != nil {
+				this.Set("into", into)
+				// A trailing file-write INTO must be the last clause except for a locking clause
+				// (FOR UPDATE / LOCK IN SHARE MODE, which MySQL accepts on either side). ORDER BY /
+				// LIMIT / WHERE / GROUP BY etc. after it is invalid (1064); fail closed rather than
+				// letting a second parseQueryModifiers pass silently reorder them ahead of the INTO.
+				if queryModifierTokens[p.curr.TokenType] &&
+					p.curr.TokenType != tokens.FOR && p.curr.TokenType != tokens.LOCK {
+					p.raiseError("Only a locking clause may follow a trailing INTO OUTFILE/DUMPFILE")
+				}
+			}
+		}
 	}
 	return this
+}
+
+// isOutfileKeyword reports whether text is one of the MySQL INTO file-write keywords.
+func isOutfileKeyword(text string) bool {
+	switch stringsUpper(text) {
+	case "OUTFILE", "DUMPFILE":
+		return true
+	}
+	return false
+}
+
+// isOutfileKeywordToken reports whether tok is an *unquoted* OUTFILE/DUMPFILE keyword. A
+// backtick-quoted identifier (tokens.IDENTIFIER) with the same text is an ordinary INTO
+// target name (e.g. `INTO ` + "`outfile`" + ` = a variable`), which MySQL accepts, so it must
+// NOT be treated as the file-write keyword (divergence would regress a legitimate query).
+func isOutfileKeywordToken(tok tokens.Token) bool {
+	return tok.TokenType != tokens.IDENTIFIER && isOutfileKeyword(tok.Text)
 }
 
 func (p *Parser) parseInto() exp.Expression {
 	if !p.match(tokens.INTO) {
 		return nil
 	}
+	// MySQL server-side FILE WRITES: `INTO OUTFILE '/path' [CHARACTER SET ..] [export_options]`
+	// and `INTO DUMPFILE '/path'`. The `kind` marks it as a write (vs a normal INTO table/var,
+	// which leaves kind unset). Grammar extension beyond upstream, which parse-errors these.
+	// Only an *unquoted* OUTFILE/DUMPFILE is the keyword; a backtick-quoted `` `outfile` `` is an
+	// ordinary INTO target name that MySQL accepts, so it falls through to the plain-INTO path.
+	if p.dialect.Name == "mysql" && p.curr.TokenType != tokens.IDENTIFIER {
+		if p.matchTextSeq("OUTFILE") {
+			return p.parseIntoOutfile("OUTFILE")
+		}
+		if p.matchTextSeq("DUMPFILE") {
+			return p.parseIntoOutfile("DUMPFILE")
+		}
+	}
 	temp := p.match(tokens.TEMPORARY)
 	unlogged := p.matchTextSeq("UNLOGGED")
 	p.match(tokens.TABLE)
 	tbl := p.parseTable(true, false, nil, false, false, false, false)
 	return p.expression(exp.Into(exp.Args{"this": tbl, "temporary": temp, "unlogged": unlogged}), nil, nil)
+}
+
+// parseIntoOutfile parses the MySQL `INTO OUTFILE '/path' [CHARACTER SET cs] [{FIELDS|COLUMNS} …]
+// [LINES …]` / `INTO DUMPFILE '/path'` file-write targets into an Into node with kind =
+// "OUTFILE"/"DUMPFILE" and this = the path Literal.
+//
+// The Into node is ALWAYS returned with `kind` set, even when the path/options are malformed:
+// having matched OUTFILE/DUMPFILE we are committed to the file-write grammar, so a malformed tail
+// raises a parse error (a hard fail at the IMMEDIATE error level — the default and what the
+// sqlglot.ParseOne/Parse wrappers use) yet still yields a structurally detectable file-write, so a
+// lenient error level (WARN/IGNORE) can never silently degrade it to a plain SELECT with the INTO
+// dropped.
+func (p *Parser) parseIntoOutfile(kind string) exp.Expression {
+	args := exp.Args{"kind": kind}
+	// The path must be a plain string literal: MySQL requires a quoted 'file_name' constant here
+	// and rejects a placeholder/parameter/hex/bit value, so parseString's placeholder fallback is
+	// deliberately bypassed (it would violate the this = Literal contract).
+	if p.curr.TokenType != tokens.STRING {
+		p.raiseError("Expected a file path string after INTO " + kind)
+		return p.expression(exp.Into(args), nil, nil)
+	}
+	args["this"] = p.parseString()
+	if kind == "OUTFILE" {
+		p.parseOutfileExportOptions(args)
+	}
+	return p.expression(exp.Into(args), nil, nil)
+}
+
+// parseOutfileExportOptions parses the optional `CHARACTER SET cs`, `{FIELDS|COLUMNS} …`, and
+// `LINES …` export clauses of INTO OUTFILE, matching MySQL: CHARACTER SET precedes the FIELDS/LINES
+// blocks; within each block the sub-options may appear in ANY order (last wins on repetition); each
+// matched introducer REQUIRES its operand and a bare `FIELDS`/`COLUMNS`/`LINES` with no sub-option
+// is rejected — all fail closed via raiseError rather than silently dropping the malformed clause.
+func (p *Parser) parseOutfileExportOptions(args exp.Args) {
+	// "CHARACTER SET" tokenizes as a single CHARACTER_SET token (tokenizer.go:160). MySQL's
+	// charset operand is a bare charset name (utf8mb4) or a quoted string ('utf8'); a number,
+	// NULL, a parenthesized/function expression, or a placeholder is rejected (fail closed).
+	if p.match(tokens.CHARACTER_SET) {
+		var cs exp.Expression
+		// A charset name is a quoted string or a bare identifier keyword (utf8mb4, binary). The
+		// token type is checked first so parseCharsetName's placeholder/parameter fallback can't
+		// admit `?`/`@cs`/`:cs` (MySQL rejects those here with 1064).
+		switch p.curr.TokenType {
+		case tokens.STRING:
+			cs = p.parseString()
+		case tokens.VAR, tokens.IDENTIFIER, tokens.BINARY:
+			cs = p.parseCharsetName()
+		}
+		if cs == nil {
+			p.raiseError("Expected a charset name after CHARACTER SET")
+			return
+		}
+		args["charset"] = cs
+	}
+	if p.matchTexts(map[string]bool{"FIELDS": true, "COLUMNS": true}) {
+		if stringsUpper(p.prev.Text) == "COLUMNS" {
+			args["columns"] = true
+		}
+		matched := 0
+		for {
+			if p.matchTextSeq("TERMINATED", "BY") {
+				if v := p.parseExportValue(); v != nil {
+					args["fields_terminated"] = v
+				} else {
+					p.raiseError("Expected a string after TERMINATED BY")
+					return
+				}
+				matched++
+				continue
+			}
+			optionally := p.matchTextSeq("OPTIONALLY")
+			if p.matchTextSeq("ENCLOSED", "BY") {
+				if v := p.parseExportValue(); v != nil {
+					args["enclosed"] = v
+					args["optionally_enclosed"] = optionally
+				} else {
+					p.raiseError("Expected a string after ENCLOSED BY")
+					return
+				}
+				matched++
+				continue
+			}
+			if optionally {
+				// OPTIONALLY is only valid as an immediate prefix of ENCLOSED BY.
+				p.raiseError("Expected ENCLOSED BY after OPTIONALLY")
+				return
+			}
+			if p.matchTextSeq("ESCAPED", "BY") {
+				if v := p.parseExportValue(); v != nil {
+					args["escaped"] = v
+				} else {
+					p.raiseError("Expected a string after ESCAPED BY")
+					return
+				}
+				matched++
+				continue
+			}
+			break
+		}
+		if matched == 0 {
+			p.raiseError("Expected TERMINATED BY / ENCLOSED BY / ESCAPED BY after FIELDS")
+			return
+		}
+	}
+	if p.matchTextSeq("LINES") {
+		matched := 0
+		for {
+			if p.matchTextSeq("STARTING", "BY") {
+				if v := p.parseExportValue(); v != nil {
+					args["lines_starting"] = v
+				} else {
+					p.raiseError("Expected a string after STARTING BY")
+					return
+				}
+				matched++
+				continue
+			}
+			if p.matchTextSeq("TERMINATED", "BY") {
+				if v := p.parseExportValue(); v != nil {
+					args["lines_terminated"] = v
+				} else {
+					p.raiseError("Expected a string after TERMINATED BY")
+					return
+				}
+				matched++
+				continue
+			}
+			break
+		}
+		if matched == 0 {
+			p.raiseError("Expected STARTING BY or TERMINATED BY after LINES")
+			return
+		}
+	}
+}
+
+// parseExportValue parses the MySQL string constant used as a FIELDS/LINES export-option value:
+// a single quoted string, or a hex/bit-string literal (X'2c' / 0x2c, b'101' / 0b101). Anything
+// else yields nil (fail closed) — MySQL rejects a number/column/expression here, and also rejects
+// the national-string form `N'…'` and adjacent string literals in this slot. A single constant is
+// parsed deliberately: parsePrimary would fold adjacent strings into a CONCAT (`'a' 'b'` →
+// CONCAT('a', 'b')), so the plain-string form goes through parseString (one literal, no concat),
+// leaving any trailing token to fail closed.
+func (p *Parser) parseExportValue() exp.Expression {
+	switch p.curr.TokenType {
+	case tokens.HEX_STRING, tokens.BIT_STRING:
+		return p.parsePrimary()
+	case tokens.STRING:
+		return p.parseString()
+	}
+	return nil
 }
 
 func (p *Parser) parseFrom(joins bool, skipFromToken bool, consumePipe bool) exp.Expression {

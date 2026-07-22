@@ -490,6 +490,68 @@ r`), which are intentionally **not** modeled in this pass (safe — the privileg
 extension is Postgres-only; base/MySQL leave these forms as `Command` (MySQL's own multi-item `SET a=1, b=2`
 is unaffected). Verified against PostgreSQL 17.6. Use the stable ledger ids for the reconciliation lifecycle.
 
+Ledger ids [`mysql-into-outfile`, `mysql-into-dumpfile`](./testdata/upstream_extensions.jsonl) register
+MySQL's `SELECT ... INTO {OUTFILE|DUMPFILE} '/path'` server-side file writes, which pinned upstream rejects
+with a parse error. These parse to the existing `Into` node (hung off the `Select`'s `into` arg) with a new
+`kind` marker (`"OUTFILE"`/`"DUMPFILE"`; **unset** for a normal `INTO tbl/@var`) and `this` = the path
+`Literal`, so a consumer detects the file-write — and its target path — structurally via `Into.kind` rather
+than scanning raw SQL. `OUTFILE` additionally models the export grammar into dedicated args — `CHARACTER SET`
+(`charset`), the `{FIELDS|COLUMNS}` clause (`fields_terminated`, `optionally_enclosed`, `enclosed`, `escaped`,
+plus a `columns` marker distinguishing the `COLUMNS` synonym), and the `LINES` clause (`lines_starting`,
+`lines_terminated`); `DUMPFILE` takes no options (trailing option tokens fail closed, matching MySQL). The
+path is required to be a plain string `Literal` (MySQL rejects a placeholder/parameter/number here); the
+`CHARACTER SET` operand is a bare charset name (`utf8mb4`) or a quoted string (`'utf8'`) — a number, `NULL`,
+a parenthesized/function expression, or a placeholder is rejected; and each `FIELDS`/`LINES` option value is
+a single plain-string or hex/bit literal (`X'2c'`/`0x2c`, `b'101'`/`0b101`) — the national-string form
+(`N'…'`) and adjacent-string concatenation (`'a' 'b'`, which MySQL rejects in this slot) fail closed rather
+than folding into a `CONCAT`. Within a `FIELDS`/`LINES` block the sub-options may appear in **any order**
+(repetition: last wins), matching MySQL; the generator re-emits a canonical order, so a reordered/repeated
+input normalizes rather than round-tripping byte-for-byte (semantically identical, valid MySQL). Every
+matched option introducer requires its operand and a bare `FIELDS`/`COLUMNS`/`LINES` is rejected — all fail
+closed.
+
+MySQL accepts `INTO` both before `FROM` and at the trailing position; the trailing form is canonical and is
+where this port re-emits it (the before-`FROM` spelling parses to the same shape and normalizes to trailing
+on output). The trailing grab in `parseQueryModifiers` fires only for an **unquoted** `OUTFILE`/`DUMPFILE`
+keyword on a MySQL `Select` with no existing `into`; a plain trailing `INTO tbl/@var`, and a backtick-quoted
+`` `outfile` `` (an ordinary INTO target name that MySQL accepts), are left as upstream. Because
+`INTO OUTFILE` is a file write, not a table materialization, the generator renders it inline via `intoSQL`
+and never as the `CREATE TABLE … AS` rewrite a plain `SELECT INTO` takes on non-`SUPPORTS_SELECT_INTO`
+dialects.
+
+**Fail-closed, detection-preserving.** Having matched `OUTFILE`/`DUMPFILE` the parser is committed to the
+file-write grammar, so a malformed tail (missing path, dangling option, modifier after a trailing `INTO`)
+raises a parse error — a hard failure at the default `IMMEDIATE` level that `sqlglot.ParseOne`/`Parse` use.
+The core guarantee is that a **well-formed** file-write is never silently lost: the `Into` node is built with
+its `kind` before any tail is validated, so a malformed *plain SELECT/UNION* file-write still exposes a
+kind-tagged `Into` even at the lenient `WARN`/`IGNORE` levels (reachable via the public
+`parser.NewWithErrorLevel`) — it can never degrade to a plain `SELECT` with the `INTO` dropped. (The one
+exception is a malformed file-write nested inside a speculatively-parsed `CREATE`/`REPLACE`, whose
+`tryParse` forces `IMMEDIATE` and, on the raised error, discards the partial tree back to a raw `Command`
+with no `Into`; such input is invalid MySQL and cannot execute, so this is a limit of the lenient-level
+guarantee, not an executable bypass.) **Trailing position:** a trailing `INTO` must be the last clause except
+for a following locking clause (`FOR UPDATE`/`LOCK IN SHARE MODE`, which MySQL accepts on either side); an
+`ORDER BY`/`LIMIT`/`WHERE`/`GROUP BY` after it is rejected (MySQL 1064) rather than silently reordered ahead
+of the `INTO`. **Set operations:** a file-write `INTO` on the last branch of a `UNION`/`EXCEPT`/`INTERSECT` is
+hoisted to the set-operation node (like `ORDER BY`/`LIMIT`) and rendered at the trailing position, so
+`… UNION … ORDER BY … INTO OUTFILE '/x'` round-trips as valid MySQL and stays detectable; the
+parenthesized-last-branch spelling (`… UNION (SELECT …) INTO OUTFILE`) fails closed. **Placement:** a
+per-top-level-statement check (covering `SELECT`/`UNION`, a leading `EXPLAIN`/`DESCRIBE`, and non-SELECT
+roots like `UPDATE`/`DELETE`/`INSERT`) requires the file-write `Into` to sit at the top-level query root's own
+`into` arg (directly, or after the final-branch hoist, or the query explained by `EXPLAIN`). A file-write
+`INTO` inside a subquery/derived table, on a non-final UNION branch, or nested in an `UPDATE`/`DELETE`/`INSERT`
+— all of which MySQL rejects with error 3954/1064 — fails closed. Detection is never lost in any of these
+cases; the checks keep the accepted grammar aligned with MySQL. **Executable comments:** a file-write hidden
+in a MySQL executable comment (`SELECT 1 /*! INTO OUTFILE '/x' */`) is invisible by default because the
+default strips `/*! … */` for all content (§1.5, matching upstream); it becomes a detectable `Into` node when
+`mysql_version` is set — the documented, opt-in way to see any executable-comment SQL — so this extension
+composes with §1.5 rather than adding its own comment handling.
+
+The extension is MySQL-only; other dialects do not treat `OUTFILE` specially. Verified syntactically against
+MySQL 8.0.33 — the production target — via a differential accept/reject sweep (each accepted form reaches
+runtime `secure-file-priv`, i.e. parses cleanly; each rejected form matches MySQL's `1064`/`3954`). Use the
+stable ledger ids for the reconciliation lifecycle.
+
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)

@@ -829,7 +829,7 @@ var argTypes = map[Kind][]argSpec{
 	KindWhens:      {{"expressions", true}},
 	KindOnConflict: {{"duplicate", false}, {"expressions", false}, {"action", false}, {"conflict_keys", false}, {"index_predicate", false}, {"constraint", false}, {"where", false}},
 	KindReturning:  {{"expressions", true}, {"into", false}},
-	KindInto:       {{"this", false}, {"temporary", false}, {"unlogged", false}, {"bulk_collect", false}, {"expressions", false}},
+	KindInto:       {{"this", false}, {"temporary", false}, {"unlogged", false}, {"bulk_collect", false}, {"expressions", false}, {"kind", false}, {"charset", false}, {"columns", false}, {"fields_terminated", false}, {"optionally_enclosed", false}, {"enclosed", false}, {"escaped", false}, {"lines_starting", false}, {"lines_terminated", false}},
 	// Arg order matches the order _parse_create sets kwargs (parser.py:2627-2643),
 	// which is what upstream repr() reflects (args are dict-insertion-ordered), NOT
 	// the Create.arg_types declaration order (ddl.py:40). with_ is never set by the

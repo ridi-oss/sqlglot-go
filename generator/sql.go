@@ -605,8 +605,13 @@ func (g *Generator) selectSQL(e expressions.Expression) string {
 	// SELECT in `CREATE TABLE <into.this> AS ...` below. The keyed sql(expr,"into",...) call
 	// still recurses with comments on, so we use sqlKey when we do render it inline.
 	into := asExpression(e.Arg("into"))
+	// MySQL `INTO {OUTFILE|DUMPFILE} '/path'` is a server-side file write, not a
+	// table materialization: it renders inline at the trailing position (its canonical
+	// spot) via intoSQL, never as the `CREATE TABLE ... AS` rewrite the plain SELECT
+	// INTO takes on non-SUPPORTS_SELECT_INTO dialects. Grammar extension beyond upstream.
+	intoIsFileWrite := into != nil && isOutfileKeyword(into.Text("kind"))
 	intoInline := ""
-	if into != nil && g.dialect.SupportsSelectInto {
+	if into != nil && g.dialect.SupportsSelectInto && !intoIsFileWrite {
 		intoInline = g.sqlKey(e, "into")
 	}
 	sql := g.queryModifiers(e,
@@ -619,7 +624,10 @@ func (g *Generator) selectSQL(e expressions.Expression) string {
 		e.PopComments()
 	}
 	sql = g.prependCtes(e, sql)
-	if into != nil && !g.dialect.SupportsSelectInto {
+	if intoIsFileWrite {
+		sql += g.sqlKey(e, "into")
+	}
+	if into != nil && !intoIsFileWrite && !g.dialect.SupportsSelectInto {
 		// generator.py:3374-3381: temporary -> " TEMPORARY", else "" (UNLOGGED is only kept
 		// under SUPPORTS_UNLOGGED_TABLES, which no base/mysql dialect sets, so it is dropped).
 		tableKind := ""
@@ -979,6 +987,11 @@ func (g *Generator) setOperationsSQL(e expressions.Expression) string {
 	}
 	this := strings.Join(sqls, g.sep())
 	this = g.queryModifiers(e, this)
+	// A MySQL file-write INTO hoisted to the set-operation node renders at the trailing position,
+	// after the query modifiers (ORDER BY/LIMIT) — mirroring the plain-Select path in selectSQL.
+	if into := asExpression(e.Arg("into")); into != nil && isOutfileKeyword(into.Text("kind")) {
+		this += g.sqlKey(e, "into")
+	}
 	return g.prependCtes(e, this)
 }
 
