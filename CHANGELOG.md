@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.13.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.12.0...v0.13.0) (2026-07-22)
+
+
+### Features
+
+* **postgres:** release user-type space typed-literal parsing ([#38](https://github.com/ridi-oss/sqlglot-go/issues/38)) ([acc4c4c](https://github.com/ridi-oss/sqlglot-go/commit/acc4c4c11bba2993a4f9cd8be6b196e36909e141))
+
 ## [0.12.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.11.0...v0.12.0) (2026-07-22)
 
 
