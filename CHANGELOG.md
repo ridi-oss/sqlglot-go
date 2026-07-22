@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.10.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.9.0...v0.10.0) (2026-07-22)
+
+
+### Features
+
+* **mysql:** structurally parse DESCRIBE tbl [col|wild] ([#31](https://github.com/ridi-oss/sqlglot-go/issues/31)) ([c6d1d5d](https://github.com/ridi-oss/sqlglot-go/commit/c6d1d5d32a8dfed93c6b9dd6230d3bbc11219ae5))
+
 ## [0.9.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.8.1...v0.9.0) (2026-07-21)
 
 
