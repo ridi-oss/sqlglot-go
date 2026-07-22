@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.9.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.8.1...v0.9.0) (2026-07-21)
+
+
+### Features
+
+* decode Postgres U& unicode escapes; MySQL RESET to Command ([#29](https://github.com/ridi-oss/sqlglot-go/issues/29)) ([2c45ded](https://github.com/ridi-oss/sqlglot-go/commit/2c45ded3445a10a2de98113c0db409221573b931))
+
 ## [0.8.1](https://github.com/ridi-oss/sqlglot-go/compare/v0.8.0...v0.8.1) (2026-07-21)
 
 
