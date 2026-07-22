@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.11.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.10.0...v0.11.0) (2026-07-22)
+
+
+### Features
+
+* **postgres:** structurally parse SET special-forms ([#33](https://github.com/ridi-oss/sqlglot-go/issues/33)) ([259a8b7](https://github.com/ridi-oss/sqlglot-go/commit/259a8b7cd9063c894699ce7d3a199fa286196a3a))
+
 ## [0.10.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.9.0...v0.10.0) (2026-07-22)
 
 
