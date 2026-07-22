@@ -28,6 +28,24 @@ func init() {
 	mysqlSetParsers["CHARSET"] = func(p *Parser) exp.Expression { return p.parseSetItemCharset("CHARACTER SET") }
 	mysqlSetParsers["NAMES"] = func(p *Parser) exp.Expression { return p.parseSetItemNames() }
 	mysqlSetTrie = newTrie(setParserKeys(mysqlSetParsers))
+
+	// postgresSetParsers extends the base table with Postgres's SET special-forms, which pinned
+	// upstream degrades to a raw Command — structuring them into `Set{SetItem{kind: ...}}` lets a
+	// consumer read `SetItem.kind` to tell a privileged SET (ROLE, SESSION AUTHORIZATION) from a
+	// benign one (TIME ZONE, NAMES, CONSTRAINTS, SESSION CHARACTERISTICS) without string-scanning.
+	// Grammar extension beyond upstream; see dialect_postgres_set.go + DEVIATIONS.
+	postgresSetParsers = make(map[string]func(*Parser) exp.Expression, len(setParsers)+6)
+	for k, v := range setParsers {
+		postgresSetParsers[k] = v
+	}
+	postgresSetParsers["ROLE"] = (*Parser).parseSetItemRole
+	postgresSetParsers["TIME ZONE"] = (*Parser).parseSetItemTimeZone
+	postgresSetParsers["NAMES"] = (*Parser).parseSetItemNamesPostgres
+	postgresSetParsers["CONSTRAINTS"] = (*Parser).parseSetItemConstraints
+	// `SESSION AUTHORIZATION` / `SESSION CHARACTERISTICS` can't be dispatch keys: findParser
+	// returns on the first terminal, and `SESSION` is already one (the base assignment scope), so
+	// they're handled inside parseSetItemAssignment's SESSION branch instead.
+	postgresSetTrie = newTrie(setParserKeys(postgresSetParsers))
 }
 
 // setParsers/setTrie port the base SET_PARSERS/SET_TRIE (parser.py:1553-1558, 1855).
@@ -37,6 +55,9 @@ var (
 
 	mysqlSetParsers map[string]func(*Parser) exp.Expression
 	mysqlSetTrie    wordTrie
+
+	postgresSetParsers map[string]func(*Parser) exp.Expression
+	postgresSetTrie    wordTrie
 )
 
 func setParserKeys(parsers map[string]func(*Parser) exp.Expression) []string {
@@ -57,16 +78,22 @@ func setParserKeys(parsers map[string]func(*Parser) exp.Expression) []string {
 func (p *Parser) parseSet() exp.Expression {
 	start := p.prev
 	index := p.index
-	set := p.expression(exp.Set(exp.Args{
-		"expressions": p.parseCsv(p.parseSetItem),
-		"unset":       false,
-		"tag":         false,
-	}), nil, nil)
-	if p.curr.IsValid() {
+	items := p.parseCsv(p.parseSetItem)
+	// Trailing tokens, or no item parsed at all (e.g. a special form whose required value was
+	// missing so its parser returned nil, leaving an empty list), fail closed to a raw Command.
+	// Postgres SET is single-item at top level (a comma-list is a mysql feature, or belongs
+	// inside a value/CONSTRAINTS/TRANSACTION list), so a multi-item postgres SET — the only way a
+	// special form gets comma-combined with another item, which real Postgres rejects — also fails
+	// closed rather than admit SQL the server does not accept.
+	if p.curr.IsValid() || len(items) == 0 || (p.dialect.Name == "postgres" && len(items) > 1) {
 		p.retreat(index)
 		return p.parseAsCommand(start)
 	}
-	return set
+	return p.expression(exp.Set(exp.Args{
+		"expressions": items,
+		"unset":       false,
+		"tag":         false,
+	}), nil, nil)
 }
 
 // parseSetItem ports _parse_set_item (parser.py:9261-9263): dispatch through SET_PARSERS/
@@ -74,8 +101,11 @@ func (p *Parser) parseSet() exp.Expression {
 // CHARSET/NAMES), falling back to a plain assignment.
 func (p *Parser) parseSetItem() exp.Expression {
 	parsers, trie := setParsers, setTrie
-	if p.dialect.Name == "mysql" {
+	switch p.dialect.Name {
+	case "mysql":
 		parsers, trie = mysqlSetParsers, mysqlSetTrie
+	case "postgres":
+		parsers, trie = postgresSetParsers, postgresSetTrie
 	}
 	if parse := p.findParser(parsers, trie); parse != nil {
 		return parse(p)
@@ -90,6 +120,26 @@ func (p *Parser) parseSetItemAssignment(kind any) exp.Expression {
 
 	if kindStr, ok := kind.(string); ok && (kindStr == "GLOBAL" || kindStr == "SESSION") && p.matchTextSeq("TRANSACTION") {
 		return p.parseSetTransaction(kindStr == "GLOBAL")
+	}
+
+	// Postgres `SET SESSION AUTHORIZATION ...` / `SET SESSION CHARACTERISTICS AS TRANSACTION ...`
+	// — the `SESSION` shadows these longer forms in the dispatch trie, so disambiguate here on the
+	// word that follows (an ordinary `SET SESSION x = v` continues to the assignment path below).
+	if kindStr, ok := kind.(string); ok && kindStr == "SESSION" && p.dialect.Name == "postgres" {
+		if p.matchTextSeq("AUTHORIZATION") {
+			if item := p.parseSetItemSessionAuthorization(); item != nil {
+				return item
+			}
+			p.retreat(index)
+			return nil
+		}
+		if p.matchTextSeq("CHARACTERISTICS") {
+			if item := p.parseSetSessionCharacteristics(); item != nil {
+				return item
+			}
+			p.retreat(index)
+			return nil
+		}
 	}
 
 	left := p.parsePrimary()

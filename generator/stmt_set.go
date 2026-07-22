@@ -12,6 +12,20 @@ func init() {
 // fires when that flag is false; it defaults true and no dialect in this port's base/
 // mysql/postgres scope overrides it, so it's omitted here.
 func (g *Generator) setItemSQL(e expressions.Expression) string {
+	// Postgres SET special-forms whose shape doesn't fit the generic `kind this expressions`
+	// order (see parser/dialect_postgres_set.go).
+	switch e.Text("kind") {
+	case "CONSTRAINTS":
+		// `CONSTRAINTS { ALL | name, ... } { DEFERRED | IMMEDIATE }`: targets in expressions, mode in this.
+		mode := g.sqlKey(e, "this")
+		if mode != "" {
+			mode = " " + mode
+		}
+		return "CONSTRAINTS " + g.expressions(exprsOptions{expression: e}) + mode
+	case "SESSION CHARACTERISTICS":
+		return "SESSION CHARACTERISTICS AS TRANSACTION " + g.expressions(exprsOptions{expression: e})
+	}
+
 	kind := g.sqlKey(e, "kind")
 	if kind != "" {
 		kind += " "

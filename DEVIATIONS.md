@@ -452,6 +452,44 @@ query-explain — already parses to `Describe{kind: "TABLE", this: Table(t)}` in
 upstream. A consumer distinguishing query-explain from table-describe by `this.Kind()` must also treat
 `kind == "TABLE"` as a query-explain; this extension does not widen that pre-existing shape.)
 
+Ledger ids [`pg-set-role`, `pg-set-session-authorization`, `pg-set-time-zone`, `pg-set-names`,
+`pg-set-constraints`, `pg-set-session-characteristics`](./testdata/upstream_extensions.jsonl) register the
+Postgres `SET` special-forms, each of which pinned upstream degrades to a raw `Command`. The ordinary
+assignment forms (`SET x = v` / `SET x TO v`, with optional `SESSION`/`LOCAL`/`GLOBAL` scope) already parse
+to `Set`; these six keyword forms did not. Structuring them into `Set{SetItem{kind: ...}}` lets a consumer
+read `SetItem.kind` to tell a **privileged** SET (`ROLE`, `SESSION AUTHORIZATION` — which change the
+effective role/user) from a **benign** one (`TIME ZONE`, `NAMES`, `CONSTRAINTS`, `SESSION CHARACTERISTICS`).
+Values are modeled fully — `TIME ZONE` accepts a string, a signed number, a bare zone name,
+`LOCAL`/`DEFAULT`, or an `INTERVAL '…' … TO …`; `CONSTRAINTS` holds either the unquoted `ALL` keyword (a
+*quoted* `"ALL"` stays a specific constraint name so round-trip can't broaden it to every constraint) or a
+comma-separated list of (optionally schema-qualified) constraint names in `expressions`, and the
+`DEFERRED`/`IMMEDIATE` mode (validated against exactly those two words) in `this`; `SESSION CHARACTERISTICS`
+requires `AS TRANSACTION` and reuses the shared transaction-mode options (a characteristic outside that
+set — e.g. `DEFERRABLE`, or `READ UNCOMMITTED`, which the shared upstream-ported table blocks via a
+typo in its `READ UNCOMMITTED` entry — fails closed to `Command` rather than raising); `NAMES` takes a string literal,
+`DEFAULT`, or nothing (and, unlike MySQL's, no `COLLATE` — an unquoted charset is invalid Postgres and fails
+closed). The parsers live in `parser/dialect_postgres_set.go` (dispatched via a
+Postgres-specific `SET_PARSERS` table; `SESSION AUTHORIZATION`/`SESSION CHARACTERISTICS` are disambiguated
+inside the `SESSION` assignment parser because the dispatch trie matches `SESSION` first), with two
+generator branches in `generator/stmt_set.go` for the `CONSTRAINTS`/`SESSION CHARACTERISTICS` shapes.
+
+**The `kind` is not sufficient on its own for a privilege check.** Postgres also exposes `role` and
+`session_authorization` as *ordinary GUCs*, so `SET [SESSION|LOCAL] role = x` and
+`SET session_authorization = x` perform the same privilege change as the keyword forms but parse as ordinary
+assignments (`SetItem.kind` `""`/`"SESSION"`/`"LOCAL"`, `this = EQ(<var>, <value>)`). A consumer must
+therefore ALSO deny an assignment whose LHS variable name is `role`/`session_authorization`
+(case-insensitive) — not only `kind ∈ {ROLE, SESSION AUTHORIZATION}`. This is pre-existing (the GUC-alias
+spellings always parsed as assignments); this extension only adds the keyword-form kinds and does not close
+that alias surface (keyword-spelling detection cannot — every special form has a plain-assignment alias).
+
+Fail-closed to `Command`: a form missing or malforming its required value (`parseSet` also rejects a
+zero-item `Set`); a comma-combined multi-item Postgres SET (real Postgres SET is single top-level item, so
+`len(items) > 1` on Postgres degrades — this is the only way a special form gets mixed into a comma list,
+which the server rejects); and the `SESSION`/`LOCAL`-scoped variants of these forms (e.g. `SET LOCAL ROLE
+r`), which are intentionally **not** modeled in this pass (safe — the privileged ones deny by default). The
+extension is Postgres-only; base/MySQL leave these forms as `Command` (MySQL's own multi-item `SET a=1, b=2`
+is unaffected). Verified against PostgreSQL 17.6. Use the stable ledger ids for the reconciliation lifecycle.
+
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)
