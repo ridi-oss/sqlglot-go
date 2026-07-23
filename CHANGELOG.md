@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.15.1](https://github.com/ridi-oss/sqlglot-go/compare/v0.15.0...v0.15.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **parser:** reject engine-invalid string aliases and table identifiers per dialect ([#44](https://github.com/ridi-oss/sqlglot-go/issues/44)) ([cb269c7](https://github.com/ridi-oss/sqlglot-go/commit/cb269c797fa0022d2fffc0ced56864d02118ca9f))
+
 ## [0.15.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.14.0...v0.15.0) (2026-07-23)
 
 
