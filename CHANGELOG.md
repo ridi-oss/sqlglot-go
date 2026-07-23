@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.19.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.18.0...v0.19.0) (2026-07-23)
+
+
+### Features
+
+* **parser:** structure Postgres multi-value SET (SET var = a, b) ([#55](https://github.com/ridi-oss/sqlglot-go/issues/55)) ([73805c8](https://github.com/ridi-oss/sqlglot-go/commit/73805c861b41f27a3d60678a48e78747d28f308e))
+
 ## [0.18.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.17.0...v0.18.0) (2026-07-23)
 
 
