@@ -389,8 +389,12 @@ verified with `.Equal`): a builtin `DataType` (`pg_catalog.int4` → `INT`, `int
 `SMALLINT`, `bool` → `BOOLEAN`, `numeric` → `DECIMAL`, `float8` → `DOUBLE`, `text`, `varchar`, `timestamptz`,
 `name`, `money`, the six multiranges `int4multirange`/`int8multirange`/`datemultirange`/`nummultirange`/
 `tsmultirange`/`tstzmultirange`, …), an **`ObjectIdentifier`** (`pg_catalog.oid`/`regclass`/`regproc`/
-`regtype`/… — the `OBJECT_IDENTIFIER` family), or a **`PseudoType`** (`pg_catalog.cstring`). Both cast
-spellings are covered (`CAST(x AS pg_catalog.int4)` and `x::pg_catalog.int4`), and array/collation suffixes
+`regtype`/… — the `OBJECT_IDENTIFIER` family), or a **`PseudoType`** (`pg_catalog.cstring`). All three
+spellings are covered — `CAST(x AS pg_catalog.int4)`, `x::pg_catalog.int4`, and the **space typed-literal**
+`pg_catalog.int4 '5'` (the §"Grammar extensions" `pg-user-type-typed-literal` form, which `pgTypedLiteralCast`
+folds into a `Cast`; it reuses the same `resolvePgCatalogBuiltin` so `pg_catalog.text 'x'` resolves to `TEXT`
+exactly as `'x'::pg_catalog.text` does — real PG 17.6: `pg_typeof(pg_catalog.text 'x')` = `text`, and the
+`char`/`bit`/`macaddr`/`(modifier)` carve-outs below are inherited unchanged) — and array/collation suffixes
 compose exactly as for the bare builtin.
 
 Membership is decided by a **pinned allowlist of the real `pg_catalog` type names** (the base/pseudo/range/
@@ -452,8 +456,9 @@ node regardless of the (semantically identical) spelling. The only §1.10 behavi
 builtins: `CAST('5' AS pg_catalog.int4)` now renders as `CAST('5' AS INT)` — the same type. No identity-corpus
 case uses a `pg_catalog.`-qualified type name (scanned: none), so nothing in the corpus flips. Implemented in
 `parser/parser_types.go` (the pinned `pgCatalogTypeNames` allowlist + `resolvePgCatalogBuiltin`, called from
-the `parseUserDefinedType` postgres branch); regression test `parser/parser_types_test.go`
-(`TestParsePgCatalogBuiltinType`). No upstream tripwire is needed: upstream already emits a node here (a
+the `parseUserDefinedType` postgres branch for the `::`/CAST spellings AND from `pgTypedLiteralCast` in
+`parser/parser.go` for the space typed-literal spelling `pg_catalog.text 'x'`); regression tests
+`parser/parser_types_test.go` (`TestParsePgCatalogBuiltinType`) and `pg_user_type_typed_literal_test.go`. No upstream tripwire is needed: upstream already emits a node here (a
 USER-DEFINED `DataType`, not a `Command`/parse error), so this is a §1 correctness divergence, not a
 grammar-extension ledger row — if upstream later resolves it too, the tests still pass.
 
@@ -839,7 +844,9 @@ literal: the name is a type and the string is its value. This port folds it into
 round-trips exactly) — so a consumer detects the user-type coercion (a `DOMAIN`/type `CHECK` runs a user
 function on the shared session — a code-exec/error-oracle vector) structurally via `FindAll(KindDataType)`,
 the same walk it already uses for the `::`/CAST spellings. The space form normalizes to the canonical `CAST`
-spelling on output.
+spelling on output. (The `to` is `DataType(user-defined)` for a genuine user type; when the name is a
+`pg_catalog`-qualified real builtin — `pg_catalog.text 'x'` — it resolves to the builtin node instead, exactly
+as the `::`/CAST forms do, because `pgTypedLiteralCast` reuses the same `resolvePgCatalogBuiltin` — see **§1.10**.)
 
 **Recognized at the primary-expression level** (`parseAtom`, and `parseType`'s keyword-name fallback), NOT in
 alias parsing — so it folds into a `Cast` in *every* position a value can appear: a SELECT projection, a

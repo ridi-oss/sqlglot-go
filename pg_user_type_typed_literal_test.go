@@ -325,6 +325,81 @@ func TestPGHasNoStringAliases(t *testing.T) {
 	}
 }
 
+func TestPGCatalogTypedLiteralResolvesBuiltin(t *testing.T) {
+	// DEVIATIONS §1.10 now ALSO covers the space typed-literal spelling, not only `::`/CAST: a
+	// `pg_catalog.<name>` type name whose tail is a REAL pg_catalog builtin resolves to the same
+	// node the bare `<name>` spelling produces (reusing resolvePgCatalogBuiltin from
+	// pgTypedLiteralCast). Real PG 17.6: `pg_typeof(pg_catalog.text 'x')` = `pg_typeof('x'::pg_catalog.text)`
+	// = text; `pg_catalog.int4 '5' + 1` = 6; `pg_typeof(pg_catalog.oid '5')` = oid.
+	isUserDefined := func(to exp.Expression) bool {
+		return to.Kind() == exp.KindDataType && to.Arg("this") == exp.DTypeUserDefined
+	}
+	castTarget := func(t *testing.T, sql string) exp.Expression {
+		t.Helper()
+		e, err := sqlglot.ParseOne(sql, "postgres")
+		if err != nil {
+			t.Fatalf("%s: parse: %v", sql, err)
+		}
+		proj := e.Expressions()[0]
+		if proj.Kind() != exp.KindCast {
+			t.Fatalf("%s: projection kind = %v, want Cast:\n%s", sql, exp.ClassName(proj.Kind()), e.ToS())
+		}
+		return proj.Arg("to").(exp.Expression)
+	}
+
+	// Resolved: the typed-literal target is byte-identical to the already-resolving `::` target
+	// (a builtin DataType for int4/text/…, an ObjectIdentifier for oid). Not USER-DEFINED.
+	for _, tail := range []string{"text", "int4", "int8", "int2", "bool", "numeric", "float8", "varchar", "timestamptz", "oid"} {
+		to := castTarget(t, "SELECT pg_catalog."+tail+" '5'")
+		castForm := castTarget(t, "SELECT '5'::pg_catalog."+tail)
+		if isUserDefined(to) {
+			t.Errorf("pg_catalog.%s '5': target still USER-DEFINED, want the resolved builtin", tail)
+		}
+		if !to.Equal(castForm) {
+			t.Errorf("pg_catalog.%s '5': typed-literal target\n%s\ndiffers from `::` form\n%s", tail, to.ToS(), castForm.ToS())
+		}
+	}
+
+	// Carve-outs INHERITED from resolvePgCatalogBuiltin (must stay USER-DEFINED): the char/bit
+	// semantic-mismatch pair, a real pg_catalog name the port models as USER-DEFINED (macaddr),
+	// a genuine user type under pg_catalog (myt), and any other schema (public.foo).
+	for _, sql := range []string{
+		"SELECT pg_catalog.char 'x'",    // semantic mismatch (1-byte "char" vs bare CHAR)
+		"SELECT pg_catalog.bit '1'",     // semantic mismatch (no implicit length vs bit(1))
+		"SELECT pg_catalog.macaddr 'x'", // real catalog name modeled as USER-DEFINED
+		"SELECT pg_catalog.myt 'x'",     // not a catalog name (real PG: type does not exist)
+		"SELECT public.foo 'x'",         // non-system schema (real PG: type does not exist)
+	} {
+		if to := castTarget(t, sql); !isUserDefined(to) {
+			t.Errorf("%s: target = %s, want USER-DEFINED (carve-out, must not resolve)", sql, to.ToS())
+		}
+	}
+
+	// The bare (unqualified) spelling and the `::` cast form are UNCHANGED by this fix.
+	if to := castTarget(t, "SELECT text 'x'"); !exp.IsType(to, exp.DTypeText) {
+		t.Errorf("bare `text 'x'`: target = %s, want TEXT", to.ToS())
+	}
+	if to := castTarget(t, "SELECT '5'::pg_catalog.text"); !exp.IsType(to, exp.DTypeText) {
+		t.Errorf("`'5'::pg_catalog.text`: target = %s, want TEXT", to.ToS())
+	}
+
+	// End-to-end: the resolved typed literal normalizes to the bare builtin CAST spelling; a
+	// carve-out preserves its `pg_catalog.` qualifier on round-trip.
+	for _, tc := range []struct{ in, want string }{
+		{"SELECT pg_catalog.text 'x'", "SELECT CAST('x' AS TEXT)"},
+		{"SELECT pg_catalog.int4 '5'", "SELECT CAST('5' AS INT)"},
+		{"SELECT pg_catalog.char 'x'", "SELECT CAST('x' AS pg_catalog.char)"},
+	} {
+		e, err := sqlglot.ParseOne(tc.in, "postgres")
+		if err != nil {
+			t.Fatalf("%s: parse: %v", tc.in, err)
+		}
+		if out, _ := sqlglot.Generate(e, "postgres", generator.Options{}); out != tc.want {
+			t.Errorf("%s: round-trip = %q, want %q", tc.in, out, tc.want)
+		}
+	}
+}
+
 func TestPGUserTypeTypedLiteralBoundaries(t *testing.T) {
 	// Normal aliases are untouched: an implicit id-var alias and an explicit AS alias both stay
 	// aliases, not typed literals.

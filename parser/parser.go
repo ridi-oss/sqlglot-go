@@ -2444,9 +2444,21 @@ func (p *Parser) pgTypedLiteralCast(column exp.Expression, firstTok tokens.Token
 	if pgReservedValueFunctionTokens[firstTok.TokenType] || !isPGTypeNameChain(column) {
 		return nil
 	}
-	dt, err := exp.DataTypeBuild(exp.ColumnsToDot(column), "", true, false, nil)
-	if err != nil {
-		return nil
+	// A `pg_catalog`-qualified builtin in a space typed-literal resolves like its `::`/CAST form
+	// (DEVIATIONS §1.10): `pg_catalog.text 'x'` is `text 'x'`, exactly as `'x'::pg_catalog.text`
+	// is `'x'::text` (real PG 17.6: same pg_typeof). Reuse the same resolvePgCatalogBuiltin the
+	// CAST/`::` targets use, on the ColumnsToDot type chain, and fall back to the USER-DEFINED
+	// build otherwise. Here `p.curr` is the string constant (not `(`), so resolvePgCatalogBuiltin's
+	// modifier peek is a no-op — the ObjectIdentifier/PseudoType and char/bit/modifier carve-outs
+	// are inherited for free.
+	udtType := exp.ColumnsToDot(column)
+	dt := p.resolvePgCatalogBuiltin(udtType)
+	if dt == nil {
+		var err error
+		dt, err = exp.DataTypeBuild(udtType, "", true, false, nil)
+		if err != nil {
+			return nil
+		}
 	}
 	strLit := p.parsePGTypedLiteralValue()
 	comments := column.PopComments()
