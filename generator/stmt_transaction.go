@@ -6,6 +6,19 @@ func init() {
 	dispatch[expressions.KindTransaction] = (*Generator).transactionSQL
 	dispatch[expressions.KindCommit] = (*Generator).commitSQL
 	dispatch[expressions.KindRollback] = (*Generator).rollbackSQL
+	dispatch[expressions.KindSavepoint] = (*Generator).savepointSQL
+}
+
+// savepointSQL renders the transaction-control savepoint statements: `SAVEPOINT <name>` and, when
+// the kind arg is "RELEASE", `RELEASE SAVEPOINT <name>` (the bare Postgres `RELEASE <name>` spelling
+// normalizes to the explicit SAVEPOINT keyword, which Postgres also accepts). Upstream has no
+// savepoint node, so there is no upstream generator to port. See DEVIATIONS.
+func (g *Generator) savepointSQL(e expressions.Expression) string {
+	name := g.sqlKey(e, "this")
+	if kind, _ := e.Arg("kind").(string); kind == "RELEASE" {
+		return "RELEASE SAVEPOINT " + name
+	}
+	return "SAVEPOINT " + name
 }
 
 // transactionSQL ports generator.py:4140-4143 (transaction_sql). Note upstream never

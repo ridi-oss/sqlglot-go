@@ -301,6 +301,35 @@ and `dialects/postgres.go`. The `U&"…"` identifier form is also registered in
 `testdata/upstream_extensions.jsonl` (`pg-unicode-identifier`, upstream parse-errors); regression tests:
 `unicode_escape_test.go` and `tokens/unicode_escape_test.go`.
 
+### 1.8 `SAVEPOINT` / `RELEASE SAVEPOINT` parse to `Savepoint` (not a bogus `Alias` / parse error)
+
+**What upstream does:** pinned sqlglot v30.12.0 has no savepoint statement node. `SAVEPOINT s`
+mis-parses as an `Alias` — `Alias(this=Column(SAVEPOINT), alias=s)`, rendering `SAVEPOINT AS s` — i.e.
+the expression `SAVEPOINT` aliased `AS s`, and `RELEASE SAVEPOINT s` parse-errors. Verified on the
+pinned reference for both postgres and mysql. Only `ROLLBACK TO SAVEPOINT s` is modelled (as
+`Rollback(savepoint=s)`).
+
+**What sqlglot-go does:** `SAVEPOINT <name>` and `RELEASE [SAVEPOINT] <name>` build a new
+`exp.Savepoint{this: name, kind}` root (`kind = "RELEASE"` for the release form). `SAVEPOINT`/`RELEASE`
+stay ordinary `VAR` tokens — the statement is dispatched by leading text in `parseStatement`, so
+`savepoint`/`release` remain usable as identifiers everywhere else (`SELECT savepoint FROM t` is
+unchanged) and `ROLLBACK TO SAVEPOINT` is still an `exp.Rollback`. The bare `RELEASE <name>` spelling
+(SAVEPOINT keyword omitted) is **Postgres-only** — real MySQL requires the keyword — so under
+mysql/base a bare `RELEASE <name>` is left to the normal path (fails closed). Output normalizes the
+release form to the explicit `RELEASE SAVEPOINT <name>` (which Postgres also accepts).
+
+**Why we diverge (correctness):** `SAVEPOINT` / `RELEASE SAVEPOINT` / `ROLLBACK TO SAVEPOINT` are
+standard SQL transaction-control statements — benign session/transaction state with no data access. An
+AST consumer that gates on statement kind needs to route them to session passthrough like
+`BEGIN`/`COMMIT`/`ROLLBACK`; upstream's `Alias`/parse-error is a wrong structural claim (like §1.6's
+`RESET`) that would make a valid savepoint statement indistinguishable from an aliased column or a
+parse failure. Verified against PostgreSQL 17.6 and MySQL 8.0.33 (`SAVEPOINT s`, `RELEASE SAVEPOINT s`,
+plus Postgres's optional-keyword `RELEASE s`, all execute). Implemented in `parser/stmt_transaction.go`
+(`parseSavepointStatement`) + `parser/parser.go` (the `parseStatement` hook) + `generator/
+stmt_transaction.go` (`savepointSQL`); regression test `savepoint_test.go`. The `RELEASE SAVEPOINT`
+form, which pinned upstream parse-errors, is additionally registered in
+`testdata/upstream_extensions.jsonl` (`release-savepoint`) with a tripwire.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream

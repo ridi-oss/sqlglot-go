@@ -98,3 +98,72 @@ func (p *Parser) parseCommitOrRollback() exp.Expression {
 	}
 	return p.expression(exp.Commit(exp.Args{"chain": chain}), nil, nil)
 }
+
+// parseSavepointStatement recognizes the ANSI transaction-control statements `SAVEPOINT <name>`
+// and `RELEASE [SAVEPOINT] <name>`, returning nil (consuming nothing) when the leading token is not
+// one of these so parseStatement falls through to its normal expression path. Pinned upstream models
+// neither: it mis-parses `SAVEPOINT s` as an Alias (`SAVEPOINT AS s`) and parse-errors
+// `RELEASE SAVEPOINT s`. SAVEPOINT/RELEASE are ordinary VAR tokens (not statement keywords), so this
+// is dispatched by leading text, keeping them usable as identifiers everywhere else. The bare
+// `RELEASE <name>` spelling (SAVEPOINT keyword omitted) is Postgres-only — real MySQL requires the
+// SAVEPOINT keyword — so for mysql/base a bare RELEASE is left to the normal path (fails closed).
+// `ROLLBACK TO [SAVEPOINT] <name>` is unaffected (already an exp.Rollback). See DEVIATIONS.
+func (p *Parser) parseSavepointStatement() exp.Expression {
+	if p.curr.TokenType != tokens.VAR {
+		return nil
+	}
+	switch stringsUpper(p.curr.Text) {
+	case "SAVEPOINT":
+		comments := p.curr.Comments
+		start := p.index
+		p.advance()
+		name := p.parseSavepointName()
+		if name == nil {
+			p.retreat(start)
+			return nil
+		}
+		return p.expression(exp.Savepoint(exp.Args{"this": name}), nil, comments)
+	case "RELEASE":
+		comments := p.curr.Comments
+		start := p.index
+		p.advance()
+		// The SAVEPOINT keyword is optional in Postgres (`RELEASE [SAVEPOINT] name`). It is the
+		// keyword only when it is an *unquoted* VAR "SAVEPOINT" immediately followed by a name
+		// token; a lone `RELEASE savepoint` or `RELEASE "SAVEPOINT"` releases a savepoint literally
+		// named `savepoint`/`SAVEPOINT` (verified on real PG 17.6). matchTextSeq is deliberately
+		// NOT used here — it matches a quoted identifier `"SAVEPOINT"` by text, which would swallow
+		// the name. When the keyword is absent the bare form is Postgres-only (real MySQL/base
+		// require the SAVEPOINT keyword), so mysql/base fall through to the normal path.
+		if p.curr.TokenType == tokens.VAR && stringsUpper(p.curr.Text) == "SAVEPOINT" && p.savepointNameAhead(p.next) {
+			p.advance()
+		} else if p.dialect.Name != "postgres" {
+			p.retreat(start)
+			return nil
+		}
+		name := p.parseSavepointName()
+		if name == nil {
+			p.retreat(start)
+			return nil
+		}
+		return p.expression(exp.Savepoint(exp.Args{"this": name, "kind": "RELEASE"}), nil, comments)
+	}
+	return nil
+}
+
+// parseSavepointName parses a savepoint identifier: an unquoted identifier (including unreserved
+// keyword names such as `commit`/`rollback` that both engines accept) or a dialect-quoted identifier
+// (Postgres `"x"`, MySQL “ `x` “). It rejects string literals (`'x'`), numbers, and — for MySQL —
+// a double-quoted `"x"` (which lexes as a STRING there), matching what real PostgreSQL 17.6 and
+// MySQL 8.0.33 accept as savepoint names, rather than accept-and-normalize an invalid name. Uses
+// parseIdVar with anyToken=false so STRING/NUMBER tokens (absent from idVarTokens) fail closed.
+func (p *Parser) parseSavepointName() exp.Expression {
+	return p.parseIdVar(false, nil)
+}
+
+// savepointNameAhead reports whether tok can start a savepoint name (see parseSavepointName): a
+// quoted IDENTIFIER or any idVarTokens member (VAR + the unreserved keyword tokens). Used to decide
+// whether a VAR "SAVEPOINT" after RELEASE is the optional keyword (a name follows) or itself the
+// savepoint name (nothing name-like follows).
+func (p *Parser) savepointNameAhead(tok tokens.Token) bool {
+	return tok.TokenType == tokens.IDENTIFIER || idVarTokens[tok.TokenType]
+}
