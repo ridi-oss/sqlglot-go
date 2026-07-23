@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.15.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.14.0...v0.15.0) (2026-07-23)
+
+
+### Features
+
+* **parser:** parse SAVEPOINT and RELEASE SAVEPOINT to a Savepoint node ([#42](https://github.com/ridi-oss/sqlglot-go/issues/42)) ([1009b98](https://github.com/ridi-oss/sqlglot-go/commit/1009b9874bf026e658174936a978e42467ed4013))
+
 ## [0.14.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.13.0...v0.14.0) (2026-07-23)
 
 
