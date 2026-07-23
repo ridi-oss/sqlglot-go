@@ -185,14 +185,14 @@ func TestPostgresSetFailClosedAndRegressions(t *testing.T) {
 
 	// The special forms are Postgres-only; base/MySQL leave them as Command.
 	t.Run("special forms are postgres-gated", func(t *testing.T) {
-		for _, dialect := range []string{"", "mysql"} {
-			e, err := sqlglot.ParseOne("SET ROLE admin", dialect)
-			if err != nil {
-				t.Fatalf("parse [%s]: %v", dialect, err)
-			}
-			if e.Kind() != exp.KindCommand {
-				t.Fatalf("[%s] SET ROLE admin = %v, want Command:\n%s", dialect, exp.ClassName(e.Kind()), e.ToS())
-			}
+		// The Postgres SET special-forms are postgres-gated: base leaves `SET ROLE admin` a raw Command.
+		// (MySQL now structures its own `SET ROLE` — a distinct grammar; see TestMySQLSetRole.)
+		e, err := sqlglot.ParseOne("SET ROLE admin", "")
+		if err != nil {
+			t.Fatalf("parse [base]: %v", err)
+		}
+		if e.Kind() != exp.KindCommand {
+			t.Fatalf("[base] SET ROLE admin = %v, want Command:\n%s", exp.ClassName(e.Kind()), e.ToS())
 		}
 	})
 }

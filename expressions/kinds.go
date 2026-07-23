@@ -927,7 +927,7 @@ var argTypes = map[Kind][]argSpec{
 	// Set/SetItem/Show/.../Pragma (ddl.py, query.py, properties.py, dml.py; see the Kind
 	// block comment above for exact line numbers).
 	KindSet:            {{"expressions", false}, {"unset", false}, {"tag", false}},
-	KindSetItem:        {{"this", false}, {"expressions", false}, {"kind", false}, {"collate", false}, {"global_", false}, {"scope", false}},
+	KindSetItem:        {{"this", false}, {"expressions", false}, {"kind", false}, {"collate", false}, {"global_", false}, {"scope", false}, {"except", false}, {"to", false}},
 	KindShow:           {{"this", true}, {"history", false}, {"terse", false}, {"target", false}, {"offset", false}, {"starts_with", false}, {"limit", false}, {"from_", false}, {"like", false}, {"where", false}, {"db", false}, {"scope", false}, {"scope_kind", false}, {"full", false}, {"mutex", false}, {"query", false}, {"channel", false}, {"global_", false}, {"log", false}, {"position", false}, {"types", false}, {"privileges", false}, {"for_table", false}, {"for_group", false}, {"for_user", false}, {"for_role", false}, {"into_outfile", false}, {"json", false}, {"iceberg", false}},
 	KindUse:            {{"this", false}, {"expressions", false}, {"kind", false}},
 	KindKill:           {{"this", true}, {"kind", false}},

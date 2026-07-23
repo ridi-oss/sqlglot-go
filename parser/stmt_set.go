@@ -28,6 +28,11 @@ func init() {
 	mysqlSetParsers["CHARSET"] = func(p *Parser) exp.Expression { return p.parseSetItemCharset("CHARACTER SET") }
 	mysqlSetParsers["NAMES"] = func(p *Parser) exp.Expression { return p.parseSetItemNames() }
 	mysqlSetParsers["PASSWORD"] = (*Parser).parseSetItemPassword
+	// MySQL `SET ROLE …` / `SET DEFAULT ROLE … TO …` — privilege ops pinned upstream Commands; modeled
+	// into SetItem{kind:"ROLE"|"DEFAULT ROLE"} so a consumer gates them like the Postgres SET ROLE form
+	// (which shares kind="ROLE"). Grammar extension; see dialect_mysql_set_role.go + DEVIATIONS.
+	mysqlSetParsers["ROLE"] = (*Parser).parseSetItemRoleMySQL
+	mysqlSetParsers["DEFAULT ROLE"] = (*Parser).parseSetItemDefaultRoleMySQL
 	mysqlSetTrie = newTrie(setParserKeys(mysqlSetParsers))
 
 	// postgresSetParsers extends the base table with Postgres's SET special-forms, which pinned
@@ -86,19 +91,24 @@ func (p *Parser) parseSet() exp.Expression {
 	// inside a value/CONSTRAINTS/TRANSACTION list), so a multi-item postgres SET — the only way a
 	// special form gets comma-combined with another item, which real Postgres rejects — also fails
 	// closed rather than admit SQL the server does not accept.
-	// MySQL `SET PASSWORD` is a standalone statement that cannot be comma-combined with other SET
-	// items in either position (real MySQL rejects `SET PASSWORD = x, @y = 1`), so a multi-item list
-	// containing a PASSWORD item also fails closed.
-	passwordInMultiItem := false
+	// MySQL `SET PASSWORD`, `SET ROLE`, and `SET DEFAULT ROLE` are standalone statements that cannot be
+	// comma-combined with other SET items in either position (real MySQL 8.0.33 rejects
+	// `SET PASSWORD = x, @y = 1`, `SET NAMES utf8, ROLE admin`, `SET @x = 1, DEFAULT ROLE r TO u` — all
+	// ERROR 1064), so a multi-item list containing any of them also fails closed to Command rather than
+	// admit a structured multi-item Set the server would never execute.
+	standaloneInMultiItem := false
 	if len(items) > 1 {
 		for _, item := range items {
-			if item != nil && item.Text("kind") == "PASSWORD" {
-				passwordInMultiItem = true
-				break
+			if item == nil {
+				continue
+			}
+			switch item.Text("kind") {
+			case "PASSWORD", "ROLE", "DEFAULT ROLE":
+				standaloneInMultiItem = true
 			}
 		}
 	}
-	if p.curr.IsValid() || len(items) == 0 || (p.dialect.Name == "postgres" && len(items) > 1) || passwordInMultiItem {
+	if p.curr.IsValid() || len(items) == 0 || (p.dialect.Name == "postgres" && len(items) > 1) || standaloneInMultiItem {
 		p.retreat(index)
 		return p.parseAsCommand(start)
 	}
@@ -120,8 +130,19 @@ func (p *Parser) parseSetItem() exp.Expression {
 	case "postgres":
 		parsers, trie = postgresSetParsers, postgresSetTrie
 	}
+	// Capture the index BEFORE findParser (which consumes the dispatch keyword) so a dispatched
+	// special-form parser that fails on a malformed tail can be retreated ATOMICALLY — the whole item,
+	// keyword included, is left unconsumed. Without this, a failed sub-parser leaves the cursor
+	// mid-item and the caller's CSV continues from there, dropping the consumed prefix (e.g.
+	// `SET DEFAULT ROLE NONE, @x=1` -> the lossy `SET @x = 1`). Failing closed to nil makes the caller
+	// see the item whole and degrade to Command, never a silently-truncated Set.
+	index := p.index
 	if parse := p.findParser(parsers, trie); parse != nil {
-		return parse(p)
+		if item := parse(p); item != nil {
+			return item
+		}
+		p.retreat(index)
+		return nil
 	}
 	return p.parseSetItemAssignment(nil)
 }

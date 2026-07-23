@@ -703,6 +703,63 @@ Ledger id [`mysql-set-password`](./testdata/upstream_extensions.jsonl) registers
 `parser/dialect_mysql_set_show.go` (`parseSetItemPassword` + `parseMySQLUserSpec`), generator branch in
 `generator/stmt_set.go`.
 
+Ledger ids [`mysql-set-role`, `mysql-set-default-role`](./testdata/upstream_extensions.jsonl) register MySQL
+`SET ROLE { DEFAULT | NONE | ALL [EXCEPT role,…] | role,… }` and
+`SET DEFAULT ROLE { NONE | ALL | role,… } TO user,…` — privilege operations pinned upstream Commands — into
+`Set{SetItem{kind:"ROLE"}}` and `Set{SetItem{kind:"DEFAULT ROLE"}}`. The point is that a consumer gates a
+**MySQL** role change on the SAME `SetItem.kind="ROLE"` it already uses for the Postgres `SET ROLE` form
+(§ pg-set-role) — rather than blanket-denying every MySQL raw `Command` SET because a role change might hide in
+it. The `DEFAULT/NONE/ALL/EXCEPT/TO` keywords are matched **unquoted** (so a quoted `SET ROLE 'ALL'` is a role
+literally named `ALL`, not the keyword — matches MySQL); the roles/users are MySQL account names `name[@host]`
+captured verbatim, so the statement round-trips (a role/user *list* re-spaces `a,b`→`a, b`, the generator's
+systemic CSV canonicalization applied to every comma list — `SELECT a,b` too — valid→valid, semantics
+preserved). `SET DEFAULT ROLE` (an admin op that sets a
+*user's* default roles) is a distinct statement from `SET ROLE` (which activates roles in the current session),
+so it takes a distinct `kind="DEFAULT ROLE"` and its mandatory `TO user,…` list lands in a new `SetItem.to` arg
+(with `SetItem.except` marking the `ALL EXCEPT` form). Both are MySQL-only (the Postgres `SET ROLE` keeps its
+own parser/generator path — same shared kind).
+
+Because a SQL-authorization consumer keys on the resulting structured node, the role/user grammar is parsed
+**strictly** so that only SQL MySQL 8.0.33 actually accepts becomes a `Set` — anything the server rejects fails
+closed to `Command` rather than laundering an engine-invalid statement into an executable-looking role mutation
+(dual-review 2026-07-23, Sol + Codex; every case DB-verified). Four guards, beyond the permissive
+`parseMySQLUserSpec` that `SET PASSWORD` reuses: (a) the role/user list is a **strict CSV** (`parseMySQLRoleList`)
+— a leading, trailing, or doubled comma (`SET ROLE admin,`, `,admin`, `admin,,dev` → ERROR 1064) fails closed,
+where the generic `parseCsv` would silently drop the dangling separator and regenerate valid SQL, and a trailing
+comma after a keyword alternative (`SET ROLE ALL,`) is rejected by a standalone-form check so it cannot be eaten
+by the outer CSV and regenerated as the different `SET ROLE ALL`; (b) an unquoted name (`parseMySQLRoleName`) must
+first be a single **plain-identifier word** (`isPlainMySQLName` — identifier chars, not all-digit, no embedded
+space), which rejects the token texts the tokenizer produces for non-name lexemes (a placeholder `?`, a hex/bit
+literal `x'6162'`/`b'01'`, an operator `<=`/`->`, a bare number) and for MULTIWORD keyword tokens (`CHARACTER SET`,
+`GROUP BY` — a single tokenizer token whose text spans two words), all ERROR 1064 on MySQL; the validated word is
+then checked against the pinned **MySQL reserved-keyword table** (`Dialect.IsReservedKeyword`) *plus*
+`mysqlNonRoleNameWords`. Those two together are the right oracle in BOTH directions this tokenizer mis-lexes: the
+reserved table rejects reserved words lexed as a plain `VAR` (`TO`, `ACCESSIBLE`, `ADD`, and
+`CURRENT_USER`/`TRUE`/`FALSE`/`NULL`; `SET ROLE TRUE`, `… TO CURRENT_USER` → ERROR 1064) *and* the plain-word gate
+accepts nonreserved words lexed as a dedicated keyword token (`BEGIN`, `SESSION`, `FORMAT`; MySQL parses these as
+valid role names). `mysqlNonRoleNameWords` covers the words MySQL's `sql_yacc.yy` `role_keyword` grammar excludes
+that are NOT in the reserved table: the top-level alternatives `NONE`/`ALL`/`DEFAULT` (invalid mid-list:
+`SET ROLE admin, NONE` → ERROR 1064) and the `ident_keywords_ambiguous_1_roles_and_labels` /
+`ident_keywords_ambiguous_3_roles` categories (`EVENT`, `EXECUTE`, `FILE`, `PROCESS`, `PROXY`, `RELOAD`,
+`REPLICATION`, `RESOURCE`, `RESTART`, `SHUTDOWN`, `SUPER` — nonreserved everywhere else but a syntax error in
+role-name position: `SET ROLE EVENT`, `SET DEFAULT ROLE admin TO SUPER` → ERROR 1064). A *quoted* `'ALL'`/`'NONE'`/
+`'EVENT'`/`'TO'` stays a valid role name. (Verified exhaustively against MySQL 8.0.33/8.0.46 — a 757-keyword sweep
+in both list positions — dual-review round 3, Sol + Codex.) (c) `SET ROLE`/`SET DEFAULT ROLE` are enforced as
+**standalone** statements (the `standaloneInMultiItem` guard in `parseSet`, née `passwordInMultiItem`, extended to
+these kinds), so comma-combining with any other SET item in either position (`SET NAMES utf8, ROLE admin`,
+`SET @x = 1, DEFAULT ROLE r TO u` → ERROR 1064) fails closed; the dispatch is made **atomic** (`parseSetItem`
+retreats fully when a special-form sub-parser fails) so a partially-consumed item can never leave a lossy
+truncated `Set` (`SET DEFAULT ROLE NONE, @x = 1` no longer drops the role part); (d) `SET ROLE = x` / `:= x` is
+the generic variable-assignment production (MySQL parses it as an attempt to set a run-time variable named
+`role`, ERROR 1193 — syntactically valid), so on a `=`/`:=` delimiter the ROLE dispatch retreats and parses a
+plain assignment (`isMySQLSetAssignmentDelimiterAhead`, mirroring the Postgres `parseSetItemRole` precedent),
+rather than swallowing it to `Command`; MySQL has no `TO` delimiter, so `SET ROLE TO admin` (ERROR 1064) stays
+`Command`. A bare `SET ROLE`, a `SET DEFAULT ROLE` missing its `TO`, or an empty role/user list also fails closed. **Fail-safe under-acceptance:** an unquoted dotted/IP host (`SET ROLE admin@127.0.0.1`, which
+MySQL accepts) degrades to `Command` — the same single-token-host limitation `parseMySQLUserSpec` documents
+below; quoted `'admin'@'127.0.0.1'` round-trips exactly, and the consumer denies the `Command` either way.
+Parser in `parser/dialect_mysql_set_role.go`; generator branch (`mysqlSetRoleSQL`, gated on the MySQL dialect so
+it does not collide with the Postgres `kind="ROLE"` generic render) in `generator/stmt_set.go`.
+
 Ledger id [`mysql-show-create-user`](./testdata/upstream_extensions.jsonl) registers MySQL
 `SHOW CREATE USER <user>` — pinned upstream omits it from its `SHOW_PARSERS` and Commands it — modeled like
 the sibling `SHOW CREATE {TABLE,VIEW,…}` forms as `Show{this:"CREATE USER"}`, via a dedicated strict
