@@ -17,11 +17,34 @@ func (p *Parser) parseShow() exp.Expression {
 	if p.dialect.Name == "mysql" {
 		start := p.prev
 		if parse := p.findParser(showParsers, showTrie); parse != nil {
-			return parse(p)
+			// A sub-parser returning nil means the form is malformed for that keyword (e.g.
+			// `SHOW CREATE USER` with no user, or trailing clauses it does not accept) — fail closed
+			// to a raw Command rather than a half-built Show. The generic parseShowMySQL never
+			// returns nil, so this only affects sub-parsers that opt into strict validation.
+			if result := parse(p); result != nil {
+				return result
+			}
+			return p.parseAsCommand(start)
 		}
 		return p.parseAsCommand(start)
 	}
+	if p.dialect.Name == "postgres" {
+		return p.parsePostgresShow(p.prev)
+	}
 	return p.parseAsCommand(p.prev)
+}
+
+// parsePostgresShow structures Postgres `SHOW { ALL | <name> }` into Show{this:<name>} — a grammar
+// extension (pinned upstream Commands all Postgres SHOW). The parameter (a GUC name like
+// `search_path`, a dotted `ext.var`, `ALL`, or a special phrase like `TIME ZONE`) is parsed and
+// captured verbatim by the shared parsePostgresConfigParam. A `SHOW` with no name, an unknown
+// multi-word form, or one followed by trailing tokens (`SHOW search_path extra`) fails closed to a
+// raw Command.
+func (p *Parser) parsePostgresShow(showTok tokens.Token) exp.Expression {
+	if name, ok := p.parsePostgresConfigParam(true); ok {
+		return p.expression(exp.Show(exp.Args{"this": name}), nil, nil)
+	}
+	return p.parseAsCommand(showTok)
 }
 
 // showParser mirrors parsers/mysql.py:47-51 _show_parser: a closure factory that binds a SHOW
@@ -40,20 +63,24 @@ func showParser(this string, target any, full any, global_ any) func(*Parser) ex
 // SLAVE HOSTS -> REPLICAS, SLAVE STATUS -> REPLICA STATUS, STORAGE ENGINES -> ENGINES) because
 // upstream binds them to the same `this` label as their canonical spelling.
 var showParsers = map[string]func(*Parser) exp.Expression{
-	"BINARY LOGS":       showParser("BINARY LOGS", false, nil, nil),
-	"MASTER LOGS":       showParser("BINARY LOGS", false, nil, nil),
-	"BINLOG EVENTS":     showParser("BINLOG EVENTS", false, nil, nil),
-	"CHARACTER SET":     showParser("CHARACTER SET", false, nil, nil),
-	"CHARSET":           showParser("CHARACTER SET", false, nil, nil),
-	"COLLATION":         showParser("COLLATION", false, nil, nil),
-	"FULL COLUMNS":      showParser("COLUMNS", "FROM", true, nil),
-	"COLUMNS":           showParser("COLUMNS", "FROM", nil, nil),
-	"CREATE DATABASE":   showParser("CREATE DATABASE", true, nil, nil),
-	"CREATE EVENT":      showParser("CREATE EVENT", true, nil, nil),
-	"CREATE FUNCTION":   showParser("CREATE FUNCTION", true, nil, nil),
-	"CREATE PROCEDURE":  showParser("CREATE PROCEDURE", true, nil, nil),
-	"CREATE TABLE":      showParser("CREATE TABLE", true, nil, nil),
-	"CREATE TRIGGER":    showParser("CREATE TRIGGER", true, nil, nil),
+	"BINARY LOGS":      showParser("BINARY LOGS", false, nil, nil),
+	"MASTER LOGS":      showParser("BINARY LOGS", false, nil, nil),
+	"BINLOG EVENTS":    showParser("BINLOG EVENTS", false, nil, nil),
+	"CHARACTER SET":    showParser("CHARACTER SET", false, nil, nil),
+	"CHARSET":          showParser("CHARACTER SET", false, nil, nil),
+	"COLLATION":        showParser("COLLATION", false, nil, nil),
+	"FULL COLUMNS":     showParser("COLUMNS", "FROM", true, nil),
+	"COLUMNS":          showParser("COLUMNS", "FROM", nil, nil),
+	"CREATE DATABASE":  showParser("CREATE DATABASE", true, nil, nil),
+	"CREATE EVENT":     showParser("CREATE EVENT", true, nil, nil),
+	"CREATE FUNCTION":  showParser("CREATE FUNCTION", true, nil, nil),
+	"CREATE PROCEDURE": showParser("CREATE PROCEDURE", true, nil, nil),
+	"CREATE TABLE":     showParser("CREATE TABLE", true, nil, nil),
+	"CREATE TRIGGER":   showParser("CREATE TRIGGER", true, nil, nil),
+	// CREATE USER: MySQL `SHOW CREATE USER <user>` — beyond pinned upstream, whose MySQL
+	// SHOW_PARSERS omits it (it Commands the statement). Modeled like the sibling CREATE * forms so
+	// a consumer reads Show.this = "CREATE USER" instead of scanning the raw Command tail.
+	"CREATE USER":       (*Parser).parseShowCreateUser,
 	"CREATE VIEW":       showParser("CREATE VIEW", true, nil, nil),
 	"DATABASES":         showParser("DATABASES", false, nil, nil),
 	"SCHEMAS":           showParser("DATABASES", false, nil, nil),

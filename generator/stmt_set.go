@@ -24,6 +24,20 @@ func (g *Generator) setItemSQL(e expressions.Expression) string {
 		return "CONSTRAINTS " + g.expressions(exprsOptions{expression: e}) + mode
 	case "SESSION CHARACTERISTICS":
 		return "SESSION CHARACTERISTICS AS TRANSACTION " + g.expressions(exprsOptions{expression: e})
+	case "PASSWORD":
+		// MySQL `PASSWORD [FOR <user>] { = '<string>' | TO RANDOM }`: the optional FOR user is in
+		// "this"; the value is in expressions — a string Literal renders as `= '…'`, the RANDOM
+		// keyword (a Var) as `TO RANDOM`.
+		forUser := g.sqlKey(e, "this")
+		if forUser != "" {
+			forUser = " FOR " + forUser
+		}
+		value := g.expressions(exprsOptions{expression: e})
+		delim := " = "
+		if items := e.Expressions(); len(items) == 1 && items[0].Kind() == expressions.KindVar {
+			delim = " TO "
+		}
+		return "PASSWORD" + forUser + delim + value
 	}
 
 	kind := g.sqlKey(e, "kind")
@@ -40,7 +54,14 @@ func (g *Generator) setItemSQL(e expressions.Expression) string {
 	if boolValue(e.Arg("global_")) {
 		global = "GLOBAL "
 	}
-	return global + kind + this + expressionsSQL + collate
+	// scope is the optional SESSION/LOCAL prefix on the Postgres special forms whose own label is
+	// carried in "kind" (e.g. `SET LOCAL ROLE r` -> scope=LOCAL, kind=ROLE). A plain assignment's
+	// scope lives in "kind" instead, so this stays empty there.
+	scope := g.sqlKey(e, "scope")
+	if scope != "" {
+		scope += " "
+	}
+	return global + scope + kind + this + expressionsSQL + collate
 }
 
 // setSQL ports set_sql (generator.py:2938-2941).

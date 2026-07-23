@@ -630,21 +630,142 @@ inside the `SESSION` assignment parser because the dispatch trie matches `SESSIO
 generator branches in `generator/stmt_set.go` for the `CONSTRAINTS`/`SESSION CHARACTERISTICS` shapes.
 
 **The `kind` is not sufficient on its own for a privilege check.** Postgres also exposes `role` and
-`session_authorization` as *ordinary GUCs*, so `SET [SESSION|LOCAL] role = x` and
+`session_authorization` as *ordinary GUCs*, so `SET role = x` (bare or `SESSION`/`LOCAL`-scoped) and
 `SET session_authorization = x` perform the same privilege change as the keyword forms but parse as ordinary
 assignments (`SetItem.kind` `""`/`"SESSION"`/`"LOCAL"`, `this = EQ(<var>, <value>)`). A consumer must
 therefore ALSO deny an assignment whose LHS variable name is `role`/`session_authorization`
-(case-insensitive) — not only `kind ∈ {ROLE, SESSION AUTHORIZATION}`. This is pre-existing (the GUC-alias
-spellings always parsed as assignments); this extension only adds the keyword-form kinds and does not close
-that alias surface (keyword-spelling detection cannot — every special form has a plain-assignment alias).
+(case-insensitive) — not only `kind ∈ {ROLE, SESSION AUTHORIZATION}`. The disambiguator is a following
+assignment delimiter (`=`/`:=`/`TO`): only the no-delimiter spelling is the privileged keyword form.
+**SECURITY — the bare `SET role = x`** is load-bearing and newly modeled here: because `ROLE` is a SET dispatch
+key, without the delimiter check it fell closed to a raw `Command`, and a consumer whose Command-SET fallback is
+a benign session passthrough (allow) would then let a bare `SET role = admin` through as a privilege
+escalation. `parseSetItemRole` now retreats on a following delimiter and builds the readable `EQ` (the scoped
+and `session_authorization` spellings already did). The alias *surface* is still not closable by
+keyword-spelling detection alone — every special form has a plain-assignment alias — which is exactly why a
+consumer must gate on the `EQ` LHS too.
 
 Fail-closed to `Command`: a form missing or malforming its required value (`parseSet` also rejects a
-zero-item `Set`); a comma-combined multi-item Postgres SET (real Postgres SET is single top-level item, so
+zero-item `Set`); and a comma-combined multi-item Postgres SET (real Postgres SET is single top-level item, so
 `len(items) > 1` on Postgres degrades — this is the only way a special form gets mixed into a comma list,
-which the server rejects); and the `SESSION`/`LOCAL`-scoped variants of these forms (e.g. `SET LOCAL ROLE
-r`), which are intentionally **not** modeled in this pass (safe — the privileged ones deny by default). The
-extension is Postgres-only; base/MySQL leave these forms as `Command` (MySQL's own multi-item `SET a=1, b=2`
-is unaffected). Verified against PostgreSQL 17.6. Use the stable ledger ids for the reconciliation lifecycle.
+which the server rejects). The extension is Postgres-only; base/MySQL leave these forms as `Command` (MySQL's
+own multi-item `SET a=1, b=2` is unaffected). Verified against PostgreSQL 17.6. Use the stable ledger ids for
+the reconciliation lifecycle.
+
+Ledger id [`pg-set-scoped-role`](./testdata/upstream_extensions.jsonl) extends the above to the
+**`SESSION`/`LOCAL`-scoped** privileged forms — `SET [SESSION|LOCAL] ROLE r` and
+`SET [SESSION|LOCAL] SESSION AUTHORIZATION u` — which pinned upstream also Commands. They parse to the SAME
+`SetItem.kind` as the bare form (`ROLE` / `SESSION AUTHORIZATION`, so a consumer's privilege check is
+unchanged), with the scope word preserved in a new `SetItem.scope` arg for a faithful round-trip. Critically,
+the same GUC-alias caveat is honored structurally: `SET SESSION role = x` (an assignment on the `role` GUC)
+is disambiguated from `SET SESSION ROLE x` (the privileged form) by the following assignment delimiter
+(`=`/`:=`/`TO`) — only the no-delimiter spelling is the privileged form, so the GUC-alias assignment stays an
+`EQ` whose LHS a consumer can read. Parser in `parser/stmt_set.go` (`parseSetItemAssignment`).
+
+Ledger id [`mysql-set-password`](./testdata/upstream_extensions.jsonl) registers MySQL
+`SET PASSWORD [FOR user] = value` — an account mutation pinned upstream Commands (the `FOR` form) — into
+`Set{SetItem{kind:"PASSWORD", this:<user|nil>, expressions:[<value>]}}`, so a consumer reads
+`kind = "PASSWORD"` instead of scanning the raw tail. The optional `FOR <user>` is a MySQL user spec
+`name[@host]` captured verbatim (quoting preserved) so it round-trips byte-for-byte; the bare
+`SET PASSWORD = x` (previously a plain assignment) now folds into the same `kind=PASSWORD` shape. Parser in
+`parser/dialect_mysql_set_show.go` (`parseSetItemPassword` + `parseMySQLUserSpec`), generator branch in
+`generator/stmt_set.go`.
+
+Ledger id [`mysql-show-create-user`](./testdata/upstream_extensions.jsonl) registers MySQL
+`SHOW CREATE USER <user>` — pinned upstream omits it from its `SHOW_PARSERS` and Commands it — modeled like
+the sibling `SHOW CREATE {TABLE,VIEW,…}` forms as `Show{this:"CREATE USER"}`, via a dedicated strict
+`parseShowCreateUser`: a user target is **required** and no trailing clause is allowed (MySQL rejects
+`SHOW CREATE USER 'u' LIKE …`/`FROM …`/`LIMIT …` and a bare `SHOW CREATE USER`), so those fail closed to a raw
+`Command`. All three are valid syntax on MySQL 8.0.33 / PostgreSQL 17.6.
+
+The `name[@host]` user target (used by both `SET PASSWORD FOR …` and `SHOW CREATE USER`) is parsed by
+`parseMySQLUserSpec`, which enforces MySQL's `user` grammar rather than accepting anything id-var-shaped: the
+name must be an identifier/string (not a number or reserved keyword like `ALL`), empty parens `()` are valid
+only on `CURRENT_USER` (`foo()` is not a user), and `CURRENT_USER` takes no `@host`. The `SET PASSWORD` auth
+value must be a plain string literal (`= '…'`) or `TO RANDOM` — a placeholder (`= ?`), number, or bare
+identifier fails closed. Every engine-invalid form thus degrades to `Command` instead of a structured
+privileged node (verified against MySQL 8.0.33).
+
+**Quoted dispatch keywords fail closed (all SET/SHOW dispatch).** A quoted keyword is never an unquoted
+dispatch keyword — real engines reject `SET "ROLE" x` / `SET "LOCAL" ROLE x` / `SHOW `` `CREATE` `` USER` as
+syntax errors, and read `` `PASSWORD` `` = x` as an ordinary (non-existent) variable assignment — so matching a
+quoted token by text would launder engine-invalid SQL into a structured, valid-looking **privileged** statement
+(e.g. regenerating `SET "ROLE" x` as the executable `SET ROLE x`). This whole *quote-blind hand-rolled matcher*
+class is closed:
+- the shared `findParser`/trie stops on a quoted `IDENTIFIER`/`STRING` token (the *dispatch* keyword — the
+  first word), affecting every dispatched SET/SHOW keyword, not only the privileged ones;
+- every keyword the privileged SET paths match with `matchTextSeq` — the second word of a phrase and the
+  surrounding keywords (`SESSION AUTHORIZATION`, `SESSION CHARACTERISTICS AS TRANSACTION`, `SET [GLOBAL|SESSION]
+  TRANSACTION`, MySQL `PASSWORD`'s `FOR`/`TO RANDOM`) — uses `matchUnquotedTextSeq`, so `SET SESSION
+  "AUTHORIZATION" x` / `SET PASSWORD TO `` `RANDOM` ``` fail closed;
+- MySQL `SET PASSWORD`'s `=`/`:=` delimiter check excludes a quoted `IDENTIFIER` (`` SET PASSWORD `=` 'x' ``
+  no longer builds the mutation);
+- and a **quoted config-parameter name** that would change meaning when regenerated unquoted is rejected by
+  `isPlainConfigIdent`: `RESET "all"` (an unknown parameter) must not become `RESET all` (= reset everything),
+  and `RESET "SESSION AUTHORIZATION"` (a quoted name with a space) must not become the privileged phrase — both
+  fail closed to `Command` (the parser keeps the quotes verbatim in that raw form).
+
+This is a §1-style correctness alignment (matches the DB); pinned upstream's `_find_parser`/`_match_texts`
+match quoted tokens by text.
+
+Ledger ids [`pg-show-guc`, `pg-reset`](./testdata/upstream_extensions.jsonl) register Postgres
+`SHOW { name | ALL | special }` and `RESET { name | ALL }` — session run-time-parameter introspection and
+reset that pinned upstream Commands (`postgres.py` maps `RESET`→`COMMAND` and leaves `SHOW` in the
+tokenizer's Commands set, so both pack their tail into one raw `STRING`). This port parses them from real
+tokens into `Show{this:<name>}` and `Reset{this:<name>}` (a new `KindReset` node), so a consumer classifies
+the GUC introspection/reset structurally. Two contained tokenizer changes make the real tokens available:
+`SHOW` is removed from the Postgres Commands set (exactly as `dialects/mysql.go` already does), and `RESET`
+is left as a plain `VAR` instead of `COMMAND` (so it is dispatched by leading text like `SAVEPOINT`, and stays
+usable as an ordinary identifier — `SELECT reset FROM t` is unaffected). A shared `parsePostgresConfigParam`
+accepts exactly what PostgreSQL 17.6's grammar accepts: a one-or-two-part name (`search_path`, `ext.var`,
+quoted `"search_path"`), `ALL`, or one of the special multi-word phrases `TIME ZONE` / `TRANSACTION ISOLATION
+LEVEL` / `SESSION AUTHORIZATION` (each required to be **unquoted** keywords — Postgres treats `"time"` as a
+parameter name, not the `TIME` keyword). A trailing token (`SHOW search_path extra`), a bare `SHOW`/`RESET`, a
+non-name token (`SHOW 1`, `SHOW (x)`), or a **reserved word** Postgres rejects as a `var_name`
+(`SHOW NULL`/`RESET CURRENT_USER`/`SHOW DEFAULT`/…) all **fail closed** to a raw `Command` — matching what the
+engine rejects.
+
+**`this` is a CANONICAL identity, not the raw spelling** — this is a security property. PostgreSQL's GUC lookup
+is case- and quote-insensitive (`RESET ROLE` == `reset role` == `RESET "RoLe"`), and its special phrases are
+exact aliases of underscore GUCs (`RESET SESSION AUTHORIZATION` == `RESET session_authorization`, `TIME ZONE`
+== `timezone`, `TRANSACTION ISOLATION LEVEL` == `transaction_isolation` — all verified on PG 17.6). So the
+parser folds every spelling to **one** identity: a generic name to its ASCII-lowercased, unquoted form
+(§1.1), and each special phrase to its underscore-GUC name. `RESET ROLE`/`role`/`"RoLe"` all yield
+`this="role"`; every spelling of the session-authorization reset yields `this="session_authorization"`. A
+consumer gating a privilege-relevant reset (`RESET ROLE`/`RESET SESSION AUTHORIZATION` restore the login
+identity — a potential escalation) can therefore match a single canonical `this` and cannot be defeated by a
+case/quote/phrase variant. This mirrors how SET already canonicalizes `SetItem.kind`. Round-trip regenerates
+the canonical spelling (`SHOW TIME ZONE` → `SHOW timezone`; `RESET "RoLe"` → `RESET role`) — semantically
+identical valid Postgres, the same normalization philosophy as SET's `TO`→`=`. `SHOW` additionally treats a
+quoted `"all"` as the `ALL` form (real PG: `SHOW "all"` lists every setting), whereas `RESET "all"` is an
+ordinary parameter named `all` — the one place SHOW and RESET diverge, handled by a `showAll` flag.
+
+**MySQL `RESET` is deliberately left as `Command`** (§1.6) — `RESET MASTER`/`RESET REPLICA` is a privileged
+replication-admin op, semantically unrelated to the Postgres GUC reset, so a consumer must keep treating it as
+opaque. Parser in `parser/dialect_postgres_show_reset.go` + the `parseShow` postgres branch in
+`parser/stmt_show.go`; generators in `generator/stmt_show.go` (postgres `showSQL` branch) and
+`generator/stmt_transaction.go` (`resetSQL`).
+
+**Known limitation — the name grammars approximate the engines' keyword classification (all fail-safe).**
+Exactly matching PostgreSQL's `var_name`/`ColId` and MySQL's `user`/reserved-word tables would require porting
+those keyword-category tables; this port instead approximates them with its tokenizer's token classes, which
+over- or under-accepts a handful of keyword-shaped names. All cases fail **safe** — a consumer gates on the
+statement's structural identity (`Show.this`/`Reset.this` canonical GUC, `SetItem.kind`), never on whether an
+odd name was accepted:
+- *Under-acceptance* (engine-valid → `Command`, a legibility gap): a three-part GUC name (`SHOW a.b.c` /
+  `RESET a.b.c`); a config name whose component tokenizes as a keyword rather than `VAR` (`SHOW schema` —
+  `SCHEMA` is a valid PG `ColId`); a MySQL dotted-IP host (`u@1.2.3.4`); and MySQL
+  `SET PASSWORD … REPLACE …/RETAIN CURRENT PASSWORD` clauses.
+- *Over-acceptance* (engine-invalid → structured, but never a privileged **bypass** — it structures a form the
+  engine rejects, which a consumer still denies): a PG reserved word the tokenizer leaves as `VAR`
+  (`SHOW CURRENT_ROLE`/`SHOW USER` — PG rejects these, but there is no real `current_role`/`user` GUC, so
+  nothing privileged hides behind it), and a MySQL reserved-word account name (`SET PASSWORD FOR ACCESSIBLE =
+  …`). The clearly-reserved *value* keywords (`NULL`/`TRUE`/`DEFAULT`/`CURRENT_USER`/`SESSION_USER`) and a
+  numeric name/host *are* rejected.
+
+These are fidelity gaps, not safety gaps: none lets an engine-executable privileged statement parse as benign
+or regenerate into a different privileged statement (that laundering class is closed — see the quoted-keyword
+note above and the `isPlainConfigIdent` guard, which reject a quoted parameter name whose unquoted
+regeneration would change meaning).
 
 Ledger ids [`mysql-into-outfile`, `mysql-into-dumpfile`](./testdata/upstream_extensions.jsonl) register
 MySQL's `SELECT ... INTO {OUTFILE|DUMPFILE} '/path'` server-side file writes, which pinned upstream rejects

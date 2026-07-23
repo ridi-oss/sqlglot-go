@@ -193,6 +193,22 @@ func (p *Parser) matchTextSeq(texts ...string) bool {
 	return true
 }
 
+// matchUnquotedTextSeq is matchTextSeq restricted to UNQUOTED keyword tokens: it additionally
+// rejects a quoted IDENTIFIER whose inner text happens to equal a keyword (e.g. Postgres treats
+// `"time"` as a parameter name, not the TIME keyword). Atomic: it retreats fully on any mismatch.
+func (p *Parser) matchUnquotedTextSeq(texts ...string) bool {
+	index := p.index
+	for _, text := range texts {
+		if p.curr.TokenType != tokens.STRING && p.curr.TokenType != tokens.IDENTIFIER && stringsUpper(p.curr.Text) == text {
+			p.advance()
+		} else {
+			p.retreat(index)
+			return false
+		}
+	}
+	return true
+}
+
 func (p *Parser) isConnected() bool {
 	return p.prev.IsValid() && p.curr.IsValid() && p.prev.End+1 == p.curr.Start
 }
@@ -426,6 +442,12 @@ func (p *Parser) parseStatement() exp.Expression {
 	// dispatched here by leading text before the generic expression path would mis-parse them as an
 	// Alias. Returns nil (no consumption) for anything else.
 	if stmt := p.parseSavepointStatement(); stmt != nil {
+		return stmt
+	}
+	// Postgres `RESET { name | ALL }`: RESET is a plain VAR token here (see dialects/postgres.go),
+	// so it is dispatched by leading text like SAVEPOINT above. Owns the statement fully once matched
+	// (structured Reset or fail-closed Command), so it never falls through to the expression path.
+	if stmt := p.parseResetStatement(); stmt != nil {
 		return stmt
 	}
 	return p.parseExpressionStatement()

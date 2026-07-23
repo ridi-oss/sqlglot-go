@@ -208,6 +208,9 @@ const (
 	// statements. Upstream has no such node (it mis-parses SAVEPOINT as an Alias and parse-errors
 	// RELEASE SAVEPOINT); see DEVIATIONS.
 	KindSavepoint
+	// KindReset models Postgres `RESET { name | ALL }` (reset a run-time parameter to its default).
+	// Upstream tokenizes RESET as a raw Command; see DEVIATIONS.
+	KindReset
 	KindGrant
 	KindRevoke
 	KindGrantPrivilege
@@ -924,7 +927,7 @@ var argTypes = map[Kind][]argSpec{
 	// Set/SetItem/Show/.../Pragma (ddl.py, query.py, properties.py, dml.py; see the Kind
 	// block comment above for exact line numbers).
 	KindSet:            {{"expressions", false}, {"unset", false}, {"tag", false}},
-	KindSetItem:        {{"this", false}, {"expressions", false}, {"kind", false}, {"collate", false}, {"global_", false}},
+	KindSetItem:        {{"this", false}, {"expressions", false}, {"kind", false}, {"collate", false}, {"global_", false}, {"scope", false}},
 	KindShow:           {{"this", true}, {"history", false}, {"terse", false}, {"target", false}, {"offset", false}, {"starts_with", false}, {"limit", false}, {"from_", false}, {"like", false}, {"where", false}, {"db", false}, {"scope", false}, {"scope_kind", false}, {"full", false}, {"mutex", false}, {"query", false}, {"channel", false}, {"global_", false}, {"log", false}, {"position", false}, {"types", false}, {"privileges", false}, {"for_table", false}, {"for_group", false}, {"for_user", false}, {"for_role", false}, {"into_outfile", false}, {"json", false}, {"iceberg", false}},
 	KindUse:            {{"this", false}, {"expressions", false}, {"kind", false}},
 	KindKill:           {{"this", true}, {"kind", false}},
@@ -934,6 +937,7 @@ var argTypes = map[Kind][]argSpec{
 	KindCommit:         {{"chain", false}, {"this", false}, {"durability", false}},
 	KindRollback:       {{"savepoint", false}, {"this", false}},
 	KindSavepoint:      {{"this", true}, {"kind", false}},
+	KindReset:          {{"this", false}},
 	KindGrant:          {{"privileges", true}, {"kind", false}, {"securable", true}, {"principals", true}, {"grant_option", false}},
 	KindRevoke:         {{"privileges", true}, {"kind", false}, {"securable", true}, {"principals", true}, {"grant_option", false}, {"cascade", false}},
 	KindGrantPrivilege: {{"this", true}, {"expressions", false}},
@@ -1734,6 +1738,7 @@ var className = map[Kind]string{
 	KindCommit:                              "Commit",
 	KindRollback:                            "Rollback",
 	KindSavepoint:                           "Savepoint",
+	KindReset:                               "Reset",
 	KindGrant:                               "Grant",
 	KindRevoke:                              "Revoke",
 	KindGrantPrivilege:                      "GrantPrivilege",

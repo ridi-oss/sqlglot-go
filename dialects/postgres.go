@@ -115,23 +115,27 @@ func Postgres() *Dialect {
 		// Alias and error on its modes. This maps it so it routes through parseTransaction like BEGIN.
 		// Matches real PG; a grammar extension (upstream parse-errors it) — see DEVIATIONS
 		// 'Grammar extensions beyond upstream' and ledger id pg-start-transaction.
-		"START":         tokens.BEGIN,
-		"BIGSERIAL":     tokens.BIGSERIAL,
-		"CSTRING":       tokens.PSEUDO_TYPE,
-		"DECLARE":       tokens.COMMAND,
-		"DO":            tokens.COMMAND,
-		"EXEC":          tokens.COMMAND,
-		"EXPLAIN":       tokens.DESCRIBE, // Ledgered pg-explain: non-COMMAND prevents swallowing remaining SQL as raw text.
-		"HSTORE":        tokens.HSTORE,
-		"INT8":          tokens.BIGINT,
-		"MONEY":         tokens.MONEY,
-		"NAME":          tokens.NAME,
-		"OID":           tokens.OBJECT_IDENTIFIER,
-		"ONLY":          tokens.ONLY,
-		"POINT":         tokens.POINT,
-		"REFRESH":       tokens.COMMAND,
-		"REINDEX":       tokens.COMMAND,
-		"RESET":         tokens.COMMAND,
+		"START":     tokens.BEGIN,
+		"BIGSERIAL": tokens.BIGSERIAL,
+		"CSTRING":   tokens.PSEUDO_TYPE,
+		"DECLARE":   tokens.COMMAND,
+		"DO":        tokens.COMMAND,
+		"EXEC":      tokens.COMMAND,
+		"EXPLAIN":   tokens.DESCRIBE, // Ledgered pg-explain: non-COMMAND prevents swallowing remaining SQL as raw text.
+		"HSTORE":    tokens.HSTORE,
+		"INT8":      tokens.BIGINT,
+		"MONEY":     tokens.MONEY,
+		"NAME":      tokens.NAME,
+		"OID":       tokens.OBJECT_IDENTIFIER,
+		"ONLY":      tokens.ONLY,
+		"POINT":     tokens.POINT,
+		"REFRESH":   tokens.COMMAND,
+		"REINDEX":   tokens.COMMAND,
+		// RESET is deliberately NOT mapped to COMMAND (unlike pinned upstream postgres.py:101 and
+		// unlike MySQL, whose RESET MASTER/REPLICA is a privileged admin op that stays a raw Command).
+		// Postgres `RESET { name | ALL }` is a session GUC reset; leaving RESET as a plain VAR lets
+		// parseResetStatement build a structured exp.Reset from real tokens. Grammar extension, ledger
+		// id pg-reset. See DEVIATIONS.
 		"SERIAL":        tokens.SERIAL,
 		"SMALLSERIAL":   tokens.SMALLSERIAL,
 		"TEMP":          tokens.TEMPORARY,
@@ -157,6 +161,11 @@ func Postgres() *Dialect {
 	delete(cfg.Keywords, "/*+")
 	delete(cfg.Keywords, "DIV")
 	delete(cfg.Comments, "/*+")
+	// Drop SHOW from the Commands set (mirroring MySQL's dialects/mysql.go override) so the
+	// tokenizer does not pack the parameter tail into one raw STRING. Postgres `SHOW { name | ALL }`
+	// is then parsed from real tokens by parsePostgresShow into a structured exp.Show. Grammar
+	// extension, ledger id pg-show-guc. See DEVIATIONS.
+	delete(cfg.Commands, tokens.SHOW)
 	d.TokenizerConfig = tokens.CompileConfig(cfg)
 	return d
 }

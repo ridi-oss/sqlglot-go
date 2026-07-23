@@ -371,23 +371,21 @@ func TestShowTables(t *testing.T) {
 	}
 }
 
-// TestShowDegradesToCommandOutsideMySQL covers the base/Postgres side of parseShow
-// (parser.py:9226-9230): SHOW_PARSERS is only populated for MySQL in this port, so any dialect
-// that doesn't gate on p.dialect.Name=="mysql" falls straight through to the raw-text Command
-// fallback, matching upstream's base _parse_show -> _parse_as_command.
+// TestShowDegradesToCommandOutsideMySQL covers the base side of parseShow (parser.py:9226-9230):
+// SHOW_PARSERS is only populated for MySQL in this port, so the base dialect falls straight through
+// to the raw-text Command fallback, matching upstream's base _parse_show -> _parse_as_command.
+// (Postgres is handled by parsePostgresShow instead — see TestPostgresShowGUC.)
 func TestShowDegradesToCommandOutsideMySQL(t *testing.T) {
-	for _, dialect := range []string{"", "postgres"} {
-		cmd := parseOneDialect(t, "SHOW TABLES", dialect)
-		if cmd.Kind() != exp.KindCommand {
-			t.Fatalf("dialect %q: SHOW should degrade to Command, got %v:\n%s", dialect, cmd.Kind(), cmd.ToS())
-		}
-		got, err := generateSQL(t, cmd, dialect)
-		if err != nil {
-			t.Fatalf("Generate: %v", err)
-		}
-		if got != "SHOW TABLES" {
-			t.Fatalf("round-trip = %q, want %q", got, "SHOW TABLES")
-		}
+	cmd := parseOneDialect(t, "SHOW TABLES", "")
+	if cmd.Kind() != exp.KindCommand {
+		t.Fatalf("base: SHOW should degrade to Command, got %v:\n%s", cmd.Kind(), cmd.ToS())
+	}
+	got, err := generateSQL(t, cmd, "")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got != "SHOW TABLES" {
+		t.Fatalf("round-trip = %q, want %q", got, "SHOW TABLES")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 // parseCommand ports _parse_command (parser.py:2184-2190): the generic fallback for any
@@ -119,10 +120,15 @@ func (p *Parser) findParser(parsers map[string]func(*Parser) exp.Expression, tri
 	node := trie
 	for {
 		curr := stringsUpper(p.curr.Text)
+		// A quoted identifier or string literal is never an (unquoted) dispatch keyword — real engines
+		// reject a quoted keyword in this position (`SET "ROLE" x` / `SHOW "CREATE" USER` are syntax
+		// errors) or read it as an ordinary name (`` `PASSWORD` = x`` is a variable assignment).
+		// Matching it by text would launder those into a structured privileged statement, so treat it as
+		// a non-match (failed) — the walk then fails closed to the assignment/Command fallback.
+		failed := p.curr.TokenType == tokens.IDENTIFIER || p.curr.TokenType == tokens.STRING
 		this = append(this, curr)
 		p.advance()
 
-		failed := false
 		for _, word := range strings.Split(curr, " ") {
 			if node == nil {
 				failed = true

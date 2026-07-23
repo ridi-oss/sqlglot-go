@@ -27,6 +27,7 @@ func init() {
 	mysqlSetParsers["CHARACTER SET"] = func(p *Parser) exp.Expression { return p.parseSetItemCharset("CHARACTER SET") }
 	mysqlSetParsers["CHARSET"] = func(p *Parser) exp.Expression { return p.parseSetItemCharset("CHARACTER SET") }
 	mysqlSetParsers["NAMES"] = func(p *Parser) exp.Expression { return p.parseSetItemNames() }
+	mysqlSetParsers["PASSWORD"] = (*Parser).parseSetItemPassword
 	mysqlSetTrie = newTrie(setParserKeys(mysqlSetParsers))
 
 	// postgresSetParsers extends the base table with Postgres's SET special-forms, which pinned
@@ -85,7 +86,19 @@ func (p *Parser) parseSet() exp.Expression {
 	// inside a value/CONSTRAINTS/TRANSACTION list), so a multi-item postgres SET — the only way a
 	// special form gets comma-combined with another item, which real Postgres rejects — also fails
 	// closed rather than admit SQL the server does not accept.
-	if p.curr.IsValid() || len(items) == 0 || (p.dialect.Name == "postgres" && len(items) > 1) {
+	// MySQL `SET PASSWORD` is a standalone statement that cannot be comma-combined with other SET
+	// items in either position (real MySQL rejects `SET PASSWORD = x, @y = 1`), so a multi-item list
+	// containing a PASSWORD item also fails closed.
+	passwordInMultiItem := false
+	if len(items) > 1 {
+		for _, item := range items {
+			if item != nil && item.Text("kind") == "PASSWORD" {
+				passwordInMultiItem = true
+				break
+			}
+		}
+	}
+	if p.curr.IsValid() || len(items) == 0 || (p.dialect.Name == "postgres" && len(items) > 1) || passwordInMultiItem {
 		p.retreat(index)
 		return p.parseAsCommand(start)
 	}
@@ -113,27 +126,99 @@ func (p *Parser) parseSetItem() exp.Expression {
 	return p.parseSetItemAssignment(nil)
 }
 
+// isSetAssignmentDelimiterAhead reports whether the current token is a real SET assignment delimiter
+// (=/:=/TO). It excludes STRING and quoted IDENTIFIER tokens whose TEXT merely collides with a
+// delimiter word — e.g. a role literally named "to" (`SET SESSION ROLE "to"`, valid Postgres) lexes
+// as an IDENTIFIER, distinct from the TO keyword and the =/:= operators. Without the token-type
+// guard the delimiter peek would misfire on such a name and either crash or, worse, silently
+// misclassify a privileged `SET [SESSION|LOCAL] ROLE <name>` as a benign assignment, dropping the
+// role. Used only to disambiguate the privileged ROLE / SESSION AUTHORIZATION forms from the
+// GUC-alias assignment.
+func (p *Parser) isSetAssignmentDelimiterAhead() bool {
+	if p.curr.TokenType == tokens.STRING || p.curr.TokenType == tokens.IDENTIFIER {
+		return false
+	}
+	return setAssignmentDelimiters[stringsUpper(p.curr.Text)]
+}
+
+// isUnquotedKeywordAhead reports whether the current token is an unquoted keyword/word, i.e. NOT a
+// quoted identifier or a string. Used to gate the scoped ROLE / SESSION AUTHORIZATION keyword match:
+// a quoted `SET SESSION "role" …` must not be mistaken for the ROLE keyword (matchTextSeq matches by
+// text and would otherwise grab the quoted identifier), which would wrongly structure an
+// engine-invalid statement as the privileged form.
+func (p *Parser) isUnquotedKeywordAhead() bool {
+	return p.curr.TokenType != tokens.IDENTIFIER && p.curr.TokenType != tokens.STRING
+}
+
 // parseSetItemAssignment ports _parse_set_item_assignment (parser.py:9232-9250). kind is
 // `string | nil`, mirroring Python's `str | None`.
 func (p *Parser) parseSetItemAssignment(kind any) exp.Expression {
 	index := p.index
 
-	if kindStr, ok := kind.(string); ok && (kindStr == "GLOBAL" || kindStr == "SESSION") && p.matchTextSeq("TRANSACTION") {
+	if kindStr, ok := kind.(string); ok && (kindStr == "GLOBAL" || kindStr == "SESSION") && p.matchUnquotedTextSeq("TRANSACTION") {
 		return p.parseSetTransaction(kindStr == "GLOBAL")
+	}
+
+	// Postgres SCOPED privileged forms: `SET [SESSION|LOCAL] ROLE r` and
+	// `SET [SESSION|LOCAL] SESSION AUTHORIZATION u`. The scope word (SESSION/LOCAL) was consumed as
+	// `kind` by the dispatch; the form label is carried in the returned SetItem's own `kind` (ROLE /
+	// SESSION AUTHORIZATION — the SAME kind as the bare form, so a consumer reads the privilege the
+	// same way), with the scope preserved separately in `scope`. Beyond pinned upstream, which
+	// Commands these. A bare `SET SESSION AUTHORIZATION` (SESSION as the form-start, no scope) is not
+	// matched here — its follower is a lone AUTHORIZATION, not `SESSION AUTHORIZATION` — and falls to
+	// the block below.
+	if kindStr, ok := kind.(string); ok && (kindStr == "SESSION" || kindStr == "LOCAL") && p.dialect.Name == "postgres" && p.isUnquotedKeywordAhead() {
+		// SECURITY: `role` and `session_authorization` are also plain GUCs, so `SET SESSION role =
+		// attacker` / `SET LOCAL SESSION AUTHORIZATION = x` are ASSIGNMENTS (privilege escalation via
+		// the GUC alias), NOT the `ROLE <name>` / `SESSION AUTHORIZATION <name>` privileged forms. A
+		// following assignment delimiter (=/:=/TO) means it is the GUC assignment — retreat and let
+		// the assignment path build the EQ so a consumer can read the LHS var name. Only the
+		// no-delimiter form is the privileged special form. The `isUnquotedKeywordAhead` gate ensures
+		// a *quoted* `SET SESSION "role" …` is NOT mistaken for the ROLE keyword (a quoted identifier
+		// is never the keyword — real Postgres rejects that form; matchTextSeq matches by text and
+		// would otherwise grab it). See DEVIATIONS + the GUC-alias caveat.
+		if p.matchUnquotedTextSeq("ROLE") {
+			if p.isSetAssignmentDelimiterAhead() {
+				p.retreat(index)
+			} else {
+				item := p.parseSetItemRole()
+				if item == nil {
+					p.retreat(index)
+					return nil
+				}
+				item.Set("scope", kindStr)
+				return item
+			}
+		} else if p.matchUnquotedTextSeq("SESSION", "AUTHORIZATION") {
+			if p.isSetAssignmentDelimiterAhead() {
+				p.retreat(index)
+			} else {
+				item := p.parseSetItemSessionAuthorization()
+				if item == nil {
+					p.retreat(index)
+					return nil
+				}
+				item.Set("scope", kindStr)
+				return item
+			}
+		}
 	}
 
 	// Postgres `SET SESSION AUTHORIZATION ...` / `SET SESSION CHARACTERISTICS AS TRANSACTION ...`
 	// — the `SESSION` shadows these longer forms in the dispatch trie, so disambiguate here on the
 	// word that follows (an ordinary `SET SESSION x = v` continues to the assignment path below).
 	if kindStr, ok := kind.(string); ok && kindStr == "SESSION" && p.dialect.Name == "postgres" {
-		if p.matchTextSeq("AUTHORIZATION") {
+		// matchUnquotedTextSeq: a quoted `SET SESSION "AUTHORIZATION" x` is not the privileged form —
+		// the quoted identifier is never the keyword (real Postgres rejects it), so it falls through to
+		// the assignment path / fails closed rather than being structured as SESSION AUTHORIZATION.
+		if p.matchUnquotedTextSeq("AUTHORIZATION") {
 			if item := p.parseSetItemSessionAuthorization(); item != nil {
 				return item
 			}
 			p.retreat(index)
 			return nil
 		}
-		if p.matchTextSeq("CHARACTERISTICS") {
+		if p.matchUnquotedTextSeq("CHARACTERISTICS") {
 			if item := p.parseSetSessionCharacteristics(); item != nil {
 				return item
 			}

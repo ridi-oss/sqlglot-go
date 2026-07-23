@@ -7,6 +7,14 @@ func init() {
 	dispatch[expressions.KindCommit] = (*Generator).commitSQL
 	dispatch[expressions.KindRollback] = (*Generator).rollbackSQL
 	dispatch[expressions.KindSavepoint] = (*Generator).savepointSQL
+	dispatch[expressions.KindReset] = (*Generator).resetSQL
+}
+
+// resetSQL renders Postgres `RESET <name>` (name captured verbatim, so `ALL` and special phrases like
+// `TIME ZONE` round-trip). Upstream has no Reset node (it Commands RESET), so there is no upstream
+// generator to port. See DEVIATIONS.
+func (g *Generator) resetSQL(e expressions.Expression) string {
+	return "RESET " + e.Text("this")
 }
 
 // savepointSQL renders the transaction-control savepoint statements: `SAVEPOINT <name>` and, when

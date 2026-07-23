@@ -163,10 +163,7 @@ func TestPostgresSetFailClosedAndRegressions(t *testing.T) {
 			"SET TIME ZONE",                                         // missing value
 			"SET SESSION AUTHORIZATION",                             // missing user
 			"SET CONSTRAINTS ALL",                                   // missing mode
-			"SET LOCAL ROLE admin",                                  // SESSION/LOCAL-scoped form (unmodeled)
-			"SET SESSION ROLE admin",                                // scoped
-			"SET SESSION TIME ZONE 'UTC'",                           // scoped
-			"SET LOCAL SESSION AUTHORIZATION x",                     // scoped
+			"SET SESSION TIME ZONE 'UTC'",                           // scoped TIME ZONE stays unmodeled (benign)
 			"SET CONSTRAINTS ALL GARBAGE",                           // mode not DEFERRED/IMMEDIATE
 			"SET SESSION CHARACTERISTICS READ ONLY",                 // missing AS TRANSACTION
 			"SET SESSION CHARACTERISTICS AS TRANSACTION",            // missing mode

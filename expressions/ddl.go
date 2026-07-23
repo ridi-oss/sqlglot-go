@@ -17,6 +17,7 @@ func Transaction(args Args) Expression    { return newNode(KindTransaction, args
 func Commit(args Args) Expression         { return newNode(KindCommit, args) }
 func Rollback(args Args) Expression       { return newNode(KindRollback, args) }
 func Savepoint(args Args) Expression      { return newNode(KindSavepoint, args) }
+func Reset(args Args) Expression          { return newNode(KindReset, args) }
 func Grant(args Args) Expression          { return newNode(KindGrant, args) }
 func Revoke(args Args) Expression         { return newNode(KindRevoke, args) }
 func GrantPrivilege(args Args) Expression { return newNode(KindGrantPrivilege, args) }

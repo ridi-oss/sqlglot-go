@@ -31,7 +31,21 @@ func (p *Parser) parseSetSpecialWord() exp.Expression {
 
 // parseSetItemRole ports `SET [SESSION|LOCAL] ROLE { role_name | NONE }` (privileged). Returns
 // nil (→ fail closed to Command) when the required role value is absent.
+//
+// SECURITY — the GUC-alias disambiguation: `role` is ALSO an ordinary run-time parameter, so
+// `SET role = x` / `SET role TO x` is a GUC ASSIGNMENT, not the privileged `SET ROLE <name>` form.
+// The disambiguator is a following assignment delimiter (=/:=/TO). Since `ROLE` is a dispatch key,
+// findParser reaches here having already consumed the `role` keyword; on seeing a delimiter, retreat
+// one token to re-expose `role` as the assignment LHS and build the readable EQ (a `SetItem` whose
+// `this` is `EQ(Column(role), …)`). This must NOT stay a raw Command: a consumer gating role changes
+// on `SetItem→EQ→LHS ∈ {role, session_authorization}` would otherwise route the bare Command to its
+// benign-SET passthrough and ALLOW a privilege escalation. The scoped `SET [SESSION|LOCAL] ROLE …`
+// forms disambiguate the same way in parseSetItemAssignment. See DEVIATIONS.
 func (p *Parser) parseSetItemRole() exp.Expression {
+	if p.isSetAssignmentDelimiterAhead() {
+		p.retreat(p.index - 1) // ROLE is a single-token dispatch key; re-expose it as the LHS.
+		return p.parseSetItemAssignment(nil)
+	}
 	this := p.parseSetSpecialWord()
 	if this == nil {
 		return nil
@@ -115,7 +129,9 @@ func (p *Parser) parseConstraintName() exp.Expression {
 // rendered by the SESSION CHARACTERISTICS branch in setItemSQL.
 func (p *Parser) parseSetSessionCharacteristics() exp.Expression {
 	// `AS TRANSACTION` is mandatory in Postgres — bail (→ Command) if either word is missing.
-	if !p.matchTextSeq("AS") || !p.matchTextSeq("TRANSACTION") {
+	// matchUnquotedTextSeq (not matchTextSeq) so a quoted `"AS"`/`"TRANSACTION"` — an identifier, never
+	// the keyword — cannot be laundered into a valid characteristics statement (real PG rejects it).
+	if !p.matchUnquotedTextSeq("AS") || !p.matchUnquotedTextSeq("TRANSACTION") {
 		return nil
 	}
 	// raiseUnmatched=false so a characteristic outside the modeled set (e.g. DEFERRABLE, or
