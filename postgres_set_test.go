@@ -196,3 +196,107 @@ func TestPostgresSetFailClosedAndRegressions(t *testing.T) {
 		}
 	})
 }
+
+// Postgres allows a single GUC to take a comma-separated VALUE list (`SET search_path = a, b`), which
+// pinned upstream degrades to a Command; this port structures it so a consumer sees a benign assignment
+// (readable LHS via SetItem->EQ->this) instead of an opaque Command that a uniform fail-close would
+// wrongly deny. Verified against PostgreSQL 17.6 (ledger id pg-set-multi-value). A comma value list is a
+// grammar extension; a second `name = value` (`SET a = 1, b = 2`) is a PG SYNTAX error and fails closed.
+func TestPostgresSetMultiValue(t *testing.T) {
+	// Valid multi-value forms structure and round-trip. `TO` normalizes to `=` (systemic, upstream-faithful).
+	for _, tc := range []struct{ sql, want string }{
+		{"SET search_path = a, b", "SET search_path = a, b"},
+		{"SET search_path = a, b, c", "SET search_path = a, b, c"},
+		{"SET search_path TO a, b", "SET search_path = a, b"},
+		{"SET LOCAL search_path = a, b", "SET LOCAL search_path = a, b"},
+		{"SET SESSION search_path = a, b", "SET SESSION search_path = a, b"},
+		{"SET x = 1, 2", "SET x = 1, 2"},   // syntactically valid (PG rejects only semantically)
+		{"SET x = ON, a", "SET x = ON, a"}, // ON is a reserved keyword but a valid opt_boolean_or_string var_value
+		{"SET x = a, ON", "SET x = a, ON"},
+		{"SET x = ON, OFF", "SET x = ON, OFF"},
+		// a QUOTED "DEFAULT" is an ordinary identifier value (valid PG), distinct from the bare DEFAULT
+		// keyword (fail-closed below) — the §1.12 quote preservation must survive the value-list path.
+		{`SET search_path = "DEFAULT", public`, `SET search_path = "DEFAULT", public`},
+		{`SET search_path = "$user", "DEFAULT"`, `SET search_path = "$user", "DEFAULT"`},
+	} {
+		e, err := sqlglot.ParseOne(tc.sql, "postgres")
+		if err != nil {
+			t.Errorf("%q: %v", tc.sql, err)
+			continue
+		}
+		if e.Kind() != exp.KindSet || len(e.Expressions()) != 1 {
+			t.Errorf("%q: want single-item Set\n%s", tc.sql, e.ToS())
+			continue
+		}
+		// The variable name must be reachable off SetItem->EQ->this (the consumer's gate signal).
+		item := e.Expressions()[0]
+		eq, ok := item.Arg("this").(exp.Expression)
+		if !ok || eq.Kind() != exp.KindEQ {
+			t.Errorf("%q: SetItem.this not an EQ\n%s", tc.sql, e.ToS())
+		}
+		if out, _ := sqlglot.Generate(e, "postgres", generator.Options{}); out != tc.want {
+			t.Errorf("%q: round-trip = %q, want %q", tc.sql, out, tc.want)
+		}
+	}
+
+	// §1 correctness: a QUOTED identifier value keeps its quotes — upstream drops them (rendering the
+	// invalid unquoted `$user`), but real PostgreSQL rejects `SET search_path = $user` (syntax at `$`)
+	// and accepts `"$user"`. So the port matches the DB, not upstream.
+	for _, tc := range []struct{ sql, want string }{
+		{`SET search_path = "$user"`, `SET search_path = "$user"`},
+		{`SET search_path = "$user", public`, `SET search_path = "$user", public`},
+		// A DOTTED single value (`a."b"`) is invalid Postgres (syntax error at `.`); only a single-part
+		// quoted identifier is preserved verbatim. The lone dotted form flattens to the bare trailing name
+		// (lossy but syntactically valid, matching upstream) — it must NOT round-trip to the invalid
+		// `a."b"`. (A dotted value inside a LIST fails closed instead — see the fail-closed cases below.)
+		{`SET search_path = a."b"`, `SET search_path = b`},
+	} {
+		e, err := sqlglot.ParseOne(tc.sql, "postgres")
+		if err != nil {
+			t.Errorf("%q: %v", tc.sql, err)
+			continue
+		}
+		if out, _ := sqlglot.Generate(e, "postgres", generator.Options{}); out != tc.want {
+			t.Errorf("%q: round-trip = %q, want %q (quoting must be preserved)", tc.sql, out, tc.want)
+		}
+	}
+
+	// A value list admits only simple var_values (identifier/string/number/bool/signed). Anything PG
+	// rejects as a syntax error in a list fails closed: a second `name = value` assignment, a trailing/
+	// leading/double comma, an expression, a cast, or the DEFAULT keyword (valid only as the sole value).
+	for _, sql := range []string{
+		"SET a = 1, b = 2",     // second name = value (multi-assignment)
+		"SET x = a, b = c",     // embedded assignment
+		"SET x = a,",           // trailing comma
+		"SET search_path = a,", // trailing comma
+		"SET x = a + b, c",     // expression element
+		"SET x = a::text, b",   // cast element
+		"SET x = DEFAULT, a",   // DEFAULT is not a var_list element
+		"SET search_path = a, DEFAULT",
+		"SET search_path = a.b, c",         // dotted element (unquoted) — invalid in a list
+		`SET search_path = "$user", a."b"`, // dotted element (quoted trailing) — invalid in a list
+	} {
+		e, err := sqlglot.ParseOne(sql, "postgres")
+		if err != nil {
+			t.Errorf("%q: %v", sql, err)
+			continue
+		}
+		if e.Kind() != exp.KindCommand {
+			t.Errorf("%q: want Command (fail-closed), got %s\n%s", sql, exp.ClassName(e.Kind()), e.ToS())
+		}
+	}
+
+	// The value list renders FLAT even in Pretty mode (no stray per-item indentation/newlines).
+	if e, err := sqlglot.ParseOne("SET search_path = a, b, c", "postgres"); err == nil {
+		if out, _ := sqlglot.Generate(e, "postgres", generator.Options{Pretty: true}); out != "SET search_path = a, b, c" {
+			t.Errorf("pretty multi-value = %q, want flat %q", out, "SET search_path = a, b, c")
+		}
+	}
+
+	// MySQL/base commas separate SET ITEMS, not values — the value-list is Postgres-only. `SET a = 1, b = 2`
+	// on MySQL stays two items (unchanged), not a single value-list assignment.
+	e, err := sqlglot.ParseOne("SET a = 1, b = 2", "mysql")
+	if err != nil || e.Kind() != exp.KindSet || len(e.Expressions()) != 2 {
+		t.Errorf("mysql SET a = 1, b = 2: want 2-item Set (comma = item separator), got %v / %d items", err, len(e.Expressions()))
+	}
+}

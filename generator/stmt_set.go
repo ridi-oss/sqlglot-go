@@ -55,6 +55,19 @@ func (g *Generator) setItemSQL(e expressions.Expression) string {
 	}
 	this := g.sqlKey(e, "this")
 	expressionsSQL := g.expressions(exprsOptions{expression: e})
+	// Postgres multi-value assignment (parser/stmt_set.go): `SET [LOCAL|SESSION] search_path = a, b`
+	// keeps the EQ (LHS + first value) in `this` and the remaining values in `expressions`. Fold them
+	// into `this` as a bare comma value list so the scope/kind prefix below still renders. Only such a
+	// plain assignment reaches the generic path with an EQ `this` AND `expressions` (the special forms
+	// carry their own generator branch or a non-EQ `this`), so this is scoped to exactly that form.
+	if this != "" && expressionsSQL != "" {
+		if eq, ok := e.Arg("this").(expressions.Expression); ok && eq.Kind() == expressions.KindEQ {
+			// A value list renders FLAT — `a, b, c` on one line — even in Pretty mode; the default
+			// (non-flat) expressions render inserts per-item indentation/newlines that would mangle it.
+			this += ", " + g.expressions(exprsOptions{expression: e, flat: true})
+			expressionsSQL = ""
+		}
+	}
 	collate := g.sqlKey(e, "collate")
 	if collate != "" {
 		collate = " COLLATE " + collate

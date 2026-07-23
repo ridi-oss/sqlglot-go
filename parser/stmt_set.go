@@ -262,16 +262,131 @@ func (p *Parser) parseSetItemAssignment(kind any) exp.Expression {
 		return nil
 	}
 
-	right := p.parseStatement()
+	right := p.parseSetAssignmentValue()
 	if right == nil {
-		right = p.parseIdVar(true, nil)
-	}
-	if right != nil && (right.Kind() == exp.KindColumn || right.Kind() == exp.KindIdentifier) {
-		right = exp.Var(exp.Args{"this": right.Name()})
+		p.retreat(index)
+		return nil
 	}
 
+	// Postgres allows a single GUC to take a comma-separated VALUE list — `SET search_path = a, b` /
+	// `SET search_path TO "$user", public` — where the comma separates VALUES of the one variable.
+	// (MySQL/base commas separate SET ITEMS, not values, so `SET a = 1, b = 2` is two items; that split
+	// is done by the outer parseCsv, and only Postgres reads a value list here.) Pinned upstream Commands
+	// the multi-value form; this structures it — a grammar extension (ledger id pg-set-multi-value), the
+	// extra values collected in SetItem.expressions with the EQ (LHS + first value) staying in `this` so
+	// a consumer reads the assignment's variable name off EQ→this exactly as for the single-value form.
+	var rest []exp.Expression
+	if p.dialect.Name == "postgres" && p.curr.TokenType == tokens.COMMA {
+		// A comma after the first value means a Postgres single-GUC VALUE list (`SET search_path = a, b`).
+		// Postgres `var_list` admits only simple `var_value`s — an identifier, string, number, boolean, or
+		// signed number — so EVERY element, the first included, must be one. Anything else (an expression
+		// `a + b`, a cast `a::text`, a subquery, the `DEFAULT` keyword, or a second `name = value`
+		// assignment `SET a = 1, b = 2`) is a Postgres SYNTAX error and fails closed to Command rather than
+		// structuring engine-invalid SQL. (`SET x = 1, 2` — all simple values — stays structured: Postgres
+		// parses it and rejects only SEMANTICALLY, "SET x takes only one argument", which is beyond a
+		// parser's GUC-type knowledge.) A dangling/leading/double comma also fails closed.
+		// isPgSetListValue runs on the RAW (un-flattened) value so a DOTTED column (`a.b` / `a."b"`) is
+		// seen and rejected — flattening it to a bare Var first would launder `SET search_path = a.b, c`
+		// (a Postgres syntax error) into the valid-but-different `b, c`.
+		if !isPgSetListValue(right) {
+			p.retreat(index)
+			return nil
+		}
+		for p.match(tokens.COMMA) {
+			v := p.parseSetAssignmentValue()
+			if v == nil || !isPgSetListValue(v) {
+				p.retreat(index)
+				return nil
+			}
+			rest = append(rest, flattenSetValue(v))
+		}
+	}
+	right = flattenSetValue(right)
+
 	this := p.expression(exp.EQ(exp.Args{"this": left, "expression": right}), nil, nil)
-	return p.expression(exp.SetItem(exp.Args{"this": this, "kind": kind}), nil, nil)
+	args := exp.Args{"this": this, "kind": kind}
+	if len(rest) > 0 {
+		args["expressions"] = rest
+	}
+	return p.expression(exp.SetItem(args), nil, nil)
+}
+
+// parseSetAssignmentValue parses one RAW right-hand-side value of a `SET var = value` assignment (also
+// each element of a Postgres comma value list). Mirrors the upstream RHS parse (a full statement — so a
+// subquery `= (SELECT …)` works — else an id/var). It does NOT flatten here: the caller validates the raw
+// value (a Postgres value list rejects a dotted column, which flattening would hide) before rendering it
+// with flattenSetValue.
+func (p *Parser) parseSetAssignmentValue() exp.Expression {
+	v := p.parseStatement()
+	if v == nil {
+		v = p.parseIdVar(true, nil)
+	}
+	return v
+}
+
+// flattenSetValue renders a SET assignment value the way upstream does — an unquoted identifier
+// (Column/Identifier) becomes a bare Var; a DOTTED `a.b` drops its qualifier (lossy but syntactically
+// valid) — with one correctness fix (§1.12): a SINGLE-part QUOTED identifier is preserved verbatim so
+// `SET search_path = "$user"` round-trips to VALID Postgres (upstream flattens it to the invalid bare
+// `$user`, which real Postgres rejects with `syntax error at "$"`). Applied AFTER isPgSetListValue.
+func flattenSetValue(v exp.Expression) exp.Expression {
+	if v != nil && (v.Kind() == exp.KindColumn || v.Kind() == exp.KindIdentifier) && !isQuotedIdentifierExpr(v) {
+		return exp.Var(exp.Args{"this": v.Name()})
+	}
+	return v
+}
+
+// isPgSetListValue reports whether e is a Postgres `var_value` — the only thing allowed as an element of
+// a multi-value `SET var = v1, v2` list: an identifier (`Var`/quoted-identifier `Column`), a string or
+// number `Literal`, a `Boolean` (TRUE/FALSE/ON), or a signed number (`Neg` of a Literal). It rejects an
+// expression (`Add`, `Cast`, …), a subquery, a nested assignment (`EQ`), and the `DEFAULT` keyword (valid
+// only as the sole value `SET x = DEFAULT`, never inside a list) — all Postgres SYNTAX errors in a list.
+func isPgSetListValue(e exp.Expression) bool {
+	switch e.Kind() {
+	case exp.KindLiteral, exp.KindBoolean:
+		return true
+	case exp.KindColumn:
+		// A SINGLE-part identifier only (`"$user"`); a dotted `a."b"` is not a valid Postgres var_value
+		// (syntax error at `.`), so it must not slip into a value list. The unquoted `DEFAULT` keyword
+		// (which parses raw as a single-part Column here, before flattenSetValue) is valid only as the
+		// SOLE value, never in a list — reject it; but a QUOTED `"DEFAULT"` is an ordinary identifier
+		// value that real Postgres accepts (`SET search_path = "DEFAULT", public`), so keep it.
+		return e.Arg("table") == nil && (isQuotedIdentifierExpr(e) || stringsUpper(e.Name()) != "DEFAULT")
+	case exp.KindVar, exp.KindIdentifier:
+		// A bare Identifier is the raw shape parseIdVar returns for a reserved keyword value that
+		// parseStatement can't build into a Column — e.g. `ON` (reserved via `JOIN … ON`), a valid
+		// Postgres `opt_boolean_or_string` var_value (`SET x = ON, a` is accepted, semantic error only).
+		// It carries no qualifier, so no dotted guard is needed; reject only the UNQUOTED DEFAULT keyword
+		// (a quoted `"DEFAULT"` Identifier is a valid identifier name).
+		return isQuotedIdentifierExpr(e) || stringsUpper(e.Name()) != "DEFAULT"
+	case exp.KindNeg:
+		inner, _ := e.Arg("this").(exp.Expression)
+		return inner != nil && inner.Kind() == exp.KindLiteral
+	}
+	return false
+}
+
+// isQuotedIdentifierExpr reports whether e is (or wraps) a quoted identifier — a bare `Identifier` with
+// quoted=true, or a single-part `Column` whose name Identifier is quoted (`"$user"`). Such a value must
+// keep its quotes to round-trip to valid SQL (see parseSetAssignmentValue).
+func isQuotedIdentifierExpr(e exp.Expression) bool {
+	switch e.Kind() {
+	case exp.KindIdentifier:
+		quoted, _ := e.Arg("quoted").(bool)
+		return quoted
+	case exp.KindColumn:
+		// Only a SINGLE-part column is a quoted identifier value. A dotted `a."b"` is NOT valid Postgres
+		// (syntax error at `.`); leave it to the Var-name flattening below (matching upstream/origin-main:
+		// lossy `a."b"` -> `b`, but syntactically valid) rather than preserving the invalid dotted form.
+		if e.Arg("table") != nil {
+			return false
+		}
+		if id, ok := e.Arg("this").(exp.Expression); ok && id.Kind() == exp.KindIdentifier {
+			quoted, _ := id.Arg("quoted").(bool)
+			return quoted
+		}
+	}
+	return false
 }
 
 // parseSetTransaction ports _parse_set_transaction (parser.py:9252-9259).

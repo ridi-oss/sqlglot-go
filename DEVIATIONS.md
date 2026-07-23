@@ -490,6 +490,19 @@ the MySQL base honors the setting; base/postgres already treat `"…"` as an ide
 default. The sibling `NO_BACKSLASH_ESCAPES` mode is **not** modeled yet (it also touches string generation);
 tracked as a follow-up. Regression test `mysql_ansi_quotes_test.go`.
 
+### 1.12 Postgres `SET var = "quoted"` preserves the value's quotes — *fixes an upstream value-mangling bug*
+
+Upstream's `_parse_set_item_assignment` rewrites a quoted-identifier RHS of a `SET` assignment to a **bare**
+`Var` (`right = exp.var(right.name)`), dropping the quotes: `SET search_path = "$user"` → `SET search_path =
+$user`. But the unquoted form is **invalid Postgres** — real PG 17.6 rejects `SET search_path = $user` with
+`ERROR: syntax error at or near "$"` while accepting the quoted `"$user"` (the special "current user's schema"
+element of a search path). So the port keeps a **quoted** identifier value verbatim (`parseSetAssignmentValue` +
+`isQuotedIdentifierExpr` in `parser/stmt_set.go`) and only bare-ifies *unquoted* ones, matching the DB rather
+than upstream. Same-dialect output changes only for a quoted-identifier SET value (the identity corpus has none,
+so no corpus churn); an unquoted value (`SET x = a`) is unaffected. This is the correctness prerequisite for
+structuring the common `SET search_path = "$user", public` (see "Grammar extensions beyond upstream" →
+`pg-set-multi-value`). Regression test `TestPostgresSetMultiValue`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream
@@ -683,6 +696,43 @@ zero-item `Set`); and a comma-combined multi-item Postgres SET (real Postgres SE
 which the server rejects). The extension is Postgres-only; base/MySQL leave these forms as `Command` (MySQL's
 own multi-item `SET a=1, b=2` is unaffected). Verified against PostgreSQL 17.6. Use the stable ledger ids for
 the reconciliation lifecycle.
+
+Ledger id [`pg-set-multi-value`](./testdata/upstream_extensions.jsonl) structures a Postgres single-GUC
+**comma value list** — `SET search_path = a, b` / `SET search_path TO a, b` / `SET x = 1, 2` — which pinned
+upstream Commands. This is a **multi-VALUE** assignment (ONE `SetItem`: the EQ holds the variable + first value
+in `this`, the remaining values in `SetItem.expressions`), distinct from the **multi-ITEM** `SET a = 1, b = 2`
+above (two assignments, which real Postgres rejects — the second `name = value` is a syntax error — and which
+stays fail-closed to `Command`). A value list admits only Postgres `var_value`s (`isPgSetListValue`: an
+identifier, string, number, boolean, or signed number); an element that is an expression (`a + b`), a cast
+(`a::text`), a subquery, the `DEFAULT` keyword (valid only as the sole value, never in a list), or a nested
+`name = value` assignment is a Postgres syntax error and fails closed — so `SET x = a + b, c` /
+`SET search_path = a, DEFAULT` stay `Command`. (The single-value RHS keeps the pre-existing upstream parse,
+which still over-accepts a lone expression/subquery value like `SET x = a + b` — an inherited, fail-safe gap
+for a gating consumer, not introduced or widened by this list feature.) A consumer
+still reads the variable name off `SetItem→EQ→this` exactly as for a single-value assignment, so a value list on
+a privileged GUC alias (`SET role = a, b`) is gated on the LHS name unchanged. The value list is **Postgres-only**
+(base/MySQL commas separate items, not values — `parseSetItemAssignment` only reads a value list under the
+postgres dialect); a trailing/embedded-assignment element fails closed. `SET x = 1, 2` is *syntactically* valid
+Postgres (it structures) even though PG rejects it *semantically* ("SET x takes only one argument") — GUC-type
+knowledge is beyond a parser, and structuring a syntactically-valid statement is faithful to the grammar (a
+gating consumer denies the LHS as usual; PG rejects the non-list value at run time). Depends on §1.12 (quoted
+value preservation) so the common `SET search_path = "$user", public` round-trips (a quoted `"DEFAULT"` is an
+ordinary identifier value and stays, distinct from the bare `DEFAULT` keyword which is rejected in a list). Parser
+value-list branch in `parser/stmt_set.go`; generator fold in `generator/stmt_set.go`. Verified against
+PostgreSQL 17.6. Regression test `TestPostgresSetMultiValue`.
+
+**Fail-safe fidelity gap — bare reserved-keyword values.** `isPgSetListValue` admits any single-part identifier,
+so a *fully-reserved* PostgreSQL keyword used as an unquoted value (`SET search_path = user, public` /
+`order, public`) is over-accepted: real PG rejects it (`USER`/`ORDER`/… can't be a bare `var_value`), but this
+port has **no PostgreSQL reserved-keyword table** to consult — upstream leaves PG's `RESERVED_KEYWORDS` empty
+(only MySQL populates one), and the tokenizer lexes these words as `VAR`. This is fail-safe for a gating consumer
+(the LHS is still read for gating; PG rejects the statement at parse, so it never executes) and pre-exists on the
+single-value path; the list feature widens it to list shape but does not change its class. Two related
+inherited-parse quirks: a bare unparenthesized `SELECT`/`INSERT`/… value (`SET x = select, public`) is swallowed
+whole by the RHS `parseStatement` (comma included, so the list branch never runs) and renders malformed — a
+pre-existing single-value-path artifact (`origin/main` produces the identical output); and an unquoted dotted
+single value (`SET x = a.b`) flattens lossily to `b`. Closing these to strict PG `var_value` purity would require
+modeling PG's reserved-word set (a non-upstream data addition) and is deferred; none is a security gap.
 
 Ledger id [`pg-set-scoped-role`](./testdata/upstream_extensions.jsonl) extends the above to the
 **`SESSION`/`LOCAL`-scoped** privileged forms — `SET [SESSION|LOCAL] ROLE r` and
