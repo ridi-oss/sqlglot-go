@@ -18,6 +18,18 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.17.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.16.0...v0.17.0) (2026-07-23)
+
+
+### Features
+
+* **dialects:** opt-in MySQL sql_mode=ANSI_QUOTES (mysql_ansi_quotes) ([#50](https://github.com/ridi-oss/sqlglot-go/issues/50)) ([6e66a15](https://github.com/ridi-oss/sqlglot-go/commit/6e66a15ca9df77036ddd061a01e0dbbdb517f322))
+
+
+### Bug Fixes
+
+* **parser:** resolve pg_catalog builtin type names in Postgres typed literals ([#51](https://github.com/ridi-oss/sqlglot-go/issues/51)) ([6581a9a](https://github.com/ridi-oss/sqlglot-go/commit/6581a9a7a1dbd3594020df4a1744a52451c8f502))
+
 ## [0.16.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.15.2...v0.16.0) (2026-07-23)
 
 
