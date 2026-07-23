@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.18.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.17.0...v0.18.0) (2026-07-23)
+
+
+### Features
+
+* **parser:** structure MySQL SET ROLE / SET DEFAULT ROLE ([#53](https://github.com/ridi-oss/sqlglot-go/issues/53)) ([3666851](https://github.com/ridi-oss/sqlglot-go/commit/3666851c2bde204fa627e4f474fbe3552aca9bcc))
+
 ## [0.17.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.16.0...v0.17.0) (2026-07-23)
 
 
