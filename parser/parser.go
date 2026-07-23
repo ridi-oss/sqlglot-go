@@ -422,6 +422,12 @@ func (p *Parser) parseStatement() exp.Expression {
 	if p.matchSet(p.dialect.TokenizerConfig.Commands) {
 		return p.parseCommand()
 	}
+	// SAVEPOINT/RELEASE SAVEPOINT are ordinary VAR tokens (not statement keywords), so they are
+	// dispatched here by leading text before the generic expression path would mis-parse them as an
+	// Alias. Returns nil (no consumption) for anything else.
+	if stmt := p.parseSavepointStatement(); stmt != nil {
+		return stmt
+	}
 	return p.parseExpressionStatement()
 }
 

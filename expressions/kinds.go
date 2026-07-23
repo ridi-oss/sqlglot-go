@@ -188,11 +188,12 @@ const (
 	KindJoinHint
 	KindTableColumn
 	KindFinal
-	// The 19 Kinds below close the statement-level parse gaps (SET/SHOW/USE/DESCRIBE/
+	// The 20 Kinds below close the statement-level parse gaps (SET/SHOW/USE/DESCRIBE/
 	// EXPLAIN/BEGIN/COMMIT/ROLLBACK/KILL/LOAD DATA/ANALYZE/GRANT/REVOKE/COMMENT ON/
 	// TRUNCATE, plus PRAGMA): ddl.py:104,121,157,173,181,191,306,385,389,393,426;
-	// query.py:589,609,619,1879; properties.py:16,20; dml.py:281. All are plain
-	// Expression subclasses (no Func/Condition/... mixins), so none get traitsOf rows.
+	// query.py:589,609,619,1879; properties.py:16,20; dml.py:281. KindSavepoint (below,
+	// after KindRollback) is the port's own transaction-control extension (no upstream node).
+	// All are plain Expression subclasses (no Func/Condition/... mixins), so none get traitsOf rows.
 	KindSet
 	KindSetItem
 	KindShow
@@ -203,6 +204,10 @@ const (
 	KindTransaction
 	KindCommit
 	KindRollback
+	// KindSavepoint models `SAVEPOINT name` / `RELEASE [SAVEPOINT] name` transaction-control
+	// statements. Upstream has no such node (it mis-parses SAVEPOINT as an Alias and parse-errors
+	// RELEASE SAVEPOINT); see DEVIATIONS.
+	KindSavepoint
 	KindGrant
 	KindRevoke
 	KindGrantPrivilege
@@ -928,6 +933,7 @@ var argTypes = map[Kind][]argSpec{
 	KindTransaction:    {{"this", false}, {"modes", false}, {"mark", false}},
 	KindCommit:         {{"chain", false}, {"this", false}, {"durability", false}},
 	KindRollback:       {{"savepoint", false}, {"this", false}},
+	KindSavepoint:      {{"this", true}, {"kind", false}},
 	KindGrant:          {{"privileges", true}, {"kind", false}, {"securable", true}, {"principals", true}, {"grant_option", false}},
 	KindRevoke:         {{"privileges", true}, {"kind", false}, {"securable", true}, {"principals", true}, {"grant_option", false}, {"cascade", false}},
 	KindGrantPrivilege: {{"this", true}, {"expressions", false}},
@@ -1727,6 +1733,7 @@ var className = map[Kind]string{
 	KindTransaction:                         "Transaction",
 	KindCommit:                              "Commit",
 	KindRollback:                            "Rollback",
+	KindSavepoint:                           "Savepoint",
 	KindGrant:                               "Grant",
 	KindRevoke:                              "Revoke",
 	KindGrantPrivilege:                      "GrantPrivilege",
