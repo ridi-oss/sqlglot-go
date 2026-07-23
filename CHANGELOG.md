@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.16.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.15.2...v0.16.0) (2026-07-23)
+
+
+### Features
+
+* **parser:** structure session/privilege statements pm reads as raw Command ([#48](https://github.com/ridi-oss/sqlglot-go/issues/48)) ([c76d0ce](https://github.com/ridi-oss/sqlglot-go/commit/c76d0ced4267a4ce02e4fc49b23fbe9d5f1d6770))
+
 ## [0.15.2](https://github.com/ridi-oss/sqlglot-go/compare/v0.15.1...v0.15.2) (2026-07-23)
 
 
