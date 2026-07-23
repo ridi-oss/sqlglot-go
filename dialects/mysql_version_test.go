@@ -64,7 +64,7 @@ func TestMySQLVersionSettingErrors(t *testing.T) {
 		{name: "version id with suffix", dialect: "mysql, mysql_version=80035-log", wantError: "mysql_version"},
 		{name: "trailing dot", dialect: "mysql, mysql_version=8.", wantError: "mysql_version"},
 		{name: "overflow", dialect: "mysql, mysql_version=" + strings.Repeat("9", 100), wantError: "mysql_version"},
-		{name: "unknown setting", dialect: "mysql, future_setting=1", wantError: `unsupported dialect setting "future_setting" (supported: normalization_strategy, mysql_version)`},
+		{name: "unknown setting", dialect: "mysql, future_setting=1", wantError: `unsupported dialect setting "future_setting" (supported: normalization_strategy, mysql_version, mysql_ansi_quotes)`},
 	}
 
 	for _, tt := range tests {
