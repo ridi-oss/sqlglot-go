@@ -47,7 +47,14 @@ type Dialect struct {
 	TokenizerConfig  tokens.TokenizerConfig
 	// MySQLVersion is NON-UPSTREAM tokenizer state (DEVIATIONS.md §1.5): the parsed
 	// MySQL five-digit comparable value. Nil is the default-off sentinel.
-	MySQLVersion             *int
+	MySQLVersion *int
+	// MySQLAnsiQuotes is NON-UPSTREAM, opt-in MySQL tokenizer state (DEVIATIONS): when true, the
+	// MySQL `sql_mode=ANSI_QUOTES` behavior is active — `"` is a QUOTED IDENTIFIER delimiter (like the
+	// backtick), not a string literal (which must then use `'`). Nil/false is the default-off MySQL
+	// behavior (`"` is a string). Set via the `mysql_ansi_quotes` dialect setting; applied by
+	// applyMySQLAnsiQuotes (dialects/mysql.go) at settings-resolution time. Mutable per statement on
+	// the real server, so a consumer re-resolves the dialect when the backend's live sql_mode changes.
+	MySQLAnsiQuotes          *bool
 	NormalizationStrategy    NormalizationStrategy
 	DPipeIsStringConcat      bool
 	StrictStringConcat       bool
@@ -600,6 +607,18 @@ func dialectByName(name string) (*Dialect, error) {
 
 // parseNormalizationStrategy maps a canonical strategy name (case-insensitive; the
 // upstream UPPER_SNAKE spellings, plus this port's two MySQL strategies) to the enum.
+// parseSettingBool parses a boolean dialect-setting value (`true`/`false`/`1`/`0`, case-insensitive).
+func parseSettingBool(key, v string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "on":
+		return true, nil
+	case "false", "0", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("dialect setting %q wants a boolean (true/false), got %q", key, v)
+	}
+}
+
 func parseNormalizationStrategy(v string) (NormalizationStrategy, error) {
 	switch strings.ToUpper(strings.TrimSpace(v)) {
 	case "LOWERCASE":
@@ -758,9 +777,24 @@ func getOrRaiseString(name string) (*Dialect, error) {
 				return nil, err
 			}
 			d.MySQLVersion = &version
+		case "mysql_ansi_quotes":
+			if !hasVal {
+				return nil, fmt.Errorf("dialect setting %q requires a value", key)
+			}
+			on, err := parseSettingBool(key, val)
+			if err != nil {
+				return nil, err
+			}
+			d.MySQLAnsiQuotes = &on
 		default:
-			return nil, fmt.Errorf("unsupported dialect setting %q (supported: normalization_strategy, mysql_version)", key)
+			return nil, fmt.Errorf("unsupported dialect setting %q (supported: normalization_strategy, mysql_version, mysql_ansi_quotes)", key)
 		}
+	}
+	// Apply the ANSI_QUOTES tokenizer change once, from the FINAL flag value — a duplicated setting
+	// (`mysql_ansi_quotes=true, …=false`) must land on last-value-wins, not eagerly mutate on the first
+	// `true` and leave stale identifier state behind.
+	if d.MySQLAnsiQuotes != nil && *d.MySQLAnsiQuotes {
+		applyMySQLAnsiQuotes(d)
 	}
 	return d, nil
 }

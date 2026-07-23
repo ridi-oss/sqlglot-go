@@ -457,6 +457,34 @@ the `parseUserDefinedType` postgres branch); regression test `parser/parser_type
 USER-DEFINED `DataType`, not a `Command`/parse error), so this is a §1 correctness divergence, not a
 grammar-extension ledger row — if upstream later resolves it too, the tests still pass.
 
+### 1.11 MySQL `sql_mode=ANSI_QUOTES` activation (opt-in, `mysql_ansi_quotes`) — *the one that changes what `"…"` means*
+
+**What upstream does:** pinned sqlglot v30.12.0 has no MySQL `ANSI_QUOTES` support — the MySQL dialect always
+treats `"…"` as a **string literal** (`MYSQL … Quotes` includes `"`), matching MySQL's *default* `sql_mode`.
+
+**What sqlglot-go does:** an **opt-in** dialect setting — `mysql_ansi_quotes=true` in the settings string
+(`GetOrRaise("mysql, mysql_ansi_quotes=true")`) — activates MySQL's `sql_mode=ANSI_QUOTES` behavior: `"…"` is a
+**quoted IDENTIFIER** delimiter (alongside the backtick), and a string literal must then use `'…'`. Leaving it
+unset (or `false`) preserves the default MySQL behavior and full corpus parity. Verified against MySQL 8.0.33:
+under `SET sql_mode='ANSI_QUOTES'`, `SELECT "x"` reads column `x` (error 1054 if absent), while `SELECT 'x'`
+is the string; the backtick works in both modes.
+
+**Why it matters (security).** A name-based analyzer that parses in the *wrong* mode silently misreads column
+references: `SELECT "card_number" FROM payments` under `ANSI_QUOTES` selects the **column**, but parsed in
+default mode `"card_number"` is a harmless string literal — so a masked-read gate parsing in the wrong mode
+never sees the column and leaks cleartext. Because `sql_mode` is **mutable per session** (unlike the server
+version), a consumer forwards the backend's live `sql_mode` and re-resolves the dialect when it changes.
+
+**Parse-only; the generator is already ANSI_QUOTES-valid.** The change moves `"` from the tokenizer's `Quotes`
+map to its `Identifiers` map (`applyMySQLAnsiQuotes` in `dialects/mysql.go`, re-compiling the config). The
+generator needs **no** change: it already emits strings with `'` (`QuoteStart`) and identifiers with the
+backtick, both valid under `ANSI_QUOTES` — so a `"col"` parsed under `ANSI_QUOTES` round-trips to `` `col` ``
+(a backtick identifier, semantically identical and valid in *every* sql_mode; verified on MySQL 8.0.33). Only
+the MySQL base honors the setting; base/postgres already treat `"…"` as an identifier, so it is a no-op there.
+`mysql_ansi_quotes` is a NON-UPSTREAM tokenizer setting like `mysql_version` (§1.5) and is likewise off by
+default. The sibling `NO_BACKSLASH_ESCAPES` mode is **not** modeled yet (it also touches string generation);
+tracked as a follow-up. Regression test `mysql_ansi_quotes_test.go`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream

@@ -2,11 +2,44 @@ package dialects
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/tokens"
 )
+
+// applyMySQLAnsiQuotes rewrites the dialect's tokenizer config for MySQL `sql_mode=ANSI_QUOTES`: `"`
+// stops being a string quote and becomes a QUOTED IDENTIFIER delimiter (alongside the backtick),
+// exactly as the real server does (verified MySQL 8.0.33: under ANSI_QUOTES `SELECT "x"` reads column
+// `x`, and a string literal must use `'`). Only the PARSE side changes — the generator already emits
+// strings with `'` (QuoteStart) and identifiers with the backtick, both valid under ANSI_QUOTES, so a
+// re-generated statement is correct in that mode with no generator change. No-op for a non-MySQL base
+// (base/postgres already treat `"` as a quoted identifier). See DEVIATIONS.
+func applyMySQLAnsiQuotes(d *Dialect) {
+	if d.Name != "mysql" {
+		return
+	}
+	cfg := d.TokenizerConfig
+	// Clone the maps we mutate so a shared/cached config can never be disturbed.
+	cfg.Quotes = maps.Clone(cfg.Quotes)
+	cfg.Identifiers = maps.Clone(cfg.Identifiers)
+	cfg.FormatStrings = maps.Clone(cfg.FormatStrings)
+	cfg.StringEscapes = maps.Clone(cfg.StringEscapes)
+
+	delete(cfg.Quotes, `"`)         // `"` is no longer a string literal,
+	delete(cfg.FormatStrings, `n"`) // nor the base for the N"…" national-string forms
+	delete(cfg.FormatStrings, `N"`) // that compileConfig derives from a `"` quote,
+	cfg.Identifiers['"'] = `"`      // it is a quoted-identifier delimiter instead;
+	// and it is no longer a string escape either — MySQL adds `"` to StringEscapes for `""`-doubling
+	// INSIDE a `"`-string (default mode), but under ANSI_QUOTES there are no `"`-strings, so leaving it
+	// would make a `"` before a closing `'` wrongly escape the terminator (`SELECT '\n"'` fails to
+	// tokenize). Doubling inside a `"`-IDENTIFIER (`"a""b"`) is handled by the identifier scanner, not
+	// this map.
+	delete(cfg.StringEscapes, '"')
+
+	d.TokenizerConfig = tokens.CompileConfig(cfg) // rebuild the keyword trie + re-derive
+}
 
 // parseMySQLVersion parses the mysql_version setting into MySQL's MYSQL_VERSION_ID —
 // the comparable integer major*10000 + minor*100 + patch (e.g. 80035 for MySQL 8.0.35).
