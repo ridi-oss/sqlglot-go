@@ -81,6 +81,12 @@ func MySQL() *Dialect {
 	d.ValuesFollowedByParen = false
 	// parsers/mysql.py:304 SUPPORTS_PARTITION_SELECTION = True: allow `FROM t PARTITION(p0)`.
 	d.SupportsPartitionSelection = true
+	// parsers/mysql.py:302 STRING_ALIASES = True: fold a trailing string into an identifier
+	// alias in parseAlias, e.g. `SELECT 1 'x'` -> SELECT 1 AS `x` (base/postgres reject it).
+	d.StringAliases = true
+	// Real MySQL 8.0.33 rejects a bare string as a table name (`FROM 'foo'`) or table alias
+	// (`FROM t 'x'`), even though it accepts the projection string alias above; see the field doc.
+	d.StringTableIdentifiers = false
 	// generators/mysql.py:339 RESERVED_KEYWORDS: quote reserved words used as identifiers
 	// (e.g. `SELECT 1 AS row` -> SELECT 1 AS `row`). See dialects/mysql_reserved.go.
 	d.ReservedKeywords = mysqlReservedKeywords

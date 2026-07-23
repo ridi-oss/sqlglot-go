@@ -271,6 +271,26 @@ type Dialect struct {
 	// PARTITION(...) selector, e.g. `SELECT * FROM t1 PARTITION(p0)`. MySQL overrides to True
 	// (parsers/mysql.py:304); base/postgres leave it False.
 	SupportsPartitionSelection bool
+	// StringAliases ports the parser flag STRING_ALIASES (parser.py:1780, default False):
+	// whether a trailing string constant is folded into an identifier alias in _parse_alias,
+	// e.g. the SELECT projection `SELECT 1 'x'` -> `SELECT 1 AS "x"` (parser.py:8490-8492).
+	// MySQL/tsql/sqlite override to True (parsers/mysql.py:302, tsql.py:324, sqlite.py:19);
+	// base/postgres leave it False, so `SELECT 1 'x'` fails closed there - matching both
+	// upstream and the real engines (PG rejects it, MySQL accepts it). This gates only the
+	// projection/expression alias in parseAlias; the table-name and table-alias string forms
+	// are gated separately by StringTableIdentifiers below.
+	StringAliases bool
+	// StringTableIdentifiers gates whether a bare string constant may stand in for a table NAME
+	// (`FROM 'foo'`) or table ALIAS (`FROM t 'x'`) - _parse_table_part (parser.py:4668) and
+	// _parse_table_alias (parser.py:4111), both of which upstream calls UNCONDITIONALLY (there is
+	// no upstream flag for this). This port-introduced per-dialect gate defaults True (accept,
+	// matching upstream's permissive default so base + the presto/trino/hive/athena partial
+	// dialects are unchanged) but is False for postgres and mysql, whose real engines BOTH reject a
+	// bare string in either position (verified PG 17.6 / MySQL 8.0.33) - a §1 correctness deviation
+	// (follow the engine, not upstream). NB this is orthogonal to StringAliases: MySQL accepts the
+	// projection string alias `SELECT 1 'x'` (StringAliases=True) yet rejects the table forms
+	// (StringTableIdentifiers=False).
+	StringTableIdentifiers bool
 	// ReservedKeywords ports the generator class var RESERVED_KEYWORDS (generator.py:790,
 	// empty for base/postgres; generators/mysql.py:339 for MySQL): unquoted identifiers whose
 	// lowercased name is in this set are quoted on generation (identifier_sql, generator.py:
@@ -322,6 +342,9 @@ func Base() *Dialect {
 		ValidIntervalUnits:       validIntervalUnits(datePartMapping),
 		SupportsUserDefinedTypes: true,
 		SupportsFixedSizeArrays:  false,
+		// Accept a bare string as a table name/alias by default (upstream is unconditional here);
+		// postgres/mysql override to false to match their real engines. See the field doc.
+		StringTableIdentifiers: true,
 		// dialect.py:664 SUPPORTS_LIMIT_ALL = False (base); postgres (dialects/postgres.py) and
 		// presto (dialects/presto.py:25) both override to True.
 		SupportsLimitAll: false,

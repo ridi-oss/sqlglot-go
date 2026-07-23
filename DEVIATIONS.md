@@ -330,6 +330,51 @@ stmt_transaction.go` (`savepointSQL`); regression test `savepoint_test.go`. The 
 form, which pinned upstream parse-errors, is additionally registered in
 `testdata/upstream_extensions.jsonl` (`release-savepoint`) with a tripwire.
 
+### 1.9 Postgres/MySQL reject a bare string as a table name or table alias
+
+**What upstream does:** pinned sqlglot v30.12.0 calls `_parse_string_as_identifier` **unconditionally** in
+`_parse_table_part` (`parser.py:4668`) and `_parse_table_alias` (`parser.py:4111`) — there is no flag — so
+`SELECT * FROM 'foo'` folds the string into a table name and `SELECT * FROM t 'x'` folds it into a table
+alias, in *every* dialect. Verified on the pinned reference (base/postgres/mysql all accept both). This is
+separate from the projection string-alias `STRING_ALIASES` gate (the `Dialect.StringAliases` flag): that one only
+governs `_parse_alias`.
+
+**What sqlglot-go does:** a bare string is accepted as a table name/alias only when the dialect's
+`StringTableIdentifiers` flag is true. It defaults **true** (accept — matching upstream's unconditional
+behavior, so base and the presto/trino/hive/athena partial dialects are unchanged), but is **false** for
+postgres and mysql, so `SELECT * FROM 'foo'` and `SELECT * FROM t 'x'` fail closed there. Ordinary
+identifier and `AS`/space-aliased tables (`FROM t`, `FROM t AS x`, `FROM t x`) are unaffected.
+
+**How it fails closed (two shapes).** For a `SELECT`/`UPDATE`/`DELETE`/`INSERT`/`DROP`/`TRUNCATE`/`ALTER`/
+`COMMENT ON` statement the rejected string table part is a hard **parse error** (`ParseOne` returns an
+error), because those paths have no error isolation. `CREATE`-family DDL and `GRANT`/`REVOKE`, however, wrap
+their structured parse in `tryParse` and degrade to a raw-text `exp.Command` on *any* internal failure — so
+`CREATE TABLE 'foo' (a INT)`, `CREATE VIEW 'foo' AS …`, and `GRANT SELECT ON 'foo' TO bob` become a
+verbatim, unexecutable `Command` rather than a parse error. Both shapes are **fail closed** for a consumer
+that rejects unparsed statements and opaque `Command` nodes (the port's standard "not structurally modelled"
+node). Note the `Command` shape is a net improvement over the pre-flag behavior, which folded the string
+into a real `Table` and thereby **normalized invalid SQL into a valid statement** (`CREATE TABLE "foo"`) — a
+`Command` preserves the raw, still-invalid text instead. A tree-walking consumer must therefore treat a
+`Command` as deny, not as "no tables found"; this matches how the port already surfaces other unmodelled
+statements (e.g. `SHOW CREATE USER`).
+
+**Why we diverge (correctness):** real PostgreSQL and MySQL both reject a bare string constant in
+table-name or table-alias position (a table name/alias is an identifier, not a string literal); upstream's
+unconditional fold is a permissive over-accept that rewrites invalid SQL into a different, executable
+statement (`FROM t AS "x"` / `FROM "foo"`). An AST consumer needs the invalid form to fail closed, not be
+normalized. This is orthogonal to the projection string-alias gate: **MySQL accepts** the projection `SELECT 1 'x'`
+(`StringAliases=true`) yet **rejects** the table forms (`StringTableIdentifiers=false`) — the two flags are
+independent. Base keeps upstream's accept (no real-engine reference). Verified against PostgreSQL 17.6 and
+MySQL 8.0.33 (both reject `FROM 'foo'` and `FROM t 'x'`). Implemented in `dialects/dialect.go`
+(`StringTableIdentifiers`, default true; postgres/mysql false) and the two gated call sites in
+`parser/parser.go`; regression test `parser/string_aliases_test.go` (`TestStringTableIdentifiersFlag`).
+
+**Out of scope (a separate pre-existing quirk, like the projection `AS '…'` case above):** an *explicit*
+`AS` + string table alias — `SELECT * FROM t AS 'x'` — is still accepted for both dialects. This gate only
+wraps the no-`AS` string fallback in `_parse_table_alias`; the `AS` form goes through `parseIdVar`'s
+`advanceAny` path (which absorbs any token, including a `STRING`, whenever `AS` was matched) and is unchanged
+here, matching pinned upstream even though real PG/MySQL reject it. A follow-up could gate that path too.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream
@@ -601,18 +646,26 @@ case — the coercion is detectable as a `DataType` wherever it hides, not only 
 after the literal are re-applied to the `Cast`, and a trailing alias (`<type> 'x' AS bar` / `<type> 'x' bar`)
 is then handled by ordinary alias parsing.
 
-This also corrects a pre-existing port divergence: sqlglot-go's `parseAlias` calls `parseStringAsIdentifier`
-**unconditionally**, whereas upstream gates the string-as-alias behind `STRING_ALIASES` — `False` for
-base/postgres (`parser.py:1780`), overridden to `True` only by mysql/tsql/sqlite (`parsers/mysql.py:302`
-et al.). So the port previously accepted `public.evil_domain 'x'` as a string **alias** and round-tripped it
-to a *different* statement (`… AS "x"`). The **implicit** (no-`AS`) Postgres string-alias is now closed: a
-trailing string that is not a typed literal (`SELECT 1 'x'`, or a second string as in `public.foo 'a' 'b'`)
-fails closed. (The **explicit** `AS '…'` form — `SELECT 1 AS 'x'` — is a separate, pre-existing quirk: it
-still parses as a quoted-identifier `Alias` via `parseIdVar`'s any-token path, matching pinned upstream, even
-though real PG rejects it; that path is unchanged here and out of scope.) MySQL/base keep their
-string-as-identifier alias unchanged — MySQL's `SELECT 1 'x'` is a real string alias matching its
-`STRING_ALIASES = True`, so the port's existing unconditional handling is already correct there; the general
-non-Postgres `STRING_ALIASES` port is out of scope.
+This also corrects a pre-existing port divergence: sqlglot-go's `parseAlias` previously called
+`parseStringAsIdentifier` **unconditionally**, whereas upstream gates the string-as-alias behind
+`STRING_ALIASES` — `False` for base/postgres (`parser.py:1780`), overridden to `True` only by
+mysql/tsql/sqlite (`parsers/mysql.py:302` et al.). So the port previously accepted `public.evil_domain 'x'`
+as a string **alias** and round-tripped it to a *different* statement (`… AS "x"`). `STRING_ALIASES` is now
+ported as a proper per-dialect flag (`Dialect.StringAliases`, default `False`, set `True` for MySQL), and
+`parseAlias`'s string-as-alias call is gated by it — so the **implicit** (no-`AS`) string-alias fails closed
+for **both base and postgres**: a trailing string that is not a typed literal (`SELECT 1 'x'`, or a second
+string as in `public.foo 'a' 'b'`) is an unexpected token, matching upstream base + postgres (both raise)
+and the real engines (PostgreSQL rejects it; MySQL — `STRING_ALIASES = True` — accepts it, folding the
+string into a backtick-quoted identifier alias). (The **explicit** `AS '…'` form — `SELECT 1 AS 'x'` — is a
+separate, pre-existing quirk: it still parses as a quoted-identifier `Alias` via `parseIdVar`'s any-token
+path, matching pinned upstream, even though real PG rejects it; that path is unchanged here and out of
+scope.) This flag gates only the **projection/expression** alias (`parseAlias`); the string-as-identifier for
+a table **name** (`_parse_table_part`, `parser.py:4668`) and a table **alias** (`_parse_table_alias`,
+`parser.py:4111`) are unconditional upstream — not gated by `STRING_ALIASES` — and are handled by a separate
+per-dialect flag, `Dialect.StringTableIdentifiers` (base keeps upstream's accept; postgres/mysql reject, since
+their real engines do). See **§1.9** for that gate; the closing of the base/postgres *projection* string-alias
+divergence here needs no new §1 entry (gated base/postgres now match upstream), but the *table* forms do
+diverge from upstream to match the engines and are tracked as §1.9.
 
 The type name is validated structurally as a real identifier chain — a `Dot` built by postfix
 `.field`/`.*`/`[…]` access over an arbitrary base (`(t2.a).city`, `foo().bar`, `arr[1].foo`, `t.*`) is

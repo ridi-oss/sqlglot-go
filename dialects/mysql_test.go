@@ -25,6 +25,23 @@ func TestMySQLConfigAndTokenizer(t *testing.T) {
 	if d.DPipeIsStringConcat || d.SupportsUserDefinedTypes || !d.SafeDivision {
 		t.Fatalf("dialect flags: DPipeIsStringConcat=%v SupportsUserDefinedTypes=%v SafeDivision=%v", d.DPipeIsStringConcat, d.SupportsUserDefinedTypes, d.SafeDivision)
 	}
+	// parsers/mysql.py:302 STRING_ALIASES = True (base/postgres leave it False, parser.py:1780).
+	if !d.StringAliases {
+		t.Fatalf("MySQL StringAliases = false, want true (parsers/mysql.py:302)")
+	}
+	if dialects.Base().StringAliases || dialects.Postgres().StringAliases {
+		t.Fatalf("base/postgres StringAliases must default false (parser.py:1780): base=%v postgres=%v",
+			dialects.Base().StringAliases, dialects.Postgres().StringAliases)
+	}
+	// StringTableIdentifiers: base accepts a bare string table name/alias (upstream default), but
+	// postgres/mysql reject it (real engines reject `FROM 'foo'` / `FROM t 'x'`).
+	if !dialects.Base().StringTableIdentifiers {
+		t.Fatalf("base StringTableIdentifiers = false, want true (upstream unconditional default)")
+	}
+	if d.StringTableIdentifiers || dialects.Postgres().StringTableIdentifiers {
+		t.Fatalf("mysql/postgres StringTableIdentifiers must be false (real engines reject): mysql=%v postgres=%v",
+			d.StringTableIdentifiers, dialects.Postgres().StringTableIdentifiers)
+	}
 	if d.QuoteStart != "'" || d.QuoteEnd != "'" || d.IdentifierStart != "`" || d.IdentifierEnd != "`" {
 		t.Fatalf("delimiters = quote %q/%q identifier %q/%q", d.QuoteStart, d.QuoteEnd, d.IdentifierStart, d.IdentifierEnd)
 	}

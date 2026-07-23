@@ -1117,8 +1117,12 @@ func (p *Parser) parseTablePart(schema bool) exp.Expression {
 	if expression := p.parseIdVar(false, nil); expression != nil {
 		return expression
 	}
-	if expression := p.parseStringAsIdentifier(); expression != nil {
-		return expression
+	// A bare string as a table NAME (`FROM 'foo'`) is unconditional upstream but rejected by real
+	// PostgreSQL/MySQL, so it is gated by the dialect (see Dialect.StringTableIdentifiers).
+	if p.dialect.StringTableIdentifiers {
+		if expression := p.parseStringAsIdentifier(); expression != nil {
+			return expression
+		}
 	}
 	return p.parsePlaceholder()
 }
@@ -1141,7 +1145,9 @@ func (p *Parser) parseTableAlias(aliasTokensArg map[tokens.TokenType]bool) exp.E
 		toks = tableAliasTokens
 	}
 	alias := p.parseIdVar(anyToken, toks)
-	if alias == nil {
+	if alias == nil && p.dialect.StringTableIdentifiers {
+		// A bare string as a table ALIAS (`FROM t 'x'`) is unconditional upstream but rejected by
+		// real PostgreSQL/MySQL, so it is gated by the dialect (see Dialect.StringTableIdentifiers).
 		alias = p.parseStringAsIdentifier()
 	}
 	var columns []exp.Expression
@@ -2372,17 +2378,16 @@ func (p *Parser) parseAlias(this exp.Expression, explicit bool) exp.Expression {
 		return aliases
 	}
 	alias := p.parseIdVar(anyToken, aliasTokens)
-	if alias == nil {
-		// Postgres has no string aliases (its STRING_ALIASES is false, and real PG rejects both
-		// `SELECT 1 'x'` and `SELECT 1 AS 'x'` with a syntax error), so a trailing string is never
-		// folded into an identifier alias there — it is left for the caller to reject. Other dialects
-		// keep the string-as-identifier alias (MySQL/tsql/sqlite override STRING_ALIASES to true).
-		// The postgres user-type space typed-literal `<type-name> 'string'` is recognized earlier, at
-		// the primary-expression level (parseAtom → pgTypedLiteralCast), so it never reaches here as a
-		// name+string; the general non-postgres STRING_ALIASES port is out of scope.
-		if p.dialect.Name != "postgres" {
-			alias = p.parseStringAsIdentifier()
-		}
+	if alias == nil && p.dialect.StringAliases {
+		// STRING_ALIASES (parser.py:8490-8492): only dialects with the flag set fold a trailing
+		// string constant into an identifier alias here. Base/postgres leave it false, so a
+		// trailing string is never absorbed and is left for the caller to reject — matching both
+		// upstream (base + postgres raise on `SELECT 1 'x'`) and the real engines (PG rejects it,
+		// MySQL — STRING_ALIASES=true, parsers/mysql.py:302 — accepts it, folding the string into a
+		// backtick-quoted identifier alias). The postgres user-type space typed-literal
+		// `<type-name> 'string'` is recognized earlier, at the primary-expression level (parseAtom →
+		// pgTypedLiteralCast), so it never reaches here as a name+string.
+		alias = p.parseStringAsIdentifier()
 	}
 	if alias != nil {
 		comments = append(comments, alias.PopComments()...)
