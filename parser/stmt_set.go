@@ -389,14 +389,20 @@ func isQuotedIdentifierExpr(e exp.Expression) bool {
 	return false
 }
 
-// parseSetTransaction ports _parse_set_transaction (parser.py:9252-9259).
+// parseSetTransaction ports _parse_set_transaction (parser.py:9252-9259). The mode set is
+// dialect-scoped: Postgres additionally accepts `[NOT] DEFERRABLE` (pgTransactionCharacteristics), which
+// MySQL/base reject — so this is NOT in the shared table (see sets_statements.go).
 func (p *Parser) parseSetTransaction(global bool) exp.Expression {
 	p.matchTextSeq("TRANSACTION")
-	characteristics := p.parseCsv(func() exp.Expression {
-		return p.parseVarFromOptions(transactionCharacteristics, true)
+	characteristics := transactionCharacteristics
+	if p.dialect.Name == "postgres" {
+		characteristics = pgTransactionCharacteristics
+	}
+	modes := p.parseCsv(func() exp.Expression {
+		return p.parseVarFromOptions(characteristics, true)
 	})
 	return p.expression(exp.SetItem(exp.Args{
-		"expressions": characteristics,
+		"expressions": modes,
 		"kind":        "TRANSACTION",
 		"global_":     global,
 	}), nil, nil)

@@ -51,6 +51,11 @@ func TestPostgresSetSpecialForms(t *testing.T) {
 		{"SET CONSTRAINTS public.foo DEFERRED", "CONSTRAINTS"}, // schema-qualified name
 		{"SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE", "SESSION CHARACTERISTICS"},
 		{"SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE", "SESSION CHARACTERISTICS"},
+		// [NOT] DEFERRABLE is a valid Postgres transaction_mode (upstream omits it from its table, so it
+		// Commands the form); modeled here so a consumer's uniform PG-SET fail-close doesn't false-deny it.
+		{"SET SESSION CHARACTERISTICS AS TRANSACTION DEFERRABLE", "SESSION CHARACTERISTICS"},
+		{"SET SESSION CHARACTERISTICS AS TRANSACTION NOT DEFERRABLE", "SESSION CHARACTERISTICS"},
+		{"SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY, DEFERRABLE", "SESSION CHARACTERISTICS"}, // comma-separated modes
 	}
 	for _, tc := range cases {
 		t.Run(tc.sql, func(t *testing.T) {
@@ -159,19 +164,18 @@ func TestPostgresSetFailClosedAndRegressions(t *testing.T) {
 	// as do the SESSION/LOCAL-scoped variants this extension deliberately does not model.
 	t.Run("malformed and unmodeled forms fail closed", func(t *testing.T) {
 		for _, sql := range []string{
-			"SET ROLE",                                              // missing role
-			"SET TIME ZONE",                                         // missing value
-			"SET SESSION AUTHORIZATION",                             // missing user
-			"SET CONSTRAINTS ALL",                                   // missing mode
-			"SET SESSION TIME ZONE 'UTC'",                           // scoped TIME ZONE stays unmodeled (benign)
-			"SET CONSTRAINTS ALL GARBAGE",                           // mode not DEFERRED/IMMEDIATE
-			"SET SESSION CHARACTERISTICS READ ONLY",                 // missing AS TRANSACTION
-			"SET SESSION CHARACTERISTICS AS TRANSACTION",            // missing mode
-			"SET SESSION CHARACTERISTICS AS TRANSACTION DEFERRABLE", // unmodeled characteristic (no crash)
-			"SET NAMES 'utf8' COLLATE 'x'",                          // COLLATE is not valid Postgres SET NAMES
-			"SET NAMES utf8",                                        // unquoted charset is invalid Postgres
-			"SET TIME ZONE 'UTC', ROLE admin",                       // comma-combined multi-item (Postgres rejects)
-			"SET a = 1, b = 2",                                      // multi-item Postgres SET
+			"SET ROLE",                                   // missing role
+			"SET TIME ZONE",                              // missing value
+			"SET SESSION AUTHORIZATION",                  // missing user
+			"SET CONSTRAINTS ALL",                        // missing mode
+			"SET SESSION TIME ZONE 'UTC'",                // scoped TIME ZONE stays unmodeled (benign)
+			"SET CONSTRAINTS ALL GARBAGE",                // mode not DEFERRED/IMMEDIATE
+			"SET SESSION CHARACTERISTICS READ ONLY",      // missing AS TRANSACTION
+			"SET SESSION CHARACTERISTICS AS TRANSACTION", // missing mode
+			"SET NAMES 'utf8' COLLATE 'x'",               // COLLATE is not valid Postgres SET NAMES
+			"SET NAMES utf8",                             // unquoted charset is invalid Postgres
+			"SET TIME ZONE 'UTC', ROLE admin",            // comma-combined multi-item (Postgres rejects)
+			"SET a = 1, b = 2",                           // multi-item Postgres SET
 		} {
 			e, err := sqlglot.ParseOne(sql, "postgres")
 			if err != nil {
@@ -298,5 +302,42 @@ func TestPostgresSetMultiValue(t *testing.T) {
 	e, err := sqlglot.ParseOne("SET a = 1, b = 2", "mysql")
 	if err != nil || e.Kind() != exp.KindSet || len(e.Expressions()) != 2 {
 		t.Errorf("mysql SET a = 1, b = 2: want 2-item Set (comma = item separator), got %v / %d items", err, len(e.Expressions()))
+	}
+}
+
+// [NOT] DEFERRABLE is a Postgres-only transaction_mode: it structures under the postgres dialect
+// (SET TRANSACTION and SET SESSION CHARACTERISTICS), but MySQL/base reject it (`SET TRANSACTION
+// DEFERRABLE` is ERROR 1064 on MySQL 8.0) — so it must NOT leak into their shared transaction-mode set
+// via the copied SET parsers. (Regression guard for the dialect-scoped pgTransactionCharacteristics.)
+func TestTransactionDeferrableDialectScoped(t *testing.T) {
+	// Postgres: SET TRANSACTION [NOT] DEFERRABLE structures and round-trips.
+	for _, tc := range []struct{ sql, kind string }{
+		{"SET TRANSACTION DEFERRABLE", "TRANSACTION"},
+		{"SET TRANSACTION NOT DEFERRABLE", "TRANSACTION"},
+		{"SET TRANSACTION READ ONLY, DEFERRABLE", "TRANSACTION"},
+	} {
+		e, err := sqlglot.ParseOne(tc.sql, "postgres")
+		if err != nil {
+			t.Errorf("postgres %q: %v", tc.sql, err)
+			continue
+		}
+		if e.Kind() != exp.KindSet || e.Expressions()[0].Text("kind") != tc.kind {
+			t.Errorf("postgres %q: want Set kind=%q\n%s", tc.sql, tc.kind, e.ToS())
+		}
+		if out, _ := sqlglot.Generate(e, "postgres", generator.Options{}); out != tc.sql {
+			t.Errorf("postgres %q: round-trip = %q", tc.sql, out)
+		}
+	}
+
+	// MySQL / base: DEFERRABLE is not a valid transaction mode — it must NOT structure into a
+	// SetItem{kind:"TRANSACTION"} (MySQL rejects the SQL). It's fine to be a parse error or a Command;
+	// what's not fine is a clean structured Set that misrepresents engine-invalid SQL as valid.
+	for _, d := range []string{"mysql", ""} {
+		for _, sql := range []string{"SET TRANSACTION DEFERRABLE", "SET TRANSACTION NOT DEFERRABLE"} {
+			e, err := sqlglot.ParseOne(sql, d)
+			if err == nil && e.Kind() == exp.KindSet {
+				t.Errorf("[%s] %q leaked into a structured Set (MySQL rejects it)\n%s", d, sql, e.ToS())
+			}
+		}
 	}
 }

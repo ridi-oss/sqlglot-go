@@ -666,9 +666,19 @@ Values are modeled fully — `TIME ZONE` accepts a string, a signed number, a ba
 *quoted* `"ALL"` stays a specific constraint name so round-trip can't broaden it to every constraint) or a
 comma-separated list of (optionally schema-qualified) constraint names in `expressions`, and the
 `DEFERRED`/`IMMEDIATE` mode (validated against exactly those two words) in `this`; `SESSION CHARACTERISTICS`
-requires `AS TRANSACTION` and reuses the shared transaction-mode options (a characteristic outside that
-set — e.g. `DEFERRABLE`, or `READ UNCOMMITTED`, which the shared upstream-ported table blocks via a
-typo in its `READ UNCOMMITTED` entry — fails closed to `Command` rather than raising); `NAMES` takes a string literal,
+requires `AS TRANSACTION` and uses a **Postgres-only** transaction-mode set (`pgTransactionCharacteristics`)
+that **extends upstream** with the valid Postgres `[NOT] DEFERRABLE` transaction_mode (upstream's
+`TRANSACTION_CHARACTERISTICS` omits it, so `SET SESSION CHARACTERISTICS AS TRANSACTION DEFERRABLE` Commands
+there and `SET TRANSACTION DEFERRABLE` raises "Unknown option"; a consumer's uniform PG-SET fail-close would
+false-deny the benign form). Ledger id `pg-set-transaction-deferrable`. The DEFERRABLE mode is kept OUT of the
+dialect-shared `transactionCharacteristics` (used by the base/MySQL `SET TRANSACTION` path via the copied SET
+parsers) because MySQL/base reject it — `SET TRANSACTION DEFERRABLE` is ERROR 1064 on MySQL; `parseSetTransaction`
+selects `pgTransactionCharacteristics` only under the postgres dialect. A characteristic still outside the (now-extended) set — e.g.
+`READ UNCOMMITTED`, which the shared table blocks via a typo in its `READ UNCOMMITTED` entry — fails closed to
+`Command` rather than raising. **Known limitation:** the mode list is parsed comma-separated (`parseCsv`, 1:1
+with upstream `_parse_set_transaction`), so a **space**-separated multi-mode (`… READ ONLY DEFERRABLE`, valid PG)
+degrades to `Command` — an upstream-shared gap; the comma form (`… READ ONLY, DEFERRABLE`) structures. `NAMES`
+takes a string literal,
 `DEFAULT`, or nothing (and, unlike MySQL's, no `COLLATE` — an unquoted charset is invalid Postgres and fails
 closed). The parsers live in `parser/dialect_postgres_set.go` (dispatched via a
 Postgres-specific `SET_PARSERS` table; `SESSION AUTHORIZATION`/`SESSION CHARACTERISTICS` are disambiguated

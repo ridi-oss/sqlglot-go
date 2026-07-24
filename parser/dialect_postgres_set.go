@@ -124,9 +124,10 @@ func (p *Parser) parseConstraintName() exp.Expression {
 }
 
 // parseSetSessionCharacteristics ports `SET SESSION CHARACTERISTICS AS TRANSACTION
-// transaction_mode [, ...]` (benign). "SESSION CHARACTERISTICS" is already consumed; the
-// remaining `AS TRANSACTION <modes>` is captured with the shared transaction-mode options, and
-// rendered by the SESSION CHARACTERISTICS branch in setItemSQL.
+// transaction_mode [, ...]` (benign, Postgres-only). "SESSION CHARACTERISTICS" is already consumed; the
+// remaining `AS TRANSACTION <modes>` is captured with the Postgres transaction-mode set
+// (pgTransactionCharacteristics — includes `[NOT] DEFERRABLE`), and rendered by the SESSION
+// CHARACTERISTICS branch in setItemSQL.
 func (p *Parser) parseSetSessionCharacteristics() exp.Expression {
 	// `AS TRANSACTION` is mandatory in Postgres — bail (→ Command) if either word is missing.
 	// matchUnquotedTextSeq (not matchTextSeq) so a quoted `"AS"`/`"TRANSACTION"` — an identifier, never
@@ -134,11 +135,11 @@ func (p *Parser) parseSetSessionCharacteristics() exp.Expression {
 	if !p.matchUnquotedTextSeq("AS") || !p.matchUnquotedTextSeq("TRANSACTION") {
 		return nil
 	}
-	// raiseUnmatched=false so a characteristic outside the modeled set (e.g. DEFERRABLE, or
-	// READ UNCOMMITTED — blocked upstream by a typo in the shared characteristics table) fails
-	// closed to a Command via the empty-list check, rather than raising a hard parse error.
+	// raiseUnmatched=false so a characteristic outside the modeled set (e.g. READ UNCOMMITTED — blocked
+	// by a typo in the shared characteristics table's `UNCOMITTED` entry) fails closed to a Command via
+	// the empty-list check, rather than raising a hard parse error.
 	characteristics := p.parseCsv(func() exp.Expression {
-		return p.parseVarFromOptions(transactionCharacteristics, false)
+		return p.parseVarFromOptions(pgTransactionCharacteristics, false)
 	})
 	if len(characteristics) == 0 {
 		return nil
