@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.22.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.21.0...v0.22.0) (2026-08-04)
+
+
+### Features
+
+* **parser:** structure MySQL DROP INDEX ... ON table (incl. db-qualified target) ([#61](https://github.com/ridi-oss/sqlglot-go/issues/61)) ([f875948](https://github.com/ridi-oss/sqlglot-go/commit/f875948d504eef003b2846e53c3688e5d6684603))
+
 ## [0.21.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.20.0...v0.21.0) (2026-08-04)
 
 
