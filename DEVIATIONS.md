@@ -503,6 +503,96 @@ so no corpus churn); an unquoted value (`SET x = a`) is unaffected. This is the 
 structuring the common `SET search_path = "$user", public` (see "Grammar extensions beyond upstream" →
 `pg-set-multi-value`). Regression test `TestPostgresSetMultiValue`.
 
+### 1.13 MySQL `START REPLICA` / `START SLAVE` / `START GROUP_REPLICATION` degrade to `Command` (not `Transaction`)
+
+**What upstream does:** pinned sqlglot v30.12.0 maps MySQL `START` → the `BEGIN` token and then eats the
+following word as a transaction *mode*, so `START REPLICA` parses as `Transaction{modes:[REPLICA]}` and
+renders `BEGIN REPLICA` — indistinguishable from `START TRANSACTION`. Verified on the pinned reference for
+all three (`START REPLICA` / `START SLAVE` / `START GROUP_REPLICATION`). `STOP`/`RESET` counterparts don't
+collide with `START`, so they escape into `Alias`/`Command` — the asymmetry is the tell that this is a parse
+artifact, not intent.
+
+**What sqlglot-go does:** when the leading `START` token is followed by `REPLICA` / `SLAVE` /
+`GROUP_REPLICATION`, `parseTransaction` degrades the whole statement to a raw `exp.Command{this:"START"}`,
+round-tripping unchanged (`START REPLICA USER = 'r'` and any trailing options are preserved verbatim).
+`START TRANSACTION` / `BEGIN` and their real modes (`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, …) stay
+`Transaction`. The divert is **MySQL-only** (Postgres/Presto also map `START`→`BEGIN` but have no such
+statements, so they keep upstream's behavior) and fires **only at a top-level statement** — a nested
+`SET x = START …` keeps the pre-existing path.
+
+**Why we diverge (correctness):** these are replication-control statements, not transactions. Real MySQL
+8.0.46 confirms it two ways: `START REPLICA` reaches replication logic (`ERROR 1200: The server is not
+configured as replica`), and upstream's round-trip output `BEGIN REPLICA` is itself a **syntax error**
+(`ERROR 1064`). Modelling them as `Transaction` is a wrong structural claim a session-passthrough consumer
+reads as a benign transaction, letting a connect-only principal start replication. `Command` is the faithful
+"not structurally modelled" node and fails closed. Implemented in `parser/stmt_transaction.go`
+(`startReplicationVerbs` + the guard in `parseTransaction`); regression tests
+`TestMySQLStartReplicationIsNotTransaction`, `TestStartReplicationDivertIsMySQLOnly`.
+
+### 1.14 MySQL admin command leaders degrade to `Command` (not a bogus `Alias` / `Column`)
+
+**What upstream does:** pinned sqlglot leaves several MySQL statement-initial keywords as bare `VAR` tokens,
+so its generic expression path mis-coerces them into an expression node: `STOP REPLICA`/`SLAVE`/
+`GROUP_REPLICATION`, `FLUSH …`, `UNLOCK INSTANCE`, `XA RECOVER`, `BINLOG '…'`, `HELP '…'` all become an
+`Alias` (`STOP AS REPLICA`), and bare `RESTART` / `SHUTDOWN` become a `Column`. The remaining `XA` forms
+(`XA START/END/PREPARE/COMMIT/ROLLBACK`) parse-error. Verified on the pinned reference.
+
+**What sqlglot-go does:** a MySQL statement-start dispatch (`parseMysqlCommandStatement`, keyed on the leader
+set `STOP`/`FLUSH`/`UNLOCK`/`XA`/`BINLOG`/`HELP`/`RESTART`/`SHUTDOWN`) degrades the whole statement to a raw
+`exp.Command`, round-tripping unchanged. Making `XA` a leader also unifies all `XA …` spellings under
+`Command` (stricter than the upstream 5-error/1-alias split). The dispatch fires **only at a top-level
+statement** (`statementDepth == 1`): unlike §1.8's `SAVEPOINT`, which retreats when its required name is
+absent, these leaders commit and consume to end, so at a nested `parseStatement` entry — a `SET` assignment
+RHS (`SET x = stop, y = 1`), a CTE body — they must stay ordinary identifiers/values rather than swallow the
+rest of the statement. So the words remain usable both in an expression position (`SELECT stop FROM t`) and
+as a nested value. `LOCK TABLES` / `UNLOCK TABLES` are unaffected — they already tokenize as a single
+`COMMAND` keyword handled earlier in `parseStatement`; only the bare `UNLOCK` (`UNLOCK INSTANCE`) reaches
+this dispatch, and both end up `Command`.
+
+**Why we diverge (correctness):** each is a real MySQL administrative statement, not `<kw> AS <x>` nor a bare
+column reference; upstream's expression node is a wrong structural claim, and it fails closed today only
+because the analyzer happens to route `Alias`/`Column` roots to unanalyzable — the same coercion that made
+§1.13's `START REPLICA` a `Transaction` could land any of these on a benign kind after a grammar change.
+`Command` makes fail-closed the design, not luck. Verified against MySQL 8.0.46 (`STOP REPLICA` executes;
+`RESTART`/`SHUTDOWN` are server-control statements). Implemented in `parser/stmt_mysql_command.go`
+(`mysqlCommandLeaders` + `parseMysqlCommandStatement`) + the top-level `parseStatement` hook in
+`parser/parser.go`; regression tests `TestMySQLCommandLeadersDegradeToCommand`,
+`TestMySQLCommandLeadersStayUsableAsIdentifiers`, `TestMySQLCommandLeadersNotDivertedInNestedStatement`,
+`TestMySQLCommandStatementDoesNotDuplicateComment`.
+
+### 1.15 MySQL `TABLE tbl` parses to `SELECT * FROM tbl` (not a bogus `Alias`)
+
+**What upstream does:** pinned sqlglot leaves a leading `TABLE` keyword to its generic expression path, so
+`TABLE users` mis-parses as an `Alias` — `` `TABLE` AS users`` (the expression `TABLE` aliased `AS users`).
+Verified on the pinned reference across mysql/postgres/base/duckdb; none models the table value constructor.
+
+**What sqlglot-go does:** a MySQL top-level statement dispatch (`parseMysqlTableStatement`, keyed on the
+leading `TABLE` token, `statementDepth == 1`) builds a real `Select{expressions:[Star], from_:From{this:Table{…}}}`
+— an AST **byte-identical** to the explicit `SELECT * FROM tbl` form, with schema qualification
+(`TABLE db.users`) and quoting (`` TABLE `weird table` ``) preserved. The operand must be a plain table
+identifier — a table function (`TABLE f()`), placeholder (`TABLE ?`), or other non-identifier is rejected so
+it does not fake a `Select`.
+
+**Scope (what is *not* modelled).** Only the bare `TABLE tbl_name` is a statement here. Real MySQL also
+permits `TABLE t ORDER BY … LIMIT …`, set operations (`TABLE a UNION TABLE b`), a parenthesized/subquery
+`TABLE`, and `INSERT … TABLE t` — none of those query-block positions is covered: the top-level trailer forms
+are left unconsumed and **fail closed** under the default (IMMEDIATE) parser (matching upstream, which also
+parse-errors `TABLE t ORDER BY …`), while a parenthesized `(TABLE t)` *inside* another query is not diverted
+and keeps upstream's wrong `Alias`. Because the dispatch is top-level only, a nested `SET x = TABLE t` also
+keeps the non-`Select` path. `CREATE`/`DROP`/`ALTER TABLE` (their own statement parsers) are untouched.
+
+**Why we diverge (correctness).** MySQL 8.0.19+ defines `TABLE tbl` as exactly `SELECT * FROM tbl` — verified
+on MySQL 8.0.46 (`TABLE u` and `SELECT * FROM u` return identical rows). Upstream's `Alias` is both a wrong
+structural claim and a lost read: a column-lineage consumer sees an aliased keyword instead of a full-table
+read of every column. Producing the equivalent `Select` gives the consumer the same lineage as the `SELECT`
+form. The **unqualified** `TABLE users` is a §1 correctness fix (upstream parses it structurally to the wrong
+`Alias`, not a `Command`/error — cf. the §1.8 note that bare `SAVEPOINT` is tracked here, not in the ledger);
+the **schema-qualified** `TABLE db.users` is grammar beyond pinned upstream (it parse-errors at the dot) and
+is registered in `testdata/upstream_extensions.jsonl` (`mysql-table-value`) with a tripwire. Implemented in
+`parser/stmt_mysql_table.go` (`parseMysqlTableStatement`) + the top-level `parseStatement` hook in
+`parser/parser.go`; regression tests `TestMySQLTableStatementIsSelectStar`, `TestMySQLTableStatementScope`,
+`TestMySQLCommandLeadersNotDivertedInNestedStatement`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream

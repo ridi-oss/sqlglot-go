@@ -31,6 +31,12 @@ type Parser struct {
 	chunks       [][]tokens.Token
 	chunkIndex   int
 	nodeCount    int
+
+	// statementDepth is the parseStatement recursion depth: 1 at a top-level statement, >1 when
+	// parseStatement is re-entered for a nested value/body (SET assignment RHS, CTE body, CREATE
+	// FUNCTION body, …). Statement-start dispatches that would otherwise mis-fire on a bare
+	// identifier in those nested positions gate on ==1 (see parseStatement).
+	statementDepth int
 }
 
 func New(d *dialects.Dialect) *Parser {
@@ -76,6 +82,7 @@ func (p *Parser) Reset() {
 	p.chunks = nil
 	p.chunkIndex = 0
 	p.nodeCount = 0
+	p.statementDepth = 0
 }
 
 func (p *Parser) Errors() []*sqlerrors.ParseError { return p.errors }
@@ -419,6 +426,8 @@ func (p *Parser) parse(parseMethod func() exp.Expression, rawTokens []tokens.Tok
 }
 
 func (p *Parser) parseStatement() exp.Expression {
+	p.statementDepth++
+	defer func() { p.statementDepth-- }()
 	if !p.curr.IsValid() {
 		return nil
 	}
@@ -449,6 +458,24 @@ func (p *Parser) parseStatement() exp.Expression {
 	// (structured Reset or fail-closed Command), so it never falls through to the expression path.
 	if stmt := p.parseResetStatement(); stmt != nil {
 		return stmt
+	}
+	// These two MySQL dispatches are gated to a top-level statement (statementDepth == 1): unlike
+	// SAVEPOINT/RESET above, which retreat when their required continuation is absent, they commit
+	// on the leading token and consume to end. At a nested parseStatement entry (a SET assignment
+	// RHS, a CTE body) that would mis-parse a bare identifier value — `SET x = stop` / `SET x = TABLE
+	// t` — so there the words must stay ordinary identifiers/values on the expression path.
+	if p.statementDepth == 1 {
+		// MySQL command statements whose leading keyword is a bare VAR (STOP/FLUSH/UNLOCK INSTANCE/
+		// XA/BINLOG/HELP/RESTART/SHUTDOWN): dispatched by leading text so upstream's expression path
+		// can't mis-coerce them into an Alias/Column. Returns nil for anything else.
+		if stmt := p.parseMysqlCommandStatement(); stmt != nil {
+			return stmt
+		}
+		// MySQL `TABLE tbl` (= SELECT * FROM tbl, 8.0.19+): dispatched by the leading TABLE token so
+		// it becomes a real Select instead of upstream's Alias mis-parse. Returns nil otherwise.
+		if stmt := p.parseMysqlTableStatement(); stmt != nil {
+			return stmt
+		}
 	}
 	return p.parseExpressionStatement()
 }
