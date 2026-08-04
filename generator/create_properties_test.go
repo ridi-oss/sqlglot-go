@@ -59,6 +59,7 @@ func TestCreatePropertyRenderers(t *testing.T) {
 		{"no primary index", nil, exp.NoPrimaryIndexProperty(exp.Args{}), "NO PRIMARY INDEX"},
 		{"on commit preserve", nil, exp.OnCommitProperty(exp.Args{"delete": false}), "ON COMMIT PRESERVE ROWS"},
 		{"on commit delete", nil, exp.OnCommitProperty(exp.Args{"delete": true}), "ON COMMIT DELETE ROWS"},
+		{"on property", nil, exp.OnProperty(exp.Args{"this": exp.Identifier(exp.Args{"this": "users", "quoted": false})}), "ON users"},
 		{"SQL read write", nil, exp.SqlReadWriteProperty(exp.Args{"this": "MODIFIES SQL DATA"}), "MODIFIES SQL DATA"},
 		{"locking", nil, exp.LockingProperty(exp.Args{"kind": "ROW", "for_or_in": "FOR", "lock_type": "ACCESS", "override": false}), "LOCKING ROW FOR ACCESS"},
 		{"partitioned by base", nil, exp.PartitionedByProperty(exp.Args{"this": exp.Anonymous(exp.Args{"this": "HASH", "expressions": []exp.Expression{createColumn("foo")}})}), "PARTITIONED_BY=HASH(foo)"},

@@ -41,18 +41,13 @@ func (p *Parser) parseDrop() exp.Expression {
 
 	var cluster exp.Expression
 	if p.match(tokens.ON) {
-		cluster = p.parseOnProperty()
-		if cluster == nil {
-			// `DROP INDEX <idx> ON <table>`: the ON-clause target is an exp.OnProperty (not
-			// ported; parseOnProperty matches ON but returns nil, leaving <table> unconsumed).
-			// parseDrop isn't wrapped in tryParse, so the leftover would otherwise surface as a
-			// hard "Unexpected token" error at the batch level. Degrade to a raw Command (guide:
-			// "leftover/unmatched -> parseAsCommand(start)"); parseAsCommand is source-position
-			// based, so it re-captures the whole statement and round-trips byte-identically.
-			// Scoped to the ON branch so parseDrop stays reusable as a CSV sub-parser inside
-			// ALTER ... DROP (e.g. `DROP COLUMN c, DROP PRIMARY KEY`), which never has an ON.
-			return p.parseAsCommand(start)
-		}
+		// `DROP INDEX <idx> ON <table>` (MySQL): the ON-clause target is an OnProperty carrying the
+		// table (upstream Drop.cluster, parser.py:2325). divergence: upstream's shared _parse_on_property
+		// parses only a single id (_parse_schema(_parse_id_var), parser.py:3345), so it rejects the
+		// db-qualified `ON db.tbl` that real MySQL 8.0.46 accepts. Parse the full table parts here —
+		// scoped to DROP so CREATE/ALTER keep upstream's ON handling — so the qualifier survives. The
+		// missing-name case fails closed via parseTableParts' own raiseError. See DEVIATIONS §1.
+		cluster = p.expression(exp.OnProperty(exp.Args{"this": p.parseTableParts(false, false, false, false)}), nil, nil)
 	}
 
 	var expressions []exp.Expression

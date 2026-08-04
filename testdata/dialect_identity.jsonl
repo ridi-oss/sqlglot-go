@@ -28,6 +28,7 @@
 {"dialect":"mysql","sql":"ALTER TABLE t CHANGE COLUMN c d VARCHAR(50) DEFAULT 'x'","want":"ALTER TABLE t CHANGE COLUMN c d VARCHAR(50) DEFAULT 'x'","pretty":false}
 {"dialect":"mysql","sql":"ALTER TABLE t CHANGE a b BIGINT NOT NULL","want":"ALTER TABLE t CHANGE COLUMN a b BIGINT NOT NULL","pretty":false}
 {"dialect":"mysql","sql":"ALTER TABLE t DROP COLUMN c, DROP PRIMARY KEY, DROP INDEX `i`","want":"ALTER TABLE t DROP COLUMN c, DROP PRIMARY KEY, DROP INDEX `i`","pretty":false}
+{"dialect":"mysql","sql":"DROP INDEX idx_email ON users","want":"DROP INDEX idx_email ON users","pretty":false}
 {"dialect":"mysql","sql":"ALTER TABLE t DROP PRIMARY KEY","want":"ALTER TABLE t DROP PRIMARY KEY","pretty":false}
 {"dialect":"mysql","sql":"ALTER TABLE t MODIFY COLUMN c INT AFTER d","want":"ALTER TABLE t MODIFY COLUMN c INT AFTER d","pretty":false}
 {"dialect":"mysql","sql":"ALTER TABLE t MODIFY COLUMN c INT COMMENT 'hi'","want":"ALTER TABLE t MODIFY COLUMN c INT COMMENT 'hi'","pretty":false}

@@ -593,6 +593,34 @@ is registered in `testdata/upstream_extensions.jsonl` (`mysql-table-value`) with
 `parser/parser.go`; regression tests `TestMySQLTableStatementIsSelectStar`, `TestMySQLTableStatementScope`,
 `TestMySQLCommandLeadersNotDivertedInNestedStatement`.
 
+### 1.16 MySQL `DROP INDEX <idx> ON <table>` accepts a db-qualified target
+
+**What upstream does:** pinned sqlglot v30.12.0 structures the unqualified `DROP INDEX idx ON users` as
+`Drop{kind:INDEX, cluster:OnProperty(this=Identifier(users))}`, but its shared `_parse_on_property`
+(parser.py:3345) parses the ON target with a single `_parse_schema(_parse_id_var())`, so the
+**db-qualified** `DROP INDEX idx ON db.users` parse-**errors** at the dot. Verified on the pinned
+reference. (The port itself previously degraded even the unqualified form to a raw `Command`, because it
+had no `exp.OnProperty` node — that gap is closed here too.)
+
+**What sqlglot-go does:** `parseDrop` parses the `ON` target with `parseTableParts`, so the whole
+statement is `Drop{kind:INDEX, this:Table(idx), cluster:OnProperty(this:Table(...))}` and the db
+qualifier survives: `DROP INDEX idx ON db.users` → `cluster.OnProperty.this = Table(this:users,
+schema:db)`, round-tripping unchanged. The target is a `Table` (not upstream's bare `Identifier`) so it
+can carry the qualifier — an output-identical AST-shape difference for the unqualified form. This is
+**scoped to DROP**: the shared `parseOnProperty` is left unchanged (returns nil for the ClickHouse
+`ON CLUSTER` half, out of this port's dialect scope), so CREATE/ALTER are untouched. A missing target
+(`DROP INDEX i ON`) fails closed via `parseTableParts`' own raise.
+
+**Why we diverge (correctness):** MySQL's `DROP INDEX index_name ON tbl_name` permits a db-qualified
+`tbl_name` — verified on MySQL 8.0.46 (`DROP INDEX idx_email ON zzq.users` executes). Upstream's
+single-id parse is a bug vs the real engine, and for the downstream consumer it turned a legitimate
+table-DDL statement into a parse-error/`Command` (over-denied). The unqualified form is a port
+completion (aligns with upstream's structured `Drop`); the **qualified** form — which pinned upstream
+parse-errors — is registered in `testdata/upstream_extensions.jsonl` (`mysql-drop-index-on-qualified`)
+with a tripwire, per the "grammar beyond upstream" discipline. Implemented in `parser/stmt_drop.go` (the
+`ON` branch) + the new `exp.OnProperty` node (`expressions/kinds.go`, `expressions/fidelity_properties.go`)
++ generator `onPropertySQL` (`generator/create_properties.go`); regression test `TestParseDropIndexOnTable`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream

@@ -14,6 +14,7 @@ func LockingProperty(args Args) Expression        { return newNode(KindLockingPr
 func MaterializedProperty(args Args) Expression   { return newNode(KindMaterializedProperty, args) }
 func NoPrimaryIndexProperty(args Args) Expression { return newNode(KindNoPrimaryIndexProperty, args) }
 func OnCommitProperty(args Args) Expression       { return newNode(KindOnCommitProperty, args) }
+func OnProperty(args Args) Expression             { return newNode(KindOnProperty, args) }
 func PartitionedByProperty(args Args) Expression  { return newNode(KindPartitionedByProperty, args) }
 func PartitionByRangeProperty(args Args) Expression {
 	return newNode(KindPartitionByRangeProperty, args)
