@@ -33,11 +33,32 @@ func (p *Parser) parseEndTransaction() exp.Expression {
 // by parser.py:8666,8684 (_parse_transaction / _parse_commit_or_rollback).
 var transactionOrWorkTexts = map[string]bool{"TRANSACTION": true, "WORK": true}
 
+// startReplicationVerbs are the words that, following START, make the statement MySQL
+// replication control (START REPLICA / START SLAVE / START GROUP_REPLICATION) — never a
+// transaction. divergence: pinned upstream maps START->BEGIN and greedily eats the verb as a
+// transaction mode, yielding Transaction{modes:[REPLICA]} -> `BEGIN REPLICA`; real MySQL 8.0
+// treats these as replication statements, not START TRANSACTION. Gated to MySQL below (not every
+// START->BEGIN dialect) to keep the divergence within DEVIATIONS §1.13's stated scope — Postgres
+// also maps START->BEGIN but has no such statements, so it keeps upstream's behavior. See §1.13.
+var startReplicationVerbs = map[string]bool{"REPLICA": true, "SLAVE": true, "GROUP_REPLICATION": true}
+
 // parseTransaction ports parser.py:8662-8680 (_parse_transaction). modes is a permissive,
 // comma-separated list of space-joined VAR|NOT runs so it also handles Postgres's
 // `BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE, ISOLATION LEVEL SERIALIZABLE` and
 // `DEFERRABLE, DEFERRABLE` forms without needing dedicated grammar for each mode.
 func (p *Parser) parseTransaction() exp.Expression {
+	// START REPLICA / START SLAVE / START GROUP_REPLICATION are replication control, not a
+	// transaction (see startReplicationVerbs). p.prev is the leading START token (BEGIN type,
+	// text "START") that parseStatement consumed before dispatching here; degrade to a raw
+	// Command so it fails closed downstream instead of masquerading as START TRANSACTION.
+	// MySQL-only so Postgres (which also maps START->BEGIN) keeps upstream's behavior. parseStatement
+	// attaches this statement's leading comment (BEGIN is a statement-parser token), so we don't here.
+	// Top-level only (statementDepth == 1): a nested `SET x = START …` keeps upstream's behavior.
+	if p.statementDepth == 1 && p.dialect.Name == "mysql" && p.prev.TokenType == tokens.BEGIN &&
+		stringsUpper(p.prev.Text) == "START" && startReplicationVerbs[stringsUpper(p.curr.Text)] {
+		return p.parseAsCommand(p.prev)
+	}
+
 	var this any
 	if p.matchTexts(transactionKind) {
 		this = p.prev.Text
