@@ -150,6 +150,38 @@ func TestParseDropPostgresConcurrently(t *testing.T) {
 	}
 }
 
+// TestParseDropIndexOnTable ports the MySQL `DROP INDEX <idx> ON <table>` form (parser.py:2325):
+// the ON-clause target is an OnProperty carried in Drop.cluster. Previously the port had no
+// OnProperty node, so it degraded to Command. The target is parsed as a full table so the
+// db-qualified form real MySQL 8.0.46 accepts survives (upstream's single-id parse rejects it).
+func TestParseDropIndexOnTable(t *testing.T) {
+	drop := parseOneDialect(t, "DROP INDEX idx_email ON users", "mysql")
+	if drop.Kind() != exp.KindDrop || drop.Arg("kind") != "INDEX" {
+		t.Fatalf("DROP INDEX ON: kind mismatch (want Drop/INDEX):\n%s", drop.ToS())
+	}
+	if exprArg(t, drop, "this").Name() != "idx_email" {
+		t.Fatalf("DROP INDEX ON: index name mismatch:\n%s", drop.ToS())
+	}
+	cluster := exprArg(t, drop, "cluster")
+	if cluster.Kind() != exp.KindOnProperty {
+		t.Fatalf("DROP INDEX ON: cluster should be OnProperty:\n%s", drop.ToS())
+	}
+	target := exprArg(t, cluster, "this")
+	if target.Kind() != exp.KindTable || target.Text("this") != "users" {
+		t.Fatalf("DROP INDEX ON: OnProperty target should be Table(users):\n%s", drop.ToS())
+	}
+
+	// db-qualified target: accepted (matches real MySQL), the qualifier preserved in the Table.
+	drop = parseOneDialect(t, "DROP INDEX idx ON db.users", "mysql")
+	target = exprArg(t, exprArg(t, drop, "cluster"), "this")
+	if target.Kind() != exp.KindTable || target.Text("schema") != "db" || target.Text("this") != "users" {
+		t.Fatalf("DROP INDEX ON db.users: qualifier not preserved:\n%s", drop.ToS())
+	}
+	if out, err := generateSQL(t, drop, "mysql"); err != nil || out != "DROP INDEX idx ON db.users" {
+		t.Fatalf("DROP INDEX ON db.users round-trip = %q, err=%v", out, err)
+	}
+}
+
 // TestParseDropDegradesToCommand covers DROP statements this port doesn't structurally
 // model: an unrecognized creatable (out of the creatables set) and ICEBERG-qualified DROP
 // on a non-TABLE kind (parser.py:2311-2315).

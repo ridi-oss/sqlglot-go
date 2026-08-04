@@ -351,6 +351,10 @@ func (p *Parser) parseOnProperty() exp.Expression {
 	if p.matchTextSeq("COMMIT", "DELETE", "ROWS") {
 		return exp.OnCommitProperty(exp.Args{"delete": true})
 	}
+	// The bare `ON <id>` → exp.OnProperty half of _parse_on_property (parser.py:3345) is the
+	// ClickHouse `ON CLUSTER` form for CREATE/ALTER, which is out of this port's dialect scope; the
+	// only supported OnProperty use is MySQL `DROP INDEX … ON <table>`, built directly in parseDrop
+	// (with a full table target so it accepts the db-qualified form). So this stays nil here.
 	return nil
 }
 

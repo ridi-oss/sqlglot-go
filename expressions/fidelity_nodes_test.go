@@ -105,6 +105,7 @@ func TestFidelityPropertyMetadata(t *testing.T) {
 		{"MaterializedProperty", KindMaterializedProperty, MaterializedProperty, []string{"this"}, Args{}},
 		{"NoPrimaryIndexProperty", KindNoPrimaryIndexProperty, NoPrimaryIndexProperty, []string{}, Args{}},
 		{"OnCommitProperty", KindOnCommitProperty, OnCommitProperty, []string{"delete"}, Args{}},
+		{"OnProperty", KindOnProperty, OnProperty, []string{"this"}, Args{"this": fidelityScalar()}},
 		{"PartitionedByProperty", KindPartitionedByProperty, PartitionedByProperty, []string{"this"}, Args{"this": fidelityScalar()}},
 		{"PartitionByRangeProperty", KindPartitionByRangeProperty, PartitionByRangeProperty, []string{"partition_expressions", "create_expressions"}, Args{"partition_expressions": fidelityExpressions(), "create_expressions": fidelityExpressions()}},
 		{"PartitionByListProperty", KindPartitionByListProperty, PartitionByListProperty, []string{"partition_expressions", "create_expressions"}, Args{"partition_expressions": fidelityExpressions(), "create_expressions": fidelityExpressions()}},

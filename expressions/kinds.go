@@ -577,6 +577,7 @@ const (
 	KindMaterializedProperty
 	KindNoPrimaryIndexProperty
 	KindOnCommitProperty
+	KindOnProperty
 	KindPartitionedByProperty
 	KindPartitionByRangeProperty
 	KindPartitionByListProperty
@@ -1167,6 +1168,7 @@ var argTypes = map[Kind][]argSpec{
 	KindMaterializedProperty:         {{"this", false}},
 	KindNoPrimaryIndexProperty:       {},
 	KindOnCommitProperty:             {{"delete", false}},
+	KindOnProperty:                   {{"this", true}},
 	KindPartitionedByProperty:        {{"this", true}},
 	KindPartitionByRangeProperty:     {{"partition_expressions", true}, {"create_expressions", true}},
 	KindPartitionByListProperty:      {{"partition_expressions", true}, {"create_expressions", true}},
@@ -1905,6 +1907,7 @@ var className = map[Kind]string{
 	KindMaterializedProperty:                "MaterializedProperty",
 	KindNoPrimaryIndexProperty:              "NoPrimaryIndexProperty",
 	KindOnCommitProperty:                    "OnCommitProperty",
+	KindOnProperty:                          "OnProperty",
 	KindPartitionedByProperty:               "PartitionedByProperty",
 	KindPartitionByRangeProperty:            "PartitionByRangeProperty",
 	KindPartitionByListProperty:             "PartitionByListProperty",

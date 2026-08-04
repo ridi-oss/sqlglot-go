@@ -58,6 +58,7 @@ var propertyLocations = map[expressions.Kind]propertyLocation{
 	expressions.KindLockingProperty:            propertyLocationPostAlias,
 	expressions.KindNoPrimaryIndexProperty:     propertyLocationPostExpression,
 	expressions.KindOnCommitProperty:           propertyLocationPostExpression,
+	expressions.KindOnProperty:                 propertyLocationPostSchema,
 	expressions.KindTriggerProperties:          propertyLocationPostExpression,
 	expressions.KindWithDataProperty:           propertyLocationPostExpression,
 }
@@ -92,6 +93,7 @@ func init() {
 	dispatch[expressions.KindLikeProperty] = (*Generator).likePropertySQL
 	dispatch[expressions.KindNoPrimaryIndexProperty] = (*Generator).noPrimaryIndexPropertySQL
 	dispatch[expressions.KindOnCommitProperty] = (*Generator).onCommitPropertySQL
+	dispatch[expressions.KindOnProperty] = (*Generator).onPropertySQL
 	dispatch[expressions.KindSqlReadWriteProperty] = (*Generator).sqlReadWritePropertySQL
 	dispatch[expressions.KindLockingProperty] = (*Generator).lockingPropertySQL
 	dispatch[expressions.KindPartitionedByProperty] = (*Generator).partitionedByPropertySQL
@@ -255,6 +257,12 @@ func (g *Generator) onCommitPropertySQL(e expressions.Expression) string {
 		rows = "DELETE"
 	}
 	return "ON COMMIT " + rows + " ROWS"
+}
+
+// onPropertySQL ports OnProperty (generator.py:227): `ON <this>`, e.g. the `ON <table>` target of
+// MySQL `DROP INDEX <idx> ON <table>` (carried in Drop.cluster) and the CREATE `ON <cluster>` property.
+func (g *Generator) onPropertySQL(e expressions.Expression) string {
+	return "ON " + g.sqlKey(e, "this")
 }
 
 func (g *Generator) sqlReadWritePropertySQL(e expressions.Expression) string { return e.Name() }
