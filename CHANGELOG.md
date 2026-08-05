@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.23.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.22.0...v0.23.0) (2026-08-05)
+
+
+### Features
+
+* **expressions:** add statement-discriminator contract + Into/Keyword accessors ([#63](https://github.com/ridi-oss/sqlglot-go/issues/63)) ([bb17b5b](https://github.com/ridi-oss/sqlglot-go/commit/bb17b5b903ed1f045c758be96102ec8643fb344b))
+
 ## [0.22.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.21.0...v0.22.0) (2026-08-04)
 
 
