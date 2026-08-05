@@ -83,6 +83,8 @@ type Expression interface {
 	CatalogName() string
 	Left() Expression
 	Right() Expression
+	Into() Expression
+	Keyword() string
 }
 
 type Target interface{ matches(Expression) bool }
