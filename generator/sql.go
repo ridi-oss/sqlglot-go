@@ -1562,6 +1562,13 @@ func (g *Generator) returningSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) createSQL(e expressions.Expression) string {
+	// MySQL CREATE {USER|ROLE} grammar extension: the body is not modeled; `this` holds a Command child
+	// with the verbatim statement text, emitted as-is. Keying on the Command child (not the kind string)
+	// keeps a future structured CREATE ROLE/USER, whose `this` is a real object, from being hijacked.
+	// See parser/stmt_account_object.go.
+	if body := asExpression(e.Arg("this")); body != nil && body.Kind() == expressions.KindCommand {
+		return g.gen(body)
+	}
 	kind := g.sqlKey(e, "kind")
 	properties := asExpression(e.Arg("properties"))
 

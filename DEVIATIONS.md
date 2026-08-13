@@ -1194,6 +1194,24 @@ tokenizes as `BEGIN`), matching how pinned upstream already treats `start()` und
 `start` as a column/table/CTE/alias is unaffected; only the rare `start(...)` call form is lost. This is the
 same trade-off upstream itself makes for its `START`→`BEGIN` dialects.
 
+Ledger ids [`mysql-create-user`, `mysql-create-role`, `mysql-alter-user`, `mysql-drop-user`,
+`mysql-drop-role`](./testdata/upstream_extensions.jsonl) register MySQL account-management statements —
+`CREATE/ALTER/DROP {USER|ROLE}` — which pinned upstream leaves as a raw `Command` (`USER` and `ROLE` lex as
+bare `VAR` tokens and neither is a `CREATABLE`/`ALTERABLE`, so the structured parsers decline). The
+consequence upstream leaves for a consumer is that the leading keyword (`CREATE`/`ALTER`/`DROP`) is shared
+with the schema-object forms, so `CREATE USER` cannot be told apart from `CREATE TABLE`. The MySQL parser
+instead builds a structured `Create`/`Alter`/`Drop` **root** carrying the object type as the canonical
+`kind` arg (`"USER"`/`"ROLE"`, the same discriminator + casing `TABLE` uses), so a consumer classifies by
+root `Kind` + `kind`. The statement body (the user/role list, `IF [NOT] EXISTS`, `IDENTIFIED BY` /
+`RANDOM PASSWORD` / `WITH` plugin / `REQUIRE` / resource-option clauses) is **not** modeled: it is preserved
+verbatim inside a `Command` child (held as `this` for `Create`/`Drop` and as the sole `actions` element for
+`Alter`, which requires a non-empty `actions`), and the generator keys on that `Command` child to emit it —
+so these round-trip exactly as the plain `Command` fallback does (an inline/trailing comment normalizes the
+same way it does for any `Command`). The extension is MySQL-only (Postgres keeps upstream's `Command`), and `RENAME USER` plus any
+other unmodeled object stay fail-closed `Command`. Implemented in `parser/stmt_account_object.go` (+ the
+`parseCreate`/`parseAlter`/`parseDrop` hooks) and the `createSQL`/`alterSQL`/`dropSQL` `kind` branches;
+regression test `mysql_account_object_test.go`. Use the stable ledger ids for the reconciliation lifecycle.
+
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)

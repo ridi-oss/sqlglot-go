@@ -16,6 +16,11 @@ func (p *Parser) parseCreate() exp.Expression {
 	if structured := p.tryParse(func() exp.Expression { return p.parseCreateStructured(start) }, false); structured != nil {
 		return structured
 	}
+	// Grammar extension: MySQL CREATE {USER|ROLE} — structure as a Create root carrying the object
+	// kind, body kept verbatim (see stmt_account_object.go). Everything else degrades to Command.
+	if kind := p.mysqlAccountObjectKind(true, true); kind != "" {
+		return p.parseAccountObjectStatement(start, exp.KindCreate, kind)
+	}
 	return p.parseAsCommand(start)
 }
 

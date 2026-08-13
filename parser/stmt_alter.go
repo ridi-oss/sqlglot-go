@@ -107,6 +107,14 @@ func (p *Parser) parseAlter() exp.Expression {
 		alterToken = p.prev
 	}
 	if !alterToken.IsValid() {
+		// Grammar extension: MySQL ALTER USER — structure as an Alter root carrying kind="USER", body
+		// verbatim (see stmt_account_object.go). MySQL has no ALTER ROLE (ROLE not allowed) and no
+		// ICEBERG prefix on it, so a consumed ICEBERG rules the account form out (`ALTER ICEBERG USER`).
+		if !iceberg {
+			if kind := p.mysqlAccountObjectKind(true, false); kind != "" {
+				return p.parseAccountObjectStatement(start, exp.KindAlter, kind)
+			}
+		}
 		return p.parseAsCommand(start)
 	}
 	if iceberg && alterToken.TokenType != tokens.TABLE {
