@@ -26,6 +26,14 @@ func (p *Parser) parseDrop() exp.Expression {
 		kind = stringsUpper(p.prev.Text)
 	}
 	if kind == "" || (iceberg && kind != "TABLE") {
+		// Grammar extension: MySQL DROP {USER|ROLE} — structure as a Drop root carrying the object
+		// kind, body (IF EXISTS + name list) kept verbatim (see stmt_account_object.go). Only the plain
+		// form (no TEMPORARY/MATERIALIZED/ICEBERG prefix) qualifies; anything else degrades to Command.
+		if !temporary && !materialized && !iceberg {
+			if accountKind := p.mysqlAccountObjectKind(true, true); accountKind != "" {
+				return p.parseAccountObjectStatement(start, exp.KindDrop, accountKind)
+			}
+		}
 		return p.parseAsCommand(start)
 	}
 

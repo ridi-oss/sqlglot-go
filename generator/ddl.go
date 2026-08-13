@@ -35,6 +35,12 @@ func init() {
 // populate it for anything DROP-relevant), so `kind` is used as-is - a no-op equivalent to
 // `.get(kind) or kind` when the mapping is empty.
 func (g *Generator) dropSQL(e expressions.Expression) string {
+	// MySQL DROP {USER|ROLE} grammar extension: the body is not modeled; `this` holds a Command child
+	// with the verbatim statement text. Keying on the Command child (not the kind string) keeps a
+	// future structured DROP ROLE/USER from being hijacked. See parser/stmt_account_object.go.
+	if body := asExpression(e.Arg("this")); body != nil && body.Kind() == expressions.KindCommand {
+		return g.gen(body)
+	}
 	this := g.sqlKey(e, "this")
 	exprs := g.expressions(exprsOptions{expression: e, flat: true})
 	if exprs != "" {
@@ -235,6 +241,14 @@ func (g *Generator) alterSetSQL(e expressions.Expression) string {
 // through addColumnSQL, gated by dialect.AlterTableAddRequiredForEachColumn (the ADD-
 // shortcut branch) and dialect.AlterTableIncludeColumnKeyword (inside addColumnSQL).
 func (g *Generator) alterSQL(e expressions.Expression) string {
+	// MySQL ALTER USER grammar extension: the body is not modeled; the sole `actions` element is a
+	// Command child with the verbatim statement text, keyed on that child. See
+	// parser/stmt_account_object.go.
+	if a := listFromValue(e.Arg("actions")); len(a) == 1 {
+		if body := asExpression(a[0]); body != nil && body.Kind() == expressions.KindCommand {
+			return g.gen(body)
+		}
+	}
 	actions := listFromValue(e.Arg("actions"))
 
 	useAddShortcut := false
