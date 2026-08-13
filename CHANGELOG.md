@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.24.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.23.0...v0.24.0) (2026-08-13)
+
+
+### Features
+
+* **parser:** structure MySQL CREATE/ALTER/DROP USER|ROLE with kind=USER/ROLE ([#65](https://github.com/ridi-oss/sqlglot-go/issues/65)) ([b46ceec](https://github.com/ridi-oss/sqlglot-go/commit/b46ceec5285763743f5416a4b7708eae386cd693))
+
 ## [0.23.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.22.0...v0.23.0) (2026-08-05)
 
 
