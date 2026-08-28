@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.25.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.24.0...v0.25.0) (2026-08-28)
+
+
+### Features
+
+* **parser:** parse MySQL SHOW GRANTS FOR user@host [USING roles] ([#67](https://github.com/ridi-oss/sqlglot-go/issues/67)) ([5863085](https://github.com/ridi-oss/sqlglot-go/commit/5863085caf18d0651401c05f07c03c6d174c63ce))
+
 ## [0.24.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.23.0...v0.24.0) (2026-08-13)
 
 
