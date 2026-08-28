@@ -349,6 +349,10 @@
 {"dialect":"mysql","sql":"SHOW GLOBAL VARIABLES LIKE '%foo%'","want":"SHOW GLOBAL VARIABLES LIKE '%foo%'","pretty":false}
 {"dialect":"mysql","sql":"SHOW GLOBAL VARIABLES WHERE Column_name LIKE '%foo%'","want":"SHOW GLOBAL VARIABLES WHERE Column_name LIKE '%foo%'","pretty":false}
 {"dialect":"mysql","sql":"SHOW GRANTS FOR foo","want":"SHOW GRANTS FOR foo","pretty":false}
+{"dialect":"mysql","sql":"SHOW GRANTS","want":"SHOW GRANTS","pretty":false}
+{"dialect":"mysql","sql":"SHOW GRANTS FOR 'u'@'h'","want":"SHOW GRANTS FOR 'u'@'h'","pretty":false}
+{"dialect":"mysql","sql":"SHOW GRANTS FOR CURRENT_USER()","want":"SHOW GRANTS FOR CURRENT_USER()","pretty":false}
+{"dialect":"mysql","sql":"SHOW GRANTS FOR 'u'@'h' USING 'r1', 'r2'","want":"SHOW GRANTS FOR 'u'@'h' USING 'r1', 'r2'","pretty":false}
 {"dialect":"mysql","sql":"SHOW INDEX FROM foo","want":"SHOW INDEX FROM foo","pretty":false}
 {"dialect":"mysql","sql":"SHOW INDEX FROM foo FROM bar","want":"SHOW INDEX FROM foo FROM bar","pretty":false}
 {"dialect":"mysql","sql":"SHOW MASTER LOGS","want":"SHOW BINARY LOGS","pretty":false}

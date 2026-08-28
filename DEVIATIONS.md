@@ -945,10 +945,20 @@ the sibling `SHOW CREATE {TABLE,VIEW,…}` forms as `Show{this:"CREATE USER"}`, 
 `SHOW CREATE USER 'u' LIKE …`/`FROM …`/`LIMIT …` and a bare `SHOW CREATE USER`), so those fail closed to a raw
 `Command`. All three are valid syntax on MySQL 8.0.33 / PostgreSQL 17.6.
 
-The `name[@host]` user target (used by both `SET PASSWORD FOR …` and `SHOW CREATE USER`) is parsed by
+Ledger ids [`mysql-show-grants-user-host` / `mysql-show-grants-using`](./testdata/upstream_extensions.jsonl)
+register MySQL `SHOW GRANTS [FOR <user> [USING <role>, …]]`. Pinned upstream reads the `FOR` target as a single
+token, so `SHOW GRANTS FOR 'u'@'h'`, `… CURRENT_USER()`, and `… USING 'r1'` are hard parse **errors** there.
+`parseShowGrants` reads the target and each role via `parseMySQLUserSpec`; engine-invalid forms (`FOR` without
+a user, `USING` without `FOR`, trailing `LIKE`/`LIMIT`) fail closed to `Command`. The generator emits
+` FOR`/` USING` only when present — upstream's bare-form render `SHOW GRANTS FOR` is invalid MySQL. Verified
+against MySQL 8.0.46.
+
+The `name[@host]` user target (used by `SET PASSWORD FOR …`, `SHOW CREATE USER`, and `SHOW GRANTS`) is parsed by
 `parseMySQLUserSpec`, which enforces MySQL's `user` grammar rather than accepting anything id-var-shaped: the
-name must be an identifier/string (not a number or reserved keyword like `ALL`), empty parens `()` are valid
-only on `CURRENT_USER` (`foo()` is not a user), and `CURRENT_USER` takes no `@host`. The `SET PASSWORD` auth
+name must be an identifier/string (not a number or `?` placeholder), empty parens `()` are valid only on
+`CURRENT_USER` (`foo()` is not a user), the host must touch the `@` (`'u'@ 'h'` is ERROR 1064), and
+`CURRENT_USER` takes no `@host`. Reserved keywords (`ALL`) as an unquoted name are over-accepted — the port
+does not model MySQL's reserved-word table; fail-safe, since consumers gate on the statement kind. The `SET PASSWORD` auth
 value must be a plain string literal (`= '…'`) or `TO RANDOM` — a placeholder (`= ?`), number, or bare
 identifier fails closed. Every engine-invalid form thus degrades to `Command` instead of a structured
 privileged node (verified against MySQL 8.0.33).
