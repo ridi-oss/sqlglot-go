@@ -198,6 +198,81 @@ func TestMySQLShowCreateUser(t *testing.T) {
 	}
 }
 
+// MySQL `SHOW GRANTS [FOR user [USING role, ...]]` → Show{this:"GRANTS"}, specs round-tripping
+// byte-for-byte. Beyond pinned upstream (bare single-token target only). MySQL 8.0.46-verified.
+func TestMySQLShowGrants(t *testing.T) {
+	for _, tc := range []struct {
+		sql, target string
+		using       []string
+	}{
+		{"SHOW GRANTS", "", nil},
+		{"SHOW GRANTS FOR foo", "foo", nil},
+		{"SHOW GRANTS FOR 'u'", "'u'", nil},
+		{"SHOW GRANTS FOR 'u'@'h'", "'u'@'h'", nil},
+		{"SHOW GRANTS FOR u@localhost", "u@localhost", nil},
+		{"SHOW GRANTS FOR 'store'@'172.27.0.0/255.255.0.0'", "'store'@'172.27.0.0/255.255.0.0'", nil},
+		{"SHOW GRANTS FOR `u`@`%`", "`u`@`%`", nil},
+		{"SHOW GRANTS FOR CURRENT_USER", "CURRENT_USER", nil},
+		{"SHOW GRANTS FOR CURRENT_USER()", "CURRENT_USER()", nil},
+		{"SHOW GRANTS FOR 'u'@'h' USING 'r1'", "'u'@'h'", []string{"'r1'"}},
+		{"SHOW GRANTS FOR 'u'@'h' USING 'r1'@'%', `r2`", "'u'@'h'", []string{"'r1'@'%'", "`r2`"}},
+		{"SHOW GRANTS FOR CURRENT_USER USING 'r1'", "CURRENT_USER", []string{"'r1'"}},
+	} {
+		e, err := sqlglot.ParseOne(tc.sql, "mysql")
+		if err != nil {
+			t.Errorf("%q: parse: %v", tc.sql, err)
+			continue
+		}
+		if e.Kind() != exp.KindShow || e.Text("this") != "GRANTS" {
+			t.Errorf("%q: want Show{this:GRANTS}\n%s", tc.sql, e.ToS())
+			continue
+		}
+		if got := e.Text("target"); got != tc.target {
+			t.Errorf("%q: target = %q, want %q", tc.sql, got, tc.target)
+		}
+		using, _ := e.Arg("using").([]exp.Expression)
+		if len(using) != len(tc.using) {
+			t.Errorf("%q: len(using) = %d, want %d", tc.sql, len(using), len(tc.using))
+		} else {
+			for i, want := range tc.using {
+				if got := using[i].Name(); got != want {
+					t.Errorf("%q: using[%d] = %q, want %q", tc.sql, i, got, want)
+				}
+			}
+		}
+		if out, _ := sqlglot.Generate(e, "mysql", generator.Options{}); out != tc.sql {
+			t.Errorf("%q: round-trip = %q", tc.sql, out)
+		}
+	}
+	// Engine-invalid forms (ERROR 1064 on 8.0.46) fail closed to Command — never a Show, never a
+	// hard parse error.
+	for _, sql := range []string{
+		"SHOW GRANTS FOR",
+		"SHOW GRANTS USING 'r1'",
+		"SHOW GRANTS FOR 'u'@'h' USING",
+		"SHOW GRANTS FOR 'u'@'h' USING 'r1',",
+		"SHOW GRANTS FOR 'u'@'h' USING , 'r1'",
+		"SHOW GRANTS FOR 'u'@'h' USING 'r1',, 'r2'",
+		"SHOW GRANTS FOR 'u'@'h' USING ?",
+		"SHOW GRANTS FOR ?",
+		"SHOW GRANTS FOR 'u'@ 'h'", // host must touch the @
+		"SHOW GRANTS FOR 'u'@'h' USING 'r'@ '%'",
+		"SHOW GRANTS FOR 'u'@'h' LIKE '%'",
+		"SHOW GRANTS FOR 'u'@'h' LIMIT 1",
+		"SHOW GRANTS FOR foo()",
+		"SHOW GRANTS FOR CURRENT_USER@'h'",
+	} {
+		e, err := sqlglot.ParseOne(sql, "mysql")
+		if err != nil {
+			t.Errorf("%q: want Command fallback, got parse error: %v", sql, err)
+			continue
+		}
+		if e.Kind() != exp.KindCommand {
+			t.Errorf("%q: want Command (fail-closed), got %s\n%s", sql, exp.ClassName(e.Kind()), e.ToS())
+		}
+	}
+}
+
 // MySQL account-grammar over-acceptance the reviewers flagged: parseMySQLUserSpec / the PASSWORD value
 // grammar must reject forms MySQL 8.0.33 itself rejects (ERROR 1064), degrading to Command rather than
 // building a structured privileged node.
@@ -210,6 +285,10 @@ func TestMySQLAccountGrammarFailClosed(t *testing.T) {
 		"SET PASSWORD = ?",                          // placeholder is not an auth string
 		"SET PASSWORD = 5",                          // number is not an auth string
 		"SET PASSWORD `=` 'x'",                      // backtick-quoted `=` is not the delimiter
+		"SET PASSWORD FOR ? = 'x'",                  // placeholder is not a user
+		"SHOW CREATE USER ?",                        // ...ditto
+		"SET PASSWORD FOR 'u'@ 'h' = 'x'",           // host must touch the @
+		"SHOW CREATE USER 'u'@ 'h'",                 // ...ditto
 	} {
 		e, err := sqlglot.ParseOne(sql, "mysql")
 		if err == nil && e.Kind() != exp.KindCommand {
@@ -218,7 +297,8 @@ func TestMySQLAccountGrammarFailClosed(t *testing.T) {
 	}
 	// Valid MySQL account names/hosts must NOT be rejected (regression guard): a keyword-shaped
 	// unquoted name and a numeric host are both accepted by MySQL 8.0.33.
-	for _, sql := range []string{"SHOW CREATE USER session", "SHOW CREATE USER u@123", "SHOW CREATE USER 'u'@'h'"} {
+	// A space BEFORE the @ is valid MySQL ('u' @'h'); only after it is ERROR 1064.
+	for _, sql := range []string{"SHOW CREATE USER session", "SHOW CREATE USER u@123", "SHOW CREATE USER 'u'@'h'", "SHOW CREATE USER 'u' @'h'"} {
 		if e, err := sqlglot.ParseOne(sql, "mysql"); err != nil || e.Kind() != exp.KindShow {
 			t.Errorf("%q: want Show (valid MySQL), got %v / %v", sql, kindOrErr(e, err), err)
 		}

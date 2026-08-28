@@ -251,12 +251,12 @@ func writeGaps(fails map[gapKey]string) error {
 // SQLGLOT_CORPUS_UPDATE=1 run on the merged tree.
 const (
 	minPassBase     = 955
-	minPassMySQL    = 425
+	minPassMySQL    = 429
 	minPassPostgres = 468
 )
 
 // Minimum record counts per corpus, from the committed fixtures (identity.sql:
-// 955 lines; dialect_identity.jsonl: 424 mysql + 468 postgres). Unlike the pass
+// 955 lines; dialect_identity.jsonl: 429 mysql + 468 postgres). Unlike the pass
 // floors, these ratchet how many cases are *exercised*, independent of how many
 // pass. Without them, silently dropping a FAILING record — a truncated
 // re-extraction, or deleting dialect_identity.jsonl entirely — would leave the
@@ -265,7 +265,7 @@ const (
 // legitimately grows; a count below any floor means the corpus shrank.
 const (
 	minTotalBase     = 955
-	minTotalMySQL    = 425
+	minTotalMySQL    = 429
 	minTotalPostgres = 468
 )
 

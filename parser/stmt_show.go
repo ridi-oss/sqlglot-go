@@ -91,7 +91,7 @@ var showParsers = map[string]func(*Parser) exp.Expression{
 	"EVENTS":            showParser("EVENTS", false, nil, nil),
 	"FUNCTION CODE":     showParser("FUNCTION CODE", true, nil, nil),
 	"FUNCTION STATUS":   showParser("FUNCTION STATUS", false, nil, nil),
-	"GRANTS":            showParser("GRANTS", "FOR", nil, nil),
+	"GRANTS":            (*Parser).parseShowGrants,
 	"INDEX":             showParser("INDEX", "FROM", nil, nil),
 	"MASTER STATUS":     showParser("MASTER STATUS", false, nil, nil),
 	"OPEN TABLES":       showParser("OPEN TABLES", false, nil, nil),

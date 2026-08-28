@@ -35,7 +35,13 @@ func (g *Generator) showSQL(e expressions.Expression) string {
 	case "COLUMNS", "INDEX":
 		target = " FROM" + target
 	case "GRANTS":
-		target = " FOR" + target
+		// Unlike upstream's unconditional " FOR": bare `SHOW GRANTS FOR` is invalid MySQL.
+		if target != "" {
+			target = " FOR" + target
+			if using := g.expressions(exprsOptions{expression: e, key: "using", flat: true}); using != "" {
+				target += " USING " + using
+			}
+		}
 	case "LINKS", "PARTITIONS":
 		if target != "" {
 			target = " ON" + target

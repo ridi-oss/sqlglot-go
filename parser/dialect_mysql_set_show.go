@@ -73,6 +73,39 @@ func (p *Parser) parseShowCreateUser() exp.Expression {
 	return p.expression(exp.Show(exp.Args{"this": "CREATE USER", "target": user}), nil, nil)
 }
 
+// parseShowGrants parses `SHOW GRANTS [FOR <user> [USING <role>, ...]]` (e.g. `SHOW GRANTS FOR
+// 'u'@'h' USING 'r1'`) into Show{this:"GRANTS", target, using}, the specs via parseMySQLUserSpec
+// like SHOW CREATE USER — the generic path's parseIdVar cannot consume `@host`. Beyond pinned
+// upstream. Strict per MySQL 8.0.46: FOR needs a user, USING needs FOR + a role, no trailing
+// clause (`LIKE`/`LIMIT` are rejected); violations fail closed to Command.
+func (p *Parser) parseShowGrants() exp.Expression {
+	var target exp.Expression
+	var using []exp.Expression
+	if p.matchUnquotedTextSeq("FOR") {
+		target = p.parseMySQLUserSpec()
+		if target == nil {
+			return nil
+		}
+		// Strict list — parseCsv would silently drop dangling commas (`USING 'r1',` is ERROR 1064).
+		if p.matchUnquotedTextSeq("USING") {
+			for {
+				role := p.parseMySQLUserSpec()
+				if role == nil {
+					return nil
+				}
+				using = append(using, role)
+				if !p.match(tokens.COMMA) {
+					break
+				}
+			}
+		}
+	}
+	if p.curr.IsValid() && p.curr.TokenType != tokens.SEMICOLON {
+		return nil
+	}
+	return p.expression(exp.Show(exp.Args{"this": "GRANTS", "target": target, "using": using}), nil, nil)
+}
+
 // mysqlUserHostTokens are the tokens a MySQL host part (`user@<host>`) may be: an identifier/backtick,
 // a string, or a number/IP-shaped token (`'%'`, localhost, 123). It excludes operators, so a bare
 // unquoted `%` (`u@%`, an operator token) fails closed — only `'u'@'%'` is valid MySQL.
@@ -89,9 +122,9 @@ var mysqlUserHostTokens = map[tokens.TokenType]bool{
 // name may be over-accepted here — a FAIL-SAFE fidelity gap, since a consumer gates on the statement
 // kind (PASSWORD / CREATE USER), not the account name. Verified against MySQL 8.0.33. See DEVIATIONS.
 func (p *Parser) parseMySQLUserSpec() exp.Expression {
-	// A user spec starts with a name, never the `@` host separator (reject a leading `@'host'`) and
-	// never a bare number (`SHOW CREATE USER 123` is invalid MySQL — a number is not an account name).
-	if p.curr.TokenType == tokens.PARAMETER || p.curr.TokenType == tokens.NUMBER {
+	// A user spec starts with a name — never `@'host'`, a bare number, or a `?` placeholder.
+	if p.curr.TokenType == tokens.PARAMETER || p.curr.TokenType == tokens.NUMBER ||
+		p.curr.TokenType == tokens.PLACEHOLDER {
 		return nil
 	}
 	start := p.curr
@@ -108,8 +141,9 @@ func (p *Parser) parseMySQLUserSpec() exp.Expression {
 		end = p.prev
 	}
 	if p.match(tokens.PARAMETER) { // the '@' between user and host
-		// CURRENT_USER takes no host (`CURRENT_USER@'h'` is invalid MySQL).
-		if isCurrentUser || !mysqlUserHostTokens[p.curr.TokenType] {
+		// CURRENT_USER takes no host; the host must touch the `@` (`'u'@ 'h'` is ERROR 1064,
+		// `'u' @'h'` is fine — MySQL 8.0.46).
+		if isCurrentUser || !mysqlUserHostTokens[p.curr.TokenType] || !p.isConnected() {
 			return nil
 		}
 		p.advance()
