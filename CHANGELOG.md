@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.26.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.25.0...v0.26.0) (2026-08-29)
+
+
+### Features
+
+* **parser:** record source spans on SELECT projections ([#69](https://github.com/ridi-oss/sqlglot-go/issues/69)) ([375188c](https://github.com/ridi-oss/sqlglot-go/commit/375188c51c560700fdf1b15f71bc941b4e0078a6))
+
 ## [0.25.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.24.0...v0.25.0) (2026-08-28)
 
 
