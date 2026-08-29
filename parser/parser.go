@@ -673,7 +673,7 @@ func (p *Parser) parseSelect(opts ...bool) exp.Expression {
 		// SELECT TOP is dead for M1 because TOP is not a base tokenizer keyword,
 		// but wire the parser shape to match upstream.
 		top := p.parseLimit(nil, true, false)
-		projections := p.parseExpressions()
+		projections := p.parseCsv(p.parseProjection)
 		selectArgs := exp.Args{"distinct": distinct, "expressions": projections, "hint": hint}
 		if top != nil {
 			selectArgs["limit"] = top
@@ -2763,6 +2763,26 @@ func (p *Parser) parseCsv(parseMethod func() exp.Expression, sep ...tokens.Token
 }
 
 func (p *Parser) parseExpressions() []exp.Expression { return p.parseCsv(p.parseExpression) }
+
+// parseSpanned runs parseMethod and stamps the result with its source span (rune offsets into
+// the SQL being parsed, end-exclusive; see exp.SetSpan). Go-only extension, DEVIATIONS.md §6.2.
+// Wrap any parse entry point with it to extend span coverage to more node kinds.
+func (p *Parser) parseSpanned(parseMethod func() exp.Expression) exp.Expression {
+	startValid := p.curr.IsValid()
+	start := p.curr.Start
+	this := parseMethod()
+	if this != nil && startValid && p.prev.IsValid() {
+		this.SetSpan(start, p.prev.End+1)
+	}
+	return this
+}
+
+// parseProjection parses one SELECT-list item, stamping the span on the expression itself
+// (inside any alias) so the original spelling of an unaliased computed projection is
+// recoverable — e.g. MySQL labels such a column with its verbatim source text.
+func (p *Parser) parseProjection() exp.Expression {
+	return p.parseAlias(p.parseSpanned(p.parseAssignment), false)
+}
 
 func (p *Parser) parseWith(skipWithToken bool) exp.Expression {
 	if !skipWithToken && !p.match(tokens.WITH) {
