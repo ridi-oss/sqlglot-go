@@ -48,6 +48,8 @@ type Expression interface {
 	PopComments() []string
 	Meta() map[string]any
 	MetaGet(key string) any
+	SetSpan(start, end int)
+	Span() (start, end int, ok bool)
 	Is(Trait) bool
 	IsPrimitive() bool
 	IsLeaf() bool

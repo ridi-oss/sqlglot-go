@@ -1319,6 +1319,29 @@ existing AST and grammar.
 
 ---
 
+### 6.2 Projection source spans (`Span`/`SetSpan`/`SpanText`)
+
+**What upstream does:** v30.12.0 keeps token positions (`Token.line/col/start/end`) but discards
+them at parse time — no expression node records where in the source it came from.
+
+**What sqlglot-go does:** the parser stamps each top-level SELECT-list expression with its source
+span — rune offsets into the SQL string, start-inclusive/end-exclusive — stored in `Node.meta`
+(`meta["span"]`), so it survives `Copy()` and never affects `HashKey`, `Equal`, or generated SQL.
+The span is set on the expression *inside* any `Alias` wrapper. Accessors: `Expression.SetSpan` /
+`Expression.Span` (`expressions/span.go`), plus `exp.SpanText(sql, e)` returning the verbatim
+source slice. The capture hook is generic (`Parser.parseSpanned`); coverage can grow to more node
+kinds by wrapping their parse entry points — projections are the first stamped site (consumer:
+recovering MySQL's verbatim column label for unaliased computed projections).
+
+**Semantics:** a span means "where this node's text was in the original source *at parse time*".
+Rewrites (qualify, transforms) copy the stale span along; read spans off the freshly parsed tree.
+`SpanText` fails closed (`ok=false`) on missing, inverted, or out-of-range spans.
+
+**Tests and parse/generate status:** `expressions/span_test.go`, `parser/parser_span_test.go`. No
+`upstream_extensions.jsonl` entry: no grammar change, no output change — analysis metadata only.
+
+---
+
 ## 7. Table/column qualifier arg renamed `db` → `schema` (API + `.ToS()`; round-trip identical)
 
 **What upstream does:** upstream names the middle table/column qualifier `db` — the `Table`/`Column`
