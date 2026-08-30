@@ -121,10 +121,10 @@ differential-check against the pinned Python):
   round-trip regressions), MySQL `||`/`&&`/`XOR` logical operators, MySQL `CAST(x AS TIMESTAMP/BLOB)`.
 - DIALECTS beyond base + MySQL + Postgres (upstream ships 30+).
 - PARSER coverage is bounded by the ported corpus: constructs upstream parses that are NOT exercised
-  by the identity fixtures may still be gaps — e.g. `exp.Heredoc` for postgres `CREATE FUNCTION ... AS
-  $$...$$` dollar-quoted bodies (still degrades to Command; see the fidelity-slice deferred item),
-  and any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or DDL detail not hit by a fixture. Treat a
-  not-yet-parsed construct upstream parses as a gap to close.
+  by the identity fixtures may still be gaps — e.g. any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or
+  DDL detail not hit by a fixture. Treat a not-yet-parsed construct upstream parses as a gap to
+  close. (Closed this way so far: `exp.Heredoc` postgres dollar-quoted bodies, and the
+  `exp.Block`/`WhileBlock`/`EndStatement` procedure-body machinery.)
 
 ## MySQL grammar + tokenizer correctness + typed dialect + Node.Meta — DONE (PR #2)
 
@@ -561,7 +561,7 @@ testdata/fidelity_cases.txt + fidelity_test.go; corpus stays 955/424/468 base/my
   full PartitionByRangeProperty and round-trips to identical SQL; only the incidental partition-
   expression arg shape differs, so want_ast stays the honest Python oracle and only the exact ToS()
   match is relaxed (capped at maxASTDivergences=2). Closing it belongs to the function-parity slice.
-- Deferred (the 1 remaining full-corpus Go-only Command, outside the worklist): postgres
-  `CREATE FUNCTION ... AS $$ ... $$` dollar-quoted (heredoc) UDF body degrades to Command because
-  exp.Heredoc is not modeled (parser_ddl.go:258-269 fails closed; round-trips verbatim, so the
-  corpus stays green). Adding exp.Heredoc is separate function/body-parsing work.
+- Resolved later (was: the 1 remaining full-corpus Go-only Command): postgres
+  `CREATE FUNCTION ... AS $$ ... $$` dollar-quoted UDF bodies now parse to exp.Heredoc, and
+  procedure BEGIN...END bodies to exp.Block (+ exp.WhileBlock/EndStatement), matching upstream
+  parser.py:2114-2135/2463/9368-9370. See procedure_block_test.go + the fidelity oracle rows.

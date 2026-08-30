@@ -2608,6 +2608,23 @@ func (g *Generator) blockSQL(e expressions.Expression) string {
 	return g.expressions(exprsOptions{expression: e, sep: "; ", flat: true})
 }
 
+// heredoc_sql (generator.py:1510-1512).
+func (g *Generator) heredocSQL(e expressions.Expression) string {
+	tag := g.sqlKey(e, "tag")
+	return "$" + tag + "$" + g.sqlKey(e, "this") + "$" + tag + "$"
+}
+
+// exp.EndStatement: lambda *_: "END" (generator.py:183).
+func (g *Generator) endStatementSQL(expressions.Expression) string {
+	return "END"
+}
+
+// whileblock_sql (generator.py:6208-6210): base has no WHILE rendering (T-SQL overrides it).
+func (g *Generator) whileBlockSQL(expressions.Expression) string {
+	g.unsupported("Unsupported While block syntax")
+	return ""
+}
+
 func (g *Generator) hintSQL(e expressions.Expression) string {
 	// QUERY_HINT_SEP: mysql joins hint items with a space (generators/mysql.py:138),
 	// base/postgres with ", " (generator.py:368).

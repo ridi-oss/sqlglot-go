@@ -12,6 +12,9 @@ func Limit(args Args) Expression               { return newNode(KindLimit, args)
 func Offset(args Args) Expression              { return newNode(KindOffset, args) }
 func Tuple(args Args) Expression               { return newNode(KindTuple, args) }
 func Block(args Args) Expression               { return newNode(KindBlock, args) }
+func WhileBlock(args Args) Expression          { return newNode(KindWhileBlock, args) }
+func EndStatement(args Args) Expression        { return newNode(KindEndStatement, args) }
+func Heredoc(args Args) Expression             { return newNode(KindHeredoc, args) }
 func With(args Args) Expression                { return newNode(KindWith, args) }
 func CTE(args Args) Expression                 { return newNode(KindCTE, args) }
 func RecursiveWithSearch(args Args) Expression { return newNode(KindRecursiveWithSearch, args) }

@@ -287,6 +287,10 @@ func (p *Parser) validateExpression(expression exp.Expression, args []any) exp.E
 
 func (p *Parser) tryParse(parseMethod func() exp.Expression, retreat bool) (out exp.Expression) {
 	index := p.index
+	// parseBlock (via CREATE PROCEDURE) can consume whole semicolon chunks, which upstream's
+	// index-only _retreat cannot undo (upstream never try-parses across chunks; this port's
+	// parseCreate degrade path does), so chunk state is saved and restored alongside the index.
+	chunkIndex, chunkTokens, chunkTokensSize := p.chunkIndex, p.tokens, p.tokensSize
 	errorLevel := p.errorLevel
 	p.errorLevel = sqlerrors.IMMEDIATE
 	defer func() {
@@ -298,6 +302,7 @@ func (p *Parser) tryParse(parseMethod func() exp.Expression, retreat bool) (out 
 			}
 		}
 		if out == nil || retreat {
+			p.chunkIndex, p.tokens, p.tokensSize = chunkIndex, chunkTokens, chunkTokensSize
 			p.retreat(index)
 		}
 		p.errorLevel = errorLevel
@@ -395,6 +400,13 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 	chunksLength := len(p.chunks)
 	for p.chunkIndex < chunksLength {
 		p.advanceChunk()
+		if p.match(tokens.ELSE, false) {
+			return expressions
+		}
+		if len(expressions) > 0 && !p.next.IsValid() && p.match(tokens.END) {
+			expressions = append(expressions, exp.EndStatement(nil))
+			continue
+		}
 		stmt := parseMethod()
 		expressions = append(expressions, stmt)
 		// MySQL file-write INTO placement is validated per top-level statement so it also covers
@@ -406,6 +418,27 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 		p.checkErrors()
 	}
 	return expressions
+}
+
+// parseCondition ports _parse_condition (parser.py:2266-2267).
+func (p *Parser) parseCondition() exp.Expression {
+	return p.parseWrapped(p.parseExpression, true)
+}
+
+// parseBlock ports _parse_block (parser.py:2269-2276): the `BEGIN stmt; ...; END` body of a
+// procedure/function or WHILE statement, consuming the remaining semicolon chunks.
+func (p *Parser) parseBlock() exp.Expression {
+	return p.expression(exp.Block(exp.Args{
+		"expressions": p.parseBatchStatements(p.parseStatement, true),
+	}), nil, nil)
+}
+
+// parseWhileBlock ports _parse_whileblock (parser.py:2278-2281).
+func (p *Parser) parseWhileBlock() exp.Expression {
+	return p.expression(exp.WhileBlock(exp.Args{
+		"this": p.parseCondition(),
+		"body": p.parseBlock(),
+	}), nil, nil)
 }
 
 func (p *Parser) parse(parseMethod func() exp.Expression, rawTokens []tokens.Token, sql string) []exp.Expression {
@@ -450,6 +483,10 @@ func (p *Parser) parseStatement() exp.Expression {
 	// already-packed trailing STRING token.
 	if p.matchSet(p.dialect.TokenizerConfig.Commands) {
 		return p.parseCommand()
+	}
+	// parser.py:2296-2297: a leading WHILE starts a `WHILE <cond> <body>` block statement.
+	if p.matchTextSeq("WHILE") {
+		return p.parseWhileBlock()
 	}
 	// SAVEPOINT/RELEASE SAVEPOINT are ordinary VAR tokens (not statement keywords), so they are
 	// dispatched here by leading text before the generic expression path would mis-parse them as an

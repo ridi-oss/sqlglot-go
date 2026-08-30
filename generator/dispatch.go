@@ -68,6 +68,9 @@ func init() {
 	dispatch[expressions.KindOffset] = (*Generator).offsetSQL
 	dispatch[expressions.KindHint] = (*Generator).hintSQL
 	dispatch[expressions.KindBlock] = (*Generator).blockSQL
+	dispatch[expressions.KindWhileBlock] = (*Generator).whileBlockSQL
+	dispatch[expressions.KindEndStatement] = (*Generator).endStatementSQL
+	dispatch[expressions.KindHeredoc] = (*Generator).heredocSQL
 	dispatch[expressions.KindPlaceholder] = (*Generator).placeholderSQL
 	dispatch[expressions.KindTuple] = (*Generator).tupleSQL
 	dispatch[expressions.KindWith] = (*Generator).withSQL
