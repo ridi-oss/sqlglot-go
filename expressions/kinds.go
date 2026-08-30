@@ -674,6 +674,10 @@ const (
 	// KindHeredoc ports exp.Heredoc (ddl.py:177-178): a dollar-quoted UDF/procedure body
 	// (postgres `AS $$ ... $$`), built by _parse_heredoc (parser.py:9368-9370).
 	KindHeredoc
+	// KindSemicolon ports exp.Semicolon (query.py:2089-2090): the carrier for a trailing
+	// `;`'s comments — a SEMICOLON token with comments becomes its own statement chunk
+	// (parser.py:2159-2161) and parses via STATEMENT_PARSERS (parser.py:1110).
+	KindSemicolon
 )
 
 type Trait uint32
@@ -789,6 +793,7 @@ var argTypes = map[Kind][]argSpec{
 	KindWhileBlock:          {{"this", true}, {"body", true}},
 	KindEndStatement:        {},
 	KindHeredoc:             {{"this", true}, {"tag", false}},
+	KindSemicolon:           {},
 	KindPlaceholder:         {{"this", false}, {"kind", false}, {"widget", false}, {"jdbc", false}},
 	KindTuple:               {{"expressions", false}},
 	KindWith:                {{"expressions", true}, {"recursive", false}, {"search", false}},
@@ -1613,6 +1618,7 @@ var className = map[Kind]string{
 	KindWhileBlock:                          "WhileBlock",
 	KindEndStatement:                        "EndStatement",
 	KindHeredoc:                             "Heredoc",
+	KindSemicolon:                           "Semicolon",
 	KindPlaceholder:                         "Placeholder",
 	KindTuple:                               "Tuple",
 	KindWith:                                "With",

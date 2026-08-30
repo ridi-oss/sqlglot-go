@@ -221,12 +221,20 @@ yield a root `Scope` (target + FROM/USING/JOIN sources), complete-or-none (a mal
 the root scope, never emits a partial one). The optimizer passes use a separate compatibility
 traversal reproducing upstream exactly. Tests `optimizer/scope_dml_test.go`.
 
-### 6.2 Projection source spans
+### 6.2 Projection + statement source spans
 Upstream discards token positions at parse time. The port stamps each SELECT projection (inside any
 `Alias`) with `meta["span"]` (rune offsets) and `meta["spanText"]` (verbatim text — `1 +    1` keeps
 its spacing), both-or-neither, via `parseSpanned`. Meta survives `Copy()`, never affects output/
 `HashKey`/`Equal`; a rewrite that replaces the node drops it. Accessors in `expressions/span.go`.
-Tests `expressions/span_test.go`, `parser/parser_span_test.go`, `optimizer/qualify_span_test.go`.
+Every top-level statement `Parse` returns is stamped the same way (a multi-chunk statement — a
+procedure `BEGIN…END` body — spans all its chunks, inner semicolons included), so a batch consumer
+can split a multi-statement input into verbatim per-statement slices without a `Generate()`
+rewrite. The span is the statement's token range: separators and comment text outside the first/
+last token are not covered (the slice is exact, not exhaustive). A boundary token spliced from an
+activated MySQL executable comment widens to the `/*!NNNNN … */` delimiters — statement spans only
+— so the slice stays executable MySQL.
+Tests `expressions/span_test.go`, `parser/parser_span_test.go`, `optimizer/qualify_span_test.go`,
+`statement_span_test.go`.
 
 ---
 
