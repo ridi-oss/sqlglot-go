@@ -7,7 +7,7 @@ import (
 )
 
 // Projection source spans (DEVIATIONS.md §6.2): each top-level SELECT-list expression carries
-// the rune span of its verbatim source text, set on the expression inside any alias.
+// its verbatim source text (and rune span), set on the expression inside any alias.
 func TestProjectionSpans(t *testing.T) {
 	cases := []struct {
 		sql     string
@@ -37,13 +37,21 @@ func TestProjectionSpans(t *testing.T) {
 			if node.Kind() == exp.KindAlias {
 				node = node.This()
 			}
-			text, ok := exp.SpanText(tc.sql, node)
+			text, ok := node.SpanText()
 			if !ok {
-				t.Errorf("%s: projection %d has no span", tc.sql, i)
+				t.Errorf("%s: projection %d has no span text", tc.sql, i)
 				continue
 			}
 			if text != tc.want[i] {
 				t.Errorf("%s: projection %d span text = %q, want %q", tc.sql, i, text, tc.want[i])
+			}
+			start, end, ok := node.Span()
+			if !ok {
+				t.Errorf("%s: projection %d has no span", tc.sql, i)
+				continue
+			}
+			if got := string([]rune(tc.sql)[start:end]); got != tc.want[i] {
+				t.Errorf("%s: projection %d span [%d,%d) = %q, want %q", tc.sql, i, start, end, got, tc.want[i])
 			}
 		}
 	}
@@ -65,9 +73,9 @@ func TestProjectionSpansNestedSelects(t *testing.T) {
 			if node.Kind() == exp.KindAlias {
 				node = node.This()
 			}
-			text, ok := exp.SpanText(sql, node)
+			text, ok := node.SpanText()
 			if !ok {
-				t.Errorf("projection %s has no span", node.ToS())
+				t.Errorf("projection %s has no span text", node.ToS())
 				continue
 			}
 			got[text] = true
@@ -92,8 +100,11 @@ func TestProjectionSpanInsideAliasAndCopy(t *testing.T) {
 	if _, _, ok := alias.Span(); ok {
 		t.Fatal("Alias wrapper itself must not carry the expression span")
 	}
+	if _, ok := alias.SpanText(); ok {
+		t.Fatal("Alias wrapper itself must not carry the expression span text")
+	}
 	inner := alias.This().Copy()
-	if text, ok := exp.SpanText(sql, inner); !ok || text != "1+1" {
+	if text, ok := inner.SpanText(); !ok || text != "1+1" {
 		t.Fatalf("copied inner span text = %q,%v; want \"1+1\",true", text, ok)
 	}
 }
