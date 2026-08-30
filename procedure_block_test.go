@@ -64,6 +64,78 @@ func TestCreateProcedureBody(t *testing.T) {
 	}
 }
 
+// divergence test for DEVIATIONS §1.18: END terminates a routine's block, so a trailing
+// statement is its OWN statement — upstream folds it into the procedure's Block (after
+// EndStatement), but real PostgreSQL 16 (BEGIN ATOMIC, the engine that parses this form
+// server-side) runs the trailing statement separately. Nested WHILE blocks are unaffected:
+// only the routine body's own terminating END returns to the outer batch.
+func TestBlockEndTerminates(t *testing.T) {
+	cases := []struct {
+		sql   string
+		kinds []exp.Kind
+	}{
+		{"CREATE PROCEDURE p() BEGIN SELECT 1; END; SELECT 2",
+			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
+		{"CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END; UPDATE t SET a = 1",
+			[]exp.Kind{exp.KindCreate, exp.KindUpdate}},
+		{"CREATE PROCEDURE p() BEGIN WHILE (x < 3) BEGIN SELECT 1; END; END; SELECT 9",
+			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
+		// Empty body (`BEGIN END`, valid MySQL): terminates the same way instead of
+		// upstream's Column(END) mis-parse.
+		{"CREATE PROCEDURE p() BEGIN END; SELECT 2",
+			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
+		// A WHILE body without its own BEGIN is the single following statement, so it cannot
+		// steal the routine's END.
+		{"CREATE PROCEDURE p() BEGIN WHILE (x < 3) SELECT 1; END; SELECT 9",
+			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
+		// Multiple trailers all stay separate statements.
+		{"CREATE PROCEDURE p() BEGIN SELECT 1; END; SELECT 2; SELECT 3",
+			[]exp.Kind{exp.KindCreate, exp.KindSelect, exp.KindSelect}},
+		// Two routines in one batch.
+		{"CREATE PROCEDURE p() BEGIN SELECT 1; END; CREATE PROCEDURE q() BEGIN SELECT 2; END",
+			[]exp.Kind{exp.KindCreate, exp.KindCreate}},
+	}
+	for _, tc := range cases {
+		statements, err := sqlglot.Parse(tc.sql, "mysql")
+		if err != nil {
+			t.Errorf("%q: parse: %v", tc.sql, err)
+			continue
+		}
+		if len(statements) != len(tc.kinds) {
+			t.Errorf("%q: got %d statements, want %d", tc.sql, len(statements), len(tc.kinds))
+			continue
+		}
+		for i, want := range tc.kinds {
+			if statements[i].Kind() != want {
+				t.Errorf("%q stmt %d: Kind=%s, want %s", tc.sql, i, exp.ClassName(statements[i].Kind()), exp.ClassName(want))
+			}
+		}
+		// The routine's Block must not smuggle anything past its EndStatement.
+		block := statements[0].Find(exp.KindBlock)
+		if block == nil {
+			t.Errorf("%q: no Block in Create", tc.sql)
+			continue
+		}
+		inner := block.Expressions()
+		if len(inner) == 0 || inner[len(inner)-1].Kind() != exp.KindEndStatement {
+			t.Errorf("%q: Block does not end with EndStatement: %s", tc.sql, block.ToS())
+		}
+	}
+}
+
+// A bare top-level ELSE chunk is a parse error (real MySQL/PG reject it) — never upstream's
+// silent drop of every later statement (DEVIATIONS §1.18).
+func TestTopLevelElseFailsClosed(t *testing.T) {
+	for _, sql := range []string{
+		"SELECT 1; ELSE; SELECT 2",
+		"CREATE PROCEDURE p() BEGIN SELECT 1; END; ELSE; SELECT 2",
+	} {
+		if _, err := sqlglot.Parse(sql, "mysql"); err == nil {
+			t.Errorf("%q parsed; want error", sql)
+		}
+	}
+}
+
 // A standalone `BEGIN SELECT 1; END` is not a valid statement in any target dialect (BEGIN
 // starts a transaction); upstream parse-errors it too. Must stay fail-closed.
 func TestBareBeginBlockFailsClosed(t *testing.T) {

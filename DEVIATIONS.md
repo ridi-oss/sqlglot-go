@@ -120,6 +120,21 @@ that whenever the body itself contains `$$` (the reason a named tag exists). The
 on `Heredoc.tag` (`$fn$…$fn$` round-trips verbatim). `parser_ddl.go` `heredocTag`;
 test `TestHeredocTagPreserved`.
 
+### 1.18 `END` terminates a routine's `BEGIN…END` block
+Upstream `_parse_block` consumes ALL remaining chunks, folding
+`CREATE PROCEDURE p() … END; SELECT 2` into ONE `Create` whose Block smuggles the trailing
+`Select` after `EndStatement`. Real PostgreSQL 16 — the engine that parses this form server-side
+(`BEGIN ATOMIC`) — treats the trailing statement as its own statement (verified: the SELECT runs
+separately). The port returns the block at its terminating `END` chunk, yielding
+`[Create, Select]`; a well-formed body is unchanged (its `END` is the last chunk). Applies to
+every `parseBlock` (a top-level `WHILE (…) BEGIN … END; SELECT 2` also splits). Three adjacent
+divergences in the same machinery: an empty body (`BEGIN END`, valid MySQL) terminates the same
+way instead of upstream's `Column(END)` mis-parse; a bare top-level `ELSE` chunk is a parse error
+(real MySQL/PG reject it) instead of upstream's silent drop of every later statement; and a WHILE
+body without its own `BEGIN` is the single following statement (T-SQL's actual binding), so it
+cannot steal the enclosing routine's `END`. `parser.go` `parseBatchStatements`/`parseWhileBlock`;
+test `TestBlockEndTerminates`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream
