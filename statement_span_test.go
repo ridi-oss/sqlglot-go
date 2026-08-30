@@ -25,12 +25,11 @@ func TestStatementSpans(t *testing.T) {
 			[]string{"select id,   ssn from t"}},
 		{"CREATE PROCEDURE p() BEGIN UPDATE t SET a = 1; SELECT 1; END", "mysql",
 			[]string{"CREATE PROCEDURE p() BEGIN UPDATE t SET a = 1; SELECT 1; END"}},
-		// Upstream-faithful quirk (_parse_block consumes ALL remaining chunks; verified against
-		// pinned Python, which also returns ONE statement here): a statement following a
-		// procedure's END folds into its Block. The span still covers exactly what the single
-		// returned statement contains — verbatim, nothing dropped.
+		// divergence (DEVIATIONS §1.18): END terminates the block, so a statement after it is
+		// its own statement — upstream folds SELECT 9 into the procedure's Block, but real
+		// PostgreSQL 16 (BEGIN ATOMIC) runs the trailing statement separately.
 		{"CREATE PROCEDURE p() BEGIN SELECT 1; END; SELECT 9", "mysql",
-			[]string{"CREATE PROCEDURE p() BEGIN SELECT 1; END; SELECT 9"}},
+			[]string{"CREATE PROCEDURE p() BEGIN SELECT 1; END", "SELECT 9"}},
 		{"CREATE FUNCTION f() RETURNS INT AS $fn$ SELECT '$$'; $fn$ LANGUAGE plpgsql; SELECT 9", "postgres",
 			[]string{"CREATE FUNCTION f() RETURNS INT AS $fn$ SELECT '$$'; $fn$ LANGUAGE plpgsql", "SELECT 9"}},
 		// The trailing-comment `;` chunk parses to exp.Semicolon (its span is the `;`).

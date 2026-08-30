@@ -403,16 +403,37 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 	expressions := []exp.Expression{}
 	if sepFirstStatement {
 		p.match(tokens.BEGIN)
+		// Empty block (`BEGIN END`, valid MySQL): the block's own END is the chunk's last
+		// token — terminate here instead of mis-parsing END as a column (DEVIATIONS §1.18).
+		if p.curr.TokenType == tokens.END && !p.next.IsValid() && p.match(tokens.END) {
+			return []exp.Expression{p.spanned(exp.EndStatement(nil), p.prev, p.prev)}
+		}
 		expressions = append(expressions, parseStamped())
 	}
 	chunksLength := len(p.chunks)
 	for p.chunkIndex < chunksLength {
 		p.advanceChunk()
 		if p.match(tokens.ELSE, false) {
+			// Upstream returns here at top level too, silently dropping every later chunk
+			// (`SELECT 1; ELSE; SELECT 2` -> [Select]). Real MySQL/PG reject a bare ELSE, and
+			// silently losing statements is fail-open — error at top level instead; inside a
+			// block the return still binds ELSE to the enclosing if/while (DEVIATIONS §1.18).
+			if !sepFirstStatement {
+				p.raiseError("Unexpected ELSE")
+				p.checkErrors()
+			}
 			return expressions
 		}
 		if len(expressions) > 0 && !p.next.IsValid() && p.match(tokens.END) {
 			expressions = append(expressions, p.spanned(exp.EndStatement(nil), p.prev, p.prev))
+			// divergence: inside a block (sepFirstStatement), END terminates the block; the
+			// remaining chunks belong to the outer batch. Upstream's _parse_block keeps
+			// consuming, folding `CREATE PROCEDURE ... END; SELECT 2` into ONE Create — but
+			// real PostgreSQL 16 (BEGIN ATOMIC, the engine that parses this server-side)
+			// runs the trailing SELECT as its own statement. See DEVIATIONS §1.18.
+			if sepFirstStatement {
+				return expressions
+			}
 			continue
 		}
 		stmt := parseStamped()
@@ -434,19 +455,29 @@ func (p *Parser) parseCondition() exp.Expression {
 }
 
 // parseBlock ports _parse_block (parser.py:2269-2276): the `BEGIN stmt; ...; END` body of a
-// procedure/function or WHILE statement, consuming the remaining semicolon chunks.
+// procedure/function or WHILE statement, consuming semicolon chunks up to and including the
+// block's terminating END chunk (divergence from upstream's consume-all; DEVIATIONS §1.18).
 func (p *Parser) parseBlock() exp.Expression {
 	return p.expression(exp.Block(exp.Args{
 		"expressions": p.parseBatchStatements(p.parseStatement, true),
 	}), nil, nil)
 }
 
-// parseWhileBlock ports _parse_whileblock (parser.py:2278-2281).
+// parseWhileBlock ports _parse_whileblock (parser.py:2278-2281). divergence (§1.18): a body
+// without its own BEGIN is the single following statement (T-SQL's actual binding) — under
+// upstream's consume-all _parse_block it would instead steal the enclosing routine's END and
+// every later chunk.
 func (p *Parser) parseWhileBlock() exp.Expression {
-	return p.expression(exp.WhileBlock(exp.Args{
-		"this": p.parseCondition(),
-		"body": p.parseBlock(),
-	}), nil, nil)
+	condition := p.parseCondition()
+	var body exp.Expression
+	if p.curr.TokenType == tokens.BEGIN {
+		body = p.parseBlock()
+	} else {
+		body = p.expression(exp.Block(exp.Args{
+			"expressions": []exp.Expression{p.parseStatement()},
+		}), nil, nil)
+	}
+	return p.expression(exp.WhileBlock(exp.Args{"this": condition, "body": body}), nil, nil)
 }
 
 func (p *Parser) parse(parseMethod func() exp.Expression, rawTokens []tokens.Token, sql string) []exp.Expression {
