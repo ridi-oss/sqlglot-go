@@ -1,1414 +1,247 @@
 # Deviations from upstream sqlglot
 
-sqlglot-go is a faithful ~1:1 port of **tobymao/sqlglot v30.12.0**. This file records every place the
-port *intentionally* behaves differently from the Python original, so downstream consumers and future
-porters know exactly where — and why — the two disagree. It complements the per-site code comments
-(grep `divergence`/`Unlike upstream`) and the `ROADMAP.md` "known divergences" + "resolved-findings"
-ledgers, which carry the fine detail.
+Ledger of every place sqlglot-go *intentionally* differs from pinned upstream (v30.12.0), so an
+upstream bump or differential check can tell an intended divergence from a regression. One entry per
+deviation: upstream's behavior → ours → the guarding test. Reasoning lives in the code comments
+(grep `divergence` / `Unlike upstream`), commit history, and `ROADMAP.md`'s resolved-findings ledger.
 
-Deviations are grouped by how *observable* they are. Only **§1 changes same-dialect parse→generate
-output** vs upstream; everything else is either cross-dialect-only, output-preserving, a
-not-yet-ported boundary, or a Go-only analysis API / scope extension.
+Only **§1 changes same-dialect parse→generate output**; everything else is cross-dialect-only,
+output-preserving, a not-yet-ported boundary, or a Go-only API extension. Grammar the port accepts
+beyond upstream is additionally registered in `testdata/upstream_extensions.jsonl` (tripwired by
+`TestUpstreamExtensionsTripwire`).
 
 ---
 
 ## 1. Behavioral deviations (same input → different output than upstream)
 
-### 1.1 ASCII-only identifier case-folding  — *the one that changes same-dialect output*
-
-**What upstream does:** `Dialect.normalize_identifier` folds unquoted identifiers with Python
-`str.lower()` / `str.upper()`, and `Dialect.case_sensitive` tests with `str.isupper()`/`str.islower()`
-— all **full-Unicode** (`.reference/sqlglot-v30.12.0/sqlglot/dialects/dialect.py:1042-1050,1055-1064`).
-So upstream normalizes unquoted `CAFÉ` → `café` (it also lowercases the `É`).
-
-**What sqlglot-go does:** folds **ASCII-only** — `A-Z`↔`a-z` (bytes `0x41-0x5A`/`0x61-0x7A`), leaving
-every byte `≥ 0x80` untouched (`dialects/dialect.go` `asciiLower`/`asciiUpper` + `CaseSensitive`). So
-unquoted `CAFÉ` → `cafÉ` (the ASCII `C,A,F` fold; `É` is left alone). `CaseSensitive` likewise treats
-an identifier that differs only by non-ASCII case (e.g. `cafÉ`) as already-normalized, not
-needing-quotes.
-
-**Why we diverge (correctness):** upstream over-folds — it does not match the database it models. Real
-engines case-fold identifiers as an **ASCII** operation on multibyte encodings:
-
-- **PostgreSQL** — `downcase_identifier()` in `src/backend/parser/scansup.c`. Per the PG commit
-  *"Don't downcase non-ascii identifier chars in multi-byte encoding"*: *"Long-standing code has called
-  `tolower()` on identifier character bytes with the high bit set. This is clearly an error and produces
-  junk output when the encoding is multi-byte. This patch therefore restricts this activity to cases
-  where there is a character with the high bit set AND the encoding is single-byte."* On UTF-8
-  (`server_encoding=UTF8`) it degenerates to plain ASCII casing — only `A-Z` fold; multibyte sequences
-  pass through unchanged. Empirically verified: `CREATE TABLE t (CAFÉ int)` →
-  `information_schema.columns.column_name` = `cafÉ`, not `café`.
-  The docs (§4.1.1 *Identifiers and Key Words*) state only that *"unquoted names are always folded to
-  lower case"*; the ASCII-only detail lives in the source above.
-
-ASCII-only is **exact for UTF-8** (the dominant server_encoding) and a **safe under-fold** otherwise.
-The port has no DB connection and cannot know the actual encoding/locale, so it does not chase
-per-encoding/locale rules (e.g. a single-byte-encoding `tolower()` under a specific locale). The same
-ASCII-only fold applies to every strategy that folds (Lowercase → PostgreSQL/base; CaseInsensitive →
-Presto/Trino/Athena/Hive; and the currently-unused Uppercase/CaseInsensitiveUppercase).
-
-**Why it matters:** a downstream consumer keys column-level security policy off the *normalized*
-identifier. If sqlglot-go folds `É` but the backend does not, the normalized key resolves to a different
-column than the database binds — a correctness/safety bug. Beyond that consumer, it is simply modeling
-the dialect correctly.
-
-**Scope of the change:** `dialects/dialect.go` only — `NormalizeIdentifier` (fold) and `CaseSensitive`
-(needs-quoting test). Quoted-identifier handling is unchanged (quoted names are never folded, which is
-correct). Regression test: `identifier_casefold_test.go` (root, an original non-ported test). Full
-`go test ./...` stayed green — no existing test had encoded the old full-Unicode fold (fixtures are
-ASCII), so the blast radius was zero.
-
-**Upstream status:** this is a real upstream bug (the Go port faithfully mirrored it before this fix).
-Worth an upstream issue/PR to sqlglot proposing ASCII-restricted folding for the LOWERCASE/UPPERCASE
-strategies; until/unless upstream changes, this stays a deliberate divergence.
-
-### 1.2 MySQL-exact identifier folding — two non-upstream normalization strategies
-
-**Background.** §1.1 makes the *base/Postgres* fold ASCII-only, which is exactly right for PostgreSQL.
-**MySQL is different**: it folds identifiers **Unicode-simple and accent-PRESERVING**, under the fixed
-`utf8mb3_general_ci` collation (`system_charset_info`) via that collation's `.tolower` map — verified
-against the MySQL 8.0 source (`strings/ctype-utf8.cc` `my_unicase_default`; `sql/sql_base.cc`
-`find_field_in_table` uses `my_strcasecmp(system_charset_info, …)`, with a literal `// Ñ != N` comment).
-So MySQL treats `CAFÉ` == `café` (É→é, same column) and `NIÑO` == `niño`, but `CAFÉ` ≠ `CAFE` and
-`Ñ` ≠ `N` (accents kept), `ß` stays `ß` (no `ss`). Quoting (backticks) does **not** affect case. Column
-names are case-insensitive on every platform; database/table names are case-sensitive only when
-`lower_case_table_names = 0` (the Linux default).
-
-**Two things upstream does not have:**
-
-1. **Two new `NormalizationStrategy` members** (`dialects/dialect.go`), used only by opt-in (see below):
-   - `MySQLCaseInsensitive` — folds **every** identifier (columns and table/db names) with MySQL's map,
-     regardless of quoting. Models `lower_case_table_names = 1/2`.
-   - `MySQLCaseSensitiveTableNames` — **role-aware**: relation-level identifiers stay case-sensitive;
-     column-level identifiers fold. Models `lower_case_table_names = 0` (Linux default), where MySQL
-     resolves **table/db names, table aliases, CTE names, and column qualifiers** case-sensitively but
-     **column names** case-insensitively. Role is decided by the identifier's parent + arg key (see
-     `isRelationLevelIdentifier`): **preserved** for an `exp.Table` `this`/`db`/`catalog`, an
-     `exp.Column` `table`/`db`/`catalog` (a *qualifier* — it references a relation/alias), and an
-     `exp.TableAlias` `this` (a table alias or CTE name); **folded** for everything else — an
-     `exp.Column` `this` (the leaf column name), an `exp.TableAlias` `columns` entry (a CTE
-     output-column), an `exp.Alias` `alias` (a column alias), JOIN USING columns, etc. This matches
-     MySQL 8.4 exactly: `SELECT users.rrn FROM Users` errors because the qualifier is case-sensitive,
-     and `WITH Users AS (…) … FROM users` misses the CTE because CTE names are case-sensitive, while
-     column names fold. (Folding `Column.table` — as if a qualifier were column-level — makes a
-     qualified column against an unaliased mixed-case table, or a mixed-case CTE reference, resolve to
-     the wrong relation.) When the parent is absent (a lone `Copy()` or `parse_identifier` of a single
-     name), the identifier folds — the standalone-name default; bulk schema normalization does **not**
-     rely on that default (see *Bulk-schema normalization* below).
-
-     **`INFORMATION_SCHEMA` exception.** MySQL matches `INFORMATION_SCHEMA` case-**insensitively
-     regardless of lctn** — uniquely among schemas — because it is a virtual (synthesized) schema, not
-     an on-disk directory. Live-verified on MySQL 8.0.46 (lctn=0): `INFORMATION_SCHEMA.tables`,
-     `information_schema.TABLES`, and mixed case all resolve, as do its table names in any case; but
-     `PERFORMANCE_SCHEMA`, `MySQL`, and `SYS` are ordinary on-disk DBs and stay case-sensitive. So
-     `MySQLCaseSensitiveTableNames` folds a relation identifier — despite being relation-level — when it
-     names or qualifies `information_schema`: the schema name itself, a table name under it, and an
-     `exp.Column` `table` qualifier under it (see `isInformationSchemaRelationPart`, which reads the
-     sibling `db`, never the node's own kind). `performance_schema`/`mysql`/`sys` are left
-     case-sensitive. Under `MySQLCaseInsensitive` (lctn=1/2) everything folds anyway, so no special case
-     is needed there. Upstream models none of this (its MySQL is `CASE_SENSITIVE`, folding nothing).
-
-2. **The MySQL fold algorithm itself** — the exported **`dialects.MySQLLower`**
-   (`dialects/mysql_casefold.go`) folds via `mysqlLowerMap`, a byte-exact port of MySQL's `.tolower`
-   map (696 BMP entries) **baked into generated Go code** (`dialects/mysql_casefold_table.go`, via
-   `scripts/gen_mysql_casefold.py`; no runtime data file). This is deliberate and load-bearing:
-   **neither Go's `strings.ToLower` (simple mapping) nor the JVM's `String.lowercase()` (full mapping)
-   reproduces MySQL's table, and the two diverge from each other** on characters like `İ` (U+0130) and
-   Greek final-sigma (empirically measured). `MySQLLower` is **exported so it is the single fold
-   implementation across languages**: a consumer that must reproduce the normalized identifier
-   byte-for-byte (e.g. the JVM proxy that keys column masking off it) should **call `MySQLLower`
-   through a native binding** — one implementation, zero drift — or, failing that, regenerate the same
-   table. Never substitute a stdlib case function.
-
-**Caveat — MariaDB CTE names diverge.** These strategies model **MySQL**. Empirically (live probes,
-lctn=0): MySQL 5.7 / 8.0.33 / 8.4 and MariaDB 10.11 / 11.4 all agree that table/db names, column
-qualifiers, and table aliases are case-**sensitive** and column names case-**insensitive** — but MariaDB
-resolves **CTE names case-INSENSITIVELY even at lctn=0**, whereas MySQL treats them case-sensitively
-(`WITH Users AS (…) … FROM users` errors on MySQL, binds on MariaDB). So `MySQLCaseSensitiveTableNames`
-is exact for MySQL but **over-preserves CTE names on MariaDB** (a mixed-case CTE reference vs definition
-would get distinct normalized keys — the same class of mask-miss this strategy otherwise closes, but for
-CTE-derived columns). MariaDB is not a ported dialect; a faithful MariaDB variant would fold
-`TableAlias.this` when it is a CTE name. If you key security off normalized identifiers on **MariaDB**,
-treat CTE-derived columns with care.
-
-**Bulk-schema normalization (role-aware + fail-closed).** `schema.NewMappingSchema(mapping,
-normalize=true)` normalizes each catalog/schema/table key by assembling the key path into an `exp.Table`
-and normalizing *that* — not by folding each bare string in isolation. This gives every relation key its
-parent (so the role-aware lctn=0 strategy preserves it, instead of misreading a parentless identifier as
-a foldable column — the bug this fixes) and its sibling `db` (so the `INFORMATION_SCHEMA` exception fires
-on the schema side exactly as on the query side). Non-role-aware strategies ignore the parent, so their
-normalized keys stay byte-identical to per-key folding. **Kind-1 injectivity:** if two distinct raw keys
-fold to the same normalized key, `NewMappingSchema` **fails closed** (a `SchemaError` — `duplicate
-normalized {catalog,schema,table,column} …`) instead of silently merging the two identities (upstream
-`nested_set` is last-wins). This applies to **every** folding dialect (including Postgres), because a
-non-injective fold under a security key is a fail-open hazard; it is the only part of §1.2 that reaches
-beyond the MySQL strategies, and it only ever turns a silent merge into a loud error — never a
-parse→generate change.
-
-**Default is unchanged (faithful to upstream).** MySQL's default `NormalizationStrategy` stays
-`CASE_SENSITIVE` (upstream `mysql.py:25`) — no folding. The two MySQL strategies are **opt-in** via the
-settings string (§1.3). Under the default, MySQL columns are *under-normalized* (`CAFÉ` ≠ `café`) — a
-mask-evasion risk that the opt-in strategy closes. Postgres continues to use the ASCII fold of §1.1
-(correct for Postgres).
-
-**Which strategy to choose (identifier normalization for analysis/lineage/security keying):**
-
-| dialect / situation | strategy | why |
-|---|---|---|
-| **PostgreSQL** | default (`LOWERCASE`, ASCII fold — §1.1) | PG folds unquoted names ASCII-only; quoted names stay case-sensitive. Nothing to change. |
-| **MySQL on Linux** (or `lower_case_table_names=0`) | `mysql_case_sensitive_table_names` | Column *names* are case-insensitive on every platform (fold them); table/db names, table aliases, CTE names, and column *qualifiers* are case-sensitive on Linux (keep them). Closes the column mask-evasion gap while matching lctn=0 relation resolution exactly. |
-| **MySQL on macOS/Windows** (or `lower_case_table_names=1` or `2`) | `mysql_case_insensitive` | There, db/table names are *also* case-insensitive, so fold everything. |
-| **MySQL, must match upstream sqlglot exactly** (transpile/round-trip, not security keying) | default (`CASE_SENSITIVE`) | Upstream folds nothing for MySQL; keep parity. But be aware columns are under-normalized (`Foo` ≠ `foo`). |
-| **Presto / Trino / Athena / Hive** | default (`CASE_INSENSITIVE`, ASCII fold) | Case-insensitive dialects; folded to lower. (ASCII fold is an approximation of engine-exact folding — see §2.) |
-| **any dialect, must not fold at all** | `case_sensitive` | Treats every identifier as case-sensitive (no normalization). |
-
-Rule of thumb for a **column-masking / security key**: pick the strategy that matches the *engine's
-actual resolution* so two spellings of the same column produce the same key — for MySQL that means one
-of the two MySQL strategies (never the `CASE_SENSITIVE` default), because MySQL resolves columns
-case-insensitively regardless of quoting.
-
-### 1.3 Overridable dialect settings (`normalization_strategy`)
-
-`dialects.GetOrRaise` accepts upstream sqlglot's comma-separated settings string form —
-`"mysql, normalization_strategy = mysql_case_sensitive_table_names"` — mirroring upstream's
-`Dialect.get_or_raise` (`dialect.py:914-971`) + `SUPPORTED_SETTINGS`. This is a **feature the Go port
-previously lacked** (a gap from upstream, now closed), not a behavioral divergence; the bare-name form
-is unchanged. Only `normalization_strategy` is supported (upstream also has `version`, which this port
-does not model); unknown settings/strategy values error, as upstream.
-
-The dialect-accepting entry points (`dialects.GetOrRaise`, `optimizer.NormalizeIdentifiers`,
-`optimizer.QualifyOpts.Dialect`) now accept a **DialectType-style value** — `nil` | a string (bare name
-or the settings form) | a `*dialects.Dialect` — mirroring upstream's polymorphic `DialectType =
-Union[str, Dialect, Type[Dialect], None]` (`dialect.py:1171`). This *restores* upstream API
-compatibility the earlier string-only port had narrowed. A passed `*Dialect` is threaded through the
-optimizer and `schema.EnsureSchema` **unchanged** — `EnsureSchema(...).Dialect()` returns the caller's
-instance — so every instance field the qualify passes read (`NormalizationStrategy`,
-`ForceEarlyAliasRefExpansion`, `TablesReferenceableAsColumns`, `DefaultFunctionsColumnNames`, …) is
-honored, matching upstream `qualify.py:78`. Only the schema's per-name fold re-resolution and
-identifier parsing still take a string; for those the dialect is reduced to its canonical settings
-string (`(*Dialect).SettingsString()` / `dialects.CanonicalString`), which round-trips its name +
-`NormalizationStrategy` through `GetOrRaise`.
-
-### 1.4 MySQL `--` line comment requires a trailing space — *fixes an upstream tokenizer bug*
-
-**What upstream does:** sqlglot's tokenizer treats `--` as a line-comment start unconditionally in every
-dialect, so it tokenizes MySQL `SELECT 1--2` as `SELECT 1` (dropping `--2` as a comment). Verified on the
-pinned reference: `tokenize("SELECT 1--2", dialect="mysql")` → `[SELECT, 1]`.
-
-**What sqlglot-go does:** for MySQL, `--` begins a line comment only when the next character is
-**ASCII whitespace/control or EOF**; otherwise it is two `-` operators. `SELECT 1--2` → `SELECT 1 - -2`
-(tokens `[SELECT, 1, -, -, 2]`). Implemented via `TokenizerConfig.LineCommentRequiresSpace{"--": true}` on
-the MySQL dialect + a guard in `tokens.TokenizerCore.lineCommentSuppressed`; base and Postgres are
-untouched (Postgres `--` stays an unconditional comment, per the SQL standard). Verified against MySQL 8.4:
-`SELECT 1--` (marker at EOF) is a comment; `SELECT 1--<NBSP>2` errors (a non-ASCII space like U+00A0 does
-**not** trigger the comment — only ASCII whitespace/control does), so the trigger is ASCII-restricted.
-
-**Why we diverge (correctness):** this matches the real server. MySQL's manual: *"the `--` comment style
-requires the second dash to be followed by at least one whitespace or control character (such as a space,
-tab, newline, and so on)."* So `1--2` evaluates to `1 - (-2) = 3` on a real MySQL, not `1`. Upstream
-over-eagerly comments it out; a consumer that relies on the token stream to distinguish `SELECT 1--2` from
-`SELECT 1` would otherwise conflate them. Regression test: `tokenizer_mysql_comment_test.go`.
-
-### 1.5 MySQL executable/version comment activation (opt-in, `mysql_version`)
-
-**What upstream and the default do:** pinned sqlglot v30.12.0 strips MySQL executable comments
-(`/*! ... */` and `/*!NNNNN ... */`) from the token stream exactly like ordinary block comments. The body
-is retained only as comment metadata; it is never parsed as SQL, regardless of the gate. sqlglot-go's bare
-`mysql` behavior remains identical. Activation is explicitly opt-in through a dialect setting such as
-`"mysql, mysql_version=80035"`; leaving `mysql_version` unset preserves upstream behavior and corpus parity.
-
-**Version and gate semantics:** `mysql_version` is MySQL's `MYSQL_VERSION_ID` integer — the comparable
-value `major*10000 + minor*100 + patch` (`80035` for MySQL 8.0.35). This is exactly the `/*!NNNNN` gate form
-and precisely what the C API `mysql_get_server_version()` returns, so a client passes the integer it already
-has; a dotted version string is intentionally **not** accepted (it silently mis-parsed as a major version and
-over-activated near-boundary gates). A bare `/*! ... */` body always activates when the setting is present.
-For `/*!NNNNN ... */`, the first five digits are the gate: the body activates when the configured
-`MYSQL_VERSION_ID` is greater than or equal to it (`50000` and `80033` activate at `80035`; `80036` and
-`99999` do not). Active bodies are tokenized as SQL and the wrapper plus gate disappear; inactive bodies
-remain comment metadata, including their leading `!` and digits.
-
-**Scope:** only `/*!` version comments are activated. MySQL optimizer-hint comments (`/*+ ... */`) are left
-as ordinary comments (stripped), matching upstream — hints do not change the set of columns/tables a
-statement reads, so this is correct for the lineage/grant-hash consumers this extension serves.
-
-Only the MySQL dialect advertises the executable-comment capability. `mysql_version` is nevertheless a
-recognized setting for every dialect string so shared configuration can pass it uniformly: base and
-Postgres accept it but leave the body inactive/comment-only. Malformed versions still error for every
-dialect. `SettingsString` intentionally omits this tokenizer-only, per-call state because that method
-serializes identifier-resolution/qualify state.
-
-**Generation caveat:** activation is semantic, not a byte-preserving comment rewrite. An active
-`SELECT 1 /*!50000 + 100 */` parses and regenerates as `SELECT 1 + 100`; likewise a hidden select item such
-as `SELECT 1 /*!50000, rrn */ FROM t` regenerates as `SELECT 1, rrn FROM t`. Inactive/default wrappers pass
-through the existing comment sanitizer, normally rendering with a space after `/*`, for example
-`SELECT 1 /* !99999 + 100 */`. Do not expect the original `/*!...*/` bytes to survive regeneration.
-
-This behavior was checked against MySQL 8.4.9: gate `50000` executes, gate `99999` does not, and the hidden
-column form executes and exposes the extra select item. The implementation lives in `dialects/dialect.go`,
-`dialects/mysql.go`, `tokens/tokenizer.go`, and `tokens/tokenizer_core.go`; low-level tokenizer tests live
-beside those packages, and the public regression is `mysql_version_comment_test.go`.
-
-**Why this is an opt-in behavioral extension:** the accepted SQL grammar is unchanged — both implementations
-already recognize the wrapper as a comment, and its body uses the existing SQL grammar when explicitly
-activated. The extension changes whether comment-contained SQL participates in the token stream for a
-configured server version. Therefore no `testdata/upstream_extensions.jsonl` row is appropriate; that ledger
-tracks grammar accepted beyond the pinned upstream parser, not opt-in executable-comment semantics.
-
-### 1.6 MySQL `RESET …` degrades to `Command` (not a bogus `Alias`)
-
-**What upstream does:** pinned sqlglot v30.12.0 does not tokenize MySQL `RESET` as a keyword, so
-`RESET MASTER` falls into the generic expression-statement path and parses as an `Alias` —
-`Alias(this=Column(RESET), alias=MASTER)`, i.e. the expression `RESET` aliased `AS MASTER`. Verified on the
-pinned reference: `parse_one("RESET MASTER", "mysql")` → `Alias`, `.sql()` = `RESET AS MASTER`. The sibling
-`RESET BINARY LOGS AND GTIDS` parse-errors.
-
-**What sqlglot-go does:** MySQL maps `RESET` to a `COMMAND` token (as Postgres already does), so the whole
-statement degrades to a raw `exp.Command{this: "RESET"}` — `RESET MASTER` / `RESET REPLICA` /
-`RESET BINARY LOGS AND GTIDS` all round-trip unchanged. `reset` as an ordinary identifier
-(`SELECT reset FROM t`) is unaffected.
-
-**Why we diverge (correctness):** `RESET …` is an administrative statement; upstream's `Alias` is a
-semantically wrong structural claim (there is no alias) that a tree consumer could read as a harmless aliased
-expression. A `Command` is the faithful "not structurally modelled" node and matches the real server's intent
-(and Postgres's own `RESET` handling here). Verified against MySQL 8.4 (`RESET MASTER` was removed there;
-`RESET REPLICA` / `RESET BINARY LOGS AND GTIDS` are valid — all degrade to `Command`). Implemented in
-`dialects/mysql.go`.
-
-### 1.7 Postgres `U&'…'` / `U&"…"` Unicode escapes are decoded
-
-**What upstream does:** pinned sqlglot leaves the Postgres `UNICODE_STRINGS` tokenizer set empty, so it
-mis-tokenizes `U&'\0067'` as `U & '\0067'` — a bitwise-AND of a column named `U` with an ordinary (undecoded)
-string literal — and parse-errors the quoted-identifier form (`… FROM U&"inf\006Frmation_schema".tables`).
-Verified on the pinned reference. (Where upstream *does* wire `UNICODE_STRINGS` — Presto/Oracle — it keeps the
-escapes raw in a `UnicodeString` node and never decodes them.)
-
-**What sqlglot-go does:** for Postgres, `U&'…'` (string) and `U&"…"` (quoted identifier) are recognized and
-their SQL-standard backslash-Unicode escapes are decoded into the real code points — `\XXXX`, `\+XXXXXX`,
-`\\`, and UTF-16 surrogate pairs — producing an ordinary decoded string `Literal` / quoted `Identifier`. So
-`U&'\0067\0072\0061\0064\0065'` is the string `'grade'` and `U&"inf\006Frmation_schema"` is the identifier
-`information_schema`, matching what the server executes. A trailing custom `UESCAPE 'c'` clause is not
-consumed, so those rare forms fail closed (parse error) rather than decode against the wrong escape character.
-Presto/Oracle `UnicodeString` handling is untouched.
-
-**Why we diverge (correctness):** `standard_conforming_strings` is on by default in Postgres, which evaluates
-`U&'…'`/`U&"…"` as decoded strings/identifiers — they are pure alternate spellings. Upstream's `U & '…'` is a
-wrong parse, and for an AST-based analyzer the identifier form is a real blind spot: a name (`set_config`, a
-system schema, a masked column) spelled with escapes is invisible to every name-based check while the DB runs
-it. Decoding surfaces the effective name. Verified against PostgreSQL 17.6 (`U&'\0067\0072\0061\0064\0065'` →
-`grade`; `U&"inf\006Frmation_schema"` resolves to the live `information_schema`). Implemented in
-`tokens/unicode_escape.go`, `tokens/tokenizer.go` (`FormatString.DecodeUnicode`), `tokens/tokenizer_core.go`,
-and `dialects/postgres.go`. The `U&"…"` identifier form is also registered in
-`testdata/upstream_extensions.jsonl` (`pg-unicode-identifier`, upstream parse-errors); regression tests:
-`unicode_escape_test.go` and `tokens/unicode_escape_test.go`.
-
-### 1.8 `SAVEPOINT` / `RELEASE SAVEPOINT` parse to `Savepoint` (not a bogus `Alias` / parse error)
-
-**What upstream does:** pinned sqlglot v30.12.0 has no savepoint statement node. `SAVEPOINT s`
-mis-parses as an `Alias` — `Alias(this=Column(SAVEPOINT), alias=s)`, rendering `SAVEPOINT AS s` — i.e.
-the expression `SAVEPOINT` aliased `AS s`, and `RELEASE SAVEPOINT s` parse-errors. Verified on the
-pinned reference for both postgres and mysql. Only `ROLLBACK TO SAVEPOINT s` is modelled (as
-`Rollback(savepoint=s)`).
-
-**What sqlglot-go does:** `SAVEPOINT <name>` and `RELEASE [SAVEPOINT] <name>` build a new
-`exp.Savepoint{this: name, kind}` root (`kind = "RELEASE"` for the release form). `SAVEPOINT`/`RELEASE`
-stay ordinary `VAR` tokens — the statement is dispatched by leading text in `parseStatement`, so
-`savepoint`/`release` remain usable as identifiers everywhere else (`SELECT savepoint FROM t` is
-unchanged) and `ROLLBACK TO SAVEPOINT` is still an `exp.Rollback`. The bare `RELEASE <name>` spelling
-(SAVEPOINT keyword omitted) is **Postgres-only** — real MySQL requires the keyword — so under
-mysql/base a bare `RELEASE <name>` is left to the normal path (fails closed). Output normalizes the
-release form to the explicit `RELEASE SAVEPOINT <name>` (which Postgres also accepts).
-
-**Why we diverge (correctness):** `SAVEPOINT` / `RELEASE SAVEPOINT` / `ROLLBACK TO SAVEPOINT` are
-standard SQL transaction-control statements — benign session/transaction state with no data access. An
-AST consumer that gates on statement kind needs to route them to session passthrough like
-`BEGIN`/`COMMIT`/`ROLLBACK`; upstream's `Alias`/parse-error is a wrong structural claim (like §1.6's
-`RESET`) that would make a valid savepoint statement indistinguishable from an aliased column or a
-parse failure. Verified against PostgreSQL 17.6 and MySQL 8.0.33 (`SAVEPOINT s`, `RELEASE SAVEPOINT s`,
-plus Postgres's optional-keyword `RELEASE s`, all execute). Implemented in `parser/stmt_transaction.go`
-(`parseSavepointStatement`) + `parser/parser.go` (the `parseStatement` hook) + `generator/
-stmt_transaction.go` (`savepointSQL`); regression test `savepoint_test.go`. The `RELEASE SAVEPOINT`
-form, which pinned upstream parse-errors, is additionally registered in
-`testdata/upstream_extensions.jsonl` (`release-savepoint`) with a tripwire.
-
-### 1.9 Postgres/MySQL reject a bare string as a table name or table alias
-
-**What upstream does:** pinned sqlglot v30.12.0 calls `_parse_string_as_identifier` **unconditionally** in
-`_parse_table_part` (`parser.py:4668`) and `_parse_table_alias` (`parser.py:4111`) — there is no flag — so
-`SELECT * FROM 'foo'` folds the string into a table name and `SELECT * FROM t 'x'` folds it into a table
-alias, in *every* dialect. Verified on the pinned reference (base/postgres/mysql all accept both). This is
-separate from the projection string-alias `STRING_ALIASES` gate (the `Dialect.StringAliases` flag): that one only
-governs `_parse_alias`.
-
-**What sqlglot-go does:** a bare string is accepted as a table name/alias only when the dialect's
-`StringTableIdentifiers` flag is true. It defaults **true** (accept — matching upstream's unconditional
-behavior, so base and the presto/trino/hive/athena partial dialects are unchanged), but is **false** for
-postgres and mysql, so `SELECT * FROM 'foo'` and `SELECT * FROM t 'x'` fail closed there. Ordinary
-identifier and `AS`/space-aliased tables (`FROM t`, `FROM t AS x`, `FROM t x`) are unaffected.
-
-**How it fails closed (two shapes).** For a `SELECT`/`UPDATE`/`DELETE`/`INSERT`/`DROP`/`TRUNCATE`/`ALTER`/
-`COMMENT ON` statement the rejected string table part is a hard **parse error** (`ParseOne` returns an
-error), because those paths have no error isolation. `CREATE`-family DDL and `GRANT`/`REVOKE`, however, wrap
-their structured parse in `tryParse` and degrade to a raw-text `exp.Command` on *any* internal failure — so
-`CREATE TABLE 'foo' (a INT)`, `CREATE VIEW 'foo' AS …`, and `GRANT SELECT ON 'foo' TO bob` become a
-verbatim, unexecutable `Command` rather than a parse error. Both shapes are **fail closed** for a consumer
-that rejects unparsed statements and opaque `Command` nodes (the port's standard "not structurally modelled"
-node). Note the `Command` shape is a net improvement over the pre-flag behavior, which folded the string
-into a real `Table` and thereby **normalized invalid SQL into a valid statement** (`CREATE TABLE "foo"`) — a
-`Command` preserves the raw, still-invalid text instead. A tree-walking consumer must therefore treat a
-`Command` as deny, not as "no tables found"; this matches how the port already surfaces other unmodelled
-statements (e.g. `SHOW CREATE USER`).
-
-**Why we diverge (correctness):** real PostgreSQL and MySQL both reject a bare string constant in
-table-name or table-alias position (a table name/alias is an identifier, not a string literal); upstream's
-unconditional fold is a permissive over-accept that rewrites invalid SQL into a different, executable
-statement (`FROM t AS "x"` / `FROM "foo"`). An AST consumer needs the invalid form to fail closed, not be
-normalized. This is orthogonal to the projection string-alias gate: **MySQL accepts** the projection `SELECT 1 'x'`
-(`StringAliases=true`) yet **rejects** the table forms (`StringTableIdentifiers=false`) — the two flags are
-independent. Base keeps upstream's accept (no real-engine reference). Verified against PostgreSQL 17.6 and
-MySQL 8.0.33 (both reject `FROM 'foo'` and `FROM t 'x'`). Implemented in `dialects/dialect.go`
-(`StringTableIdentifiers`, default true; postgres/mysql false) and the two gated call sites in
-`parser/parser.go`; regression test `parser/string_aliases_test.go` (`TestStringTableIdentifiersFlag`).
-
-**Out of scope (a separate pre-existing quirk, like the projection `AS '…'` case above):** an *explicit*
-`AS` + string table alias — `SELECT * FROM t AS 'x'` — is still accepted for both dialects. This gate only
-wraps the no-`AS` string fallback in `_parse_table_alias`; the `AS` form goes through `parseIdVar`'s
-`advanceAny` path (which absorbs any token, including a `STRING`, whenever `AS` was matched) and is unchanged
-here, matching pinned upstream even though real PG/MySQL reject it. A follow-up could gate that path too.
-
-### 1.10 Postgres `pg_catalog.<builtin>` resolves to the builtin node (not USER-DEFINED)
-
-**What upstream does:** pinned sqlglot v30.12.0 parses a schema-qualified Postgres type name whose schema is
-`pg_catalog` and whose tail is a builtin as a **USER-DEFINED** `DataType` — `CAST('5' AS pg_catalog.int4)`
-and `'5'::pg_catalog.int4` both become `DataType(this=USERDEFINED, kind=Dot(pg_catalog, int4))`. Verified on
-the pinned reference for `pg_catalog.int4`/`text`/`timestamptz`/`bool`/`float8` (all USER-DEFINED). The bare
-spelling `'5'::int4` already resolves to `DataType(this=INT)` because the tokenizer keyword-maps `int4`→`INT`.
-
-**What sqlglot-go does:** for **Postgres only**, a two-part `pg_catalog.<name>` type name whose `<name>` is a
-**real pg_catalog type name** resolves to the *exact node the bare `<name>` spelling produces* (byte-identical,
-verified with `.Equal`): a builtin `DataType` (`pg_catalog.int4` → `INT`, `int8` → `BIGINT`, `int2` →
-`SMALLINT`, `bool` → `BOOLEAN`, `numeric` → `DECIMAL`, `float8` → `DOUBLE`, `text`, `varchar`, `timestamptz`,
-`name`, `money`, the six multiranges `int4multirange`/`int8multirange`/`datemultirange`/`nummultirange`/
-`tsmultirange`/`tstzmultirange`, …), an **`ObjectIdentifier`** (`pg_catalog.oid`/`regclass`/`regproc`/
-`regtype`/… — the `OBJECT_IDENTIFIER` family), or a **`PseudoType`** (`pg_catalog.cstring`). All three
-spellings are covered — `CAST(x AS pg_catalog.int4)`, `x::pg_catalog.int4`, and the **space typed-literal**
-`pg_catalog.int4 '5'` (the §"Grammar extensions" `pg-user-type-typed-literal` form, which `pgTypedLiteralCast`
-folds into a `Cast`; it reuses the same `resolvePgCatalogBuiltin` so `pg_catalog.text 'x'` resolves to `TEXT`
-exactly as `'x'::pg_catalog.text` does — real PG 17.6: `pg_typeof(pg_catalog.text 'x')` = `text`, and the
-`char`/`bit`/`macaddr`/`(modifier)` carve-outs below are inherited unchanged) — and array/collation suffixes
-compose exactly as for the bare builtin.
-
-Membership is decided by a **pinned allowlist of the real `pg_catalog` type names** (the base/pseudo/range/
-multirange type set, captured from PostgreSQL 17.6 via `pg_type ⋈ pg_namespace WHERE nspname='pg_catalog' AND
-typtype IN ('b','p','r','m')`), **not** by the type parser's generic keyword recognition. That distinction is
-the whole point:
-the tokenizer knows many spellings that are **not** `pg_catalog` type names — the SQL-standard grammar aliases
-`integer`/`bigint`/`boolean`/`decimal`/`smallint`/`real`/`double` (the catalog names are
-`int4`/`int8`/`bool`/`numeric`/`int2`/`float4`/`float8`) and other dialects' `tinyint`/`datetime`/`mediumint`/
-`nvarchar` — and real PG **rejects** `pg_catalog.integer`, `pg_catalog.tinyint`, etc. Keying on the pinned
-catalog set keeps all of those **USER-DEFINED**, so the resolution never claims a builtin PG itself refuses.
-
-**Stays USER-DEFINED** (unchanged): a tail not in the pinned set (an alias like `pg_catalog.integer`/`real`/
-`double`/`bigserial`, an extension type like `pg_catalog.hstore`/`geography`, a genuine user type
-`pg_catalog.myt`); a real `pg_catalog` name the port does not model as a builtin
-(`pg_catalog.macaddr`/`varbit`/`tsvector` — these resolve back to USER-DEFINED and **keep their `pg_catalog.`
-qualifier**, i.e. are not silently rewritten to the bare unqualified name); any other schema (`public.myt`,
-`myschema.int4`); and a three-part name (`a.pg_catalog.int4`).
-
-**Two deliberate non-resolutions** (both stay USER-DEFINED with the qualifier preserved, so they round-trip
-losslessly and match real PG):
-- **`pg_catalog.char` and `pg_catalog.bit`** — real catalog names, but their bare SQL keyword is a *different*
-  type, so resolving would silently change semantics. `pg_catalog.char` is the 1-byte `"char"` (OID 18) whereas
-  the bare `CHAR` keyword is `character(1)`/`bpchar` (OID 1042) — `65::pg_catalog.char` = `'A'` but `65::char`
-  = `'6'`; `pg_catalog.bit` has no implicit length whereas bare `BIT` is `bit(1)` — `'101'::pg_catalog.bit` =
-  `'101'` but `'101'::bit` = `'1'`. Excluded via a small `pgCatalogSemanticMismatch` set. (`pg_catalog.bpchar`
-  and `pg_catalog.varchar` **do** resolve — their bare spellings `BPCHAR`/`VARCHAR` are the same type.)
-- **`pg_catalog.oid(5)` / `regclass(5)` / `cstring(5)`** and the other `ObjectIdentifier`/`PseudoType` names
-  **with a trailing type modifier** — real PG rejects a modifier on these (`type modifier is not allowed for
-  type "pg_catalog.oid"`), and the `ObjectIdentifier`/`PseudoType` node cannot carry `expressions`, so resolving
-  would silently drop the `(5)`. A pending `(` therefore keeps the name USER-DEFINED (which *does* carry the
-  modifier), preserving it on round-trip rather than laundering an engine-invalid form into a valid-looking one.
-  (Modifier-bearing builtin `DataType`s like `pg_catalog.numeric(10,2)` are unaffected — they carry modifiers.)
-
-Quoting is handled
-under PostgreSQL's identifier folding on **both** parts: an unquoted name folds to lowercase — **ASCII-only**
-(`stringsLower`, per §1.1), matching PG's ASCII identifier folding rather than Go's full-Unicode
-`strings.ToLower`, so `pg_catalog.INT4`/`unKnown` resolve (real PG accepts them) but a non-ASCII spelling PG
-rejects is never over-folded into a match — while a quoted name is literal — so
-`pg_catalog."int4"` (already lowercase) **is** `int4` and resolves (real PG: `pg_typeof('5'::pg_catalog."int4")
-= integer`), but `pg_catalog."INT4"` and `"PG_CATALOG".int4` stay USER-DEFINED (case-sensitive, not the
-lowercase catalog name/schema — real PG rejects them). Base and MySQL are untouched: base still folds the
-dotted name into a plain-string USER-DEFINED `kind`, and MySQL (`SUPPORTS_USER_DEFINED_TYPES=false`) errors on
-the dotted type name, exactly as before — neither has a `pg_catalog` concept.
-
-**Why we diverge (correctness):** `pg_catalog` is PostgreSQL's builtin/system schema, so `pg_catalog.<X>` names
-the builtin `<X>`, not a user type — and for the resolved set it is the *same type* as the bare spelling the
-port emits. Verified against PostgreSQL 17.6: `pg_typeof('5'::pg_catalog.int4) = pg_typeof('5'::int4) =
-integer`, and likewise for `int8`/`int2`/`bool`/`numeric`/`float8`/`text`/`varchar`/`timestamptz`/`oid`/
-`cstring`/`name`/`money`/the multiranges; the negatives all error there (`SELECT NULL::pg_catalog.integer` /
-`.tinyint` / `.hstore` / `.real` / `public.myt` → `type … does not exist`), so keeping those USER-DEFINED is
-correct. The equivalence is checked per-name against the bare node, **not** assumed from the `pg_catalog`
-prefix — the two exceptions above (`char`/`bit`, where the bare *keyword* is a different type, and the
-modifier-bearing `oid(5)`/…) show the prefix is not blindly "definitionally the bare spelling"; each resolved
-name is one whose bare rendering PG treats as the identical type. Upstream is over-conservative — it leaves
-the qualified builtin USER-DEFINED, forcing an AST consumer that classifies a cast target by `DataType.this`
-to special-case the `pg_catalog.` prefix. Resolving it structurally lets the consumer read the same builtin
-node regardless of the (semantically identical) spelling. The only §1.10 behavior change is for real catalog
-builtins: `CAST('5' AS pg_catalog.int4)` now renders as `CAST('5' AS INT)` — the same type. No identity-corpus
-case uses a `pg_catalog.`-qualified type name (scanned: none), so nothing in the corpus flips. Implemented in
-`parser/parser_types.go` (the pinned `pgCatalogTypeNames` allowlist + `resolvePgCatalogBuiltin`, called from
-the `parseUserDefinedType` postgres branch for the `::`/CAST spellings AND from `pgTypedLiteralCast` in
-`parser/parser.go` for the space typed-literal spelling `pg_catalog.text 'x'`); regression tests
-`parser/parser_types_test.go` (`TestParsePgCatalogBuiltinType`) and `pg_user_type_typed_literal_test.go`. No upstream tripwire is needed: upstream already emits a node here (a
-USER-DEFINED `DataType`, not a `Command`/parse error), so this is a §1 correctness divergence, not a
-grammar-extension ledger row — if upstream later resolves it too, the tests still pass.
-
-### 1.11 MySQL `sql_mode=ANSI_QUOTES` activation (opt-in, `mysql_ansi_quotes`) — *the one that changes what `"…"` means*
-
-**What upstream does:** pinned sqlglot v30.12.0 has no MySQL `ANSI_QUOTES` support — the MySQL dialect always
-treats `"…"` as a **string literal** (`MYSQL … Quotes` includes `"`), matching MySQL's *default* `sql_mode`.
-
-**What sqlglot-go does:** an **opt-in** dialect setting — `mysql_ansi_quotes=true` in the settings string
-(`GetOrRaise("mysql, mysql_ansi_quotes=true")`) — activates MySQL's `sql_mode=ANSI_QUOTES` behavior: `"…"` is a
-**quoted IDENTIFIER** delimiter (alongside the backtick), and a string literal must then use `'…'`. Leaving it
-unset (or `false`) preserves the default MySQL behavior and full corpus parity. Verified against MySQL 8.0.33:
-under `SET sql_mode='ANSI_QUOTES'`, `SELECT "x"` reads column `x` (error 1054 if absent), while `SELECT 'x'`
-is the string; the backtick works in both modes.
-
-**Why it matters (security).** A name-based analyzer that parses in the *wrong* mode silently misreads column
-references: `SELECT "card_number" FROM payments` under `ANSI_QUOTES` selects the **column**, but parsed in
-default mode `"card_number"` is a harmless string literal — so a masked-read gate parsing in the wrong mode
-never sees the column and leaks cleartext. Because `sql_mode` is **mutable per session** (unlike the server
-version), a consumer forwards the backend's live `sql_mode` and re-resolves the dialect when it changes.
-
-**Parse-only; the generator is already ANSI_QUOTES-valid.** The change moves `"` from the tokenizer's `Quotes`
-map to its `Identifiers` map (`applyMySQLAnsiQuotes` in `dialects/mysql.go`, re-compiling the config). The
-generator needs **no** change: it already emits strings with `'` (`QuoteStart`) and identifiers with the
-backtick, both valid under `ANSI_QUOTES` — so a `"col"` parsed under `ANSI_QUOTES` round-trips to `` `col` ``
-(a backtick identifier, semantically identical and valid in *every* sql_mode; verified on MySQL 8.0.33). Only
-the MySQL base honors the setting; base/postgres already treat `"…"` as an identifier, so it is a no-op there.
-`mysql_ansi_quotes` is a NON-UPSTREAM tokenizer setting like `mysql_version` (§1.5) and is likewise off by
-default. The sibling `NO_BACKSLASH_ESCAPES` mode is **not** modeled yet (it also touches string generation);
-tracked as a follow-up. Regression test `mysql_ansi_quotes_test.go`.
-
-### 1.12 Postgres `SET var = "quoted"` preserves the value's quotes — *fixes an upstream value-mangling bug*
-
-Upstream's `_parse_set_item_assignment` rewrites a quoted-identifier RHS of a `SET` assignment to a **bare**
-`Var` (`right = exp.var(right.name)`), dropping the quotes: `SET search_path = "$user"` → `SET search_path =
-$user`. But the unquoted form is **invalid Postgres** — real PG 17.6 rejects `SET search_path = $user` with
-`ERROR: syntax error at or near "$"` while accepting the quoted `"$user"` (the special "current user's schema"
-element of a search path). So the port keeps a **quoted** identifier value verbatim (`parseSetAssignmentValue` +
-`isQuotedIdentifierExpr` in `parser/stmt_set.go`) and only bare-ifies *unquoted* ones, matching the DB rather
-than upstream. Same-dialect output changes only for a quoted-identifier SET value (the identity corpus has none,
-so no corpus churn); an unquoted value (`SET x = a`) is unaffected. This is the correctness prerequisite for
-structuring the common `SET search_path = "$user", public` (see "Grammar extensions beyond upstream" →
-`pg-set-multi-value`). Regression test `TestPostgresSetMultiValue`.
-
-### 1.13 MySQL `START REPLICA` / `START SLAVE` / `START GROUP_REPLICATION` degrade to `Command` (not `Transaction`)
-
-**What upstream does:** pinned sqlglot v30.12.0 maps MySQL `START` → the `BEGIN` token and then eats the
-following word as a transaction *mode*, so `START REPLICA` parses as `Transaction{modes:[REPLICA]}` and
-renders `BEGIN REPLICA` — indistinguishable from `START TRANSACTION`. Verified on the pinned reference for
-all three (`START REPLICA` / `START SLAVE` / `START GROUP_REPLICATION`). `STOP`/`RESET` counterparts don't
-collide with `START`, so they escape into `Alias`/`Command` — the asymmetry is the tell that this is a parse
-artifact, not intent.
-
-**What sqlglot-go does:** when the leading `START` token is followed by `REPLICA` / `SLAVE` /
-`GROUP_REPLICATION`, `parseTransaction` degrades the whole statement to a raw `exp.Command{this:"START"}`,
-round-tripping unchanged (`START REPLICA USER = 'r'` and any trailing options are preserved verbatim).
-`START TRANSACTION` / `BEGIN` and their real modes (`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, …) stay
-`Transaction`. The divert is **MySQL-only** (Postgres/Presto also map `START`→`BEGIN` but have no such
-statements, so they keep upstream's behavior) and fires **only at a top-level statement** — a nested
-`SET x = START …` keeps the pre-existing path.
-
-**Why we diverge (correctness):** these are replication-control statements, not transactions. Real MySQL
-8.0.46 confirms it two ways: `START REPLICA` reaches replication logic (`ERROR 1200: The server is not
-configured as replica`), and upstream's round-trip output `BEGIN REPLICA` is itself a **syntax error**
-(`ERROR 1064`). Modelling them as `Transaction` is a wrong structural claim a session-passthrough consumer
-reads as a benign transaction, letting a connect-only principal start replication. `Command` is the faithful
-"not structurally modelled" node and fails closed. Implemented in `parser/stmt_transaction.go`
-(`startReplicationVerbs` + the guard in `parseTransaction`); regression tests
-`TestMySQLStartReplicationIsNotTransaction`, `TestStartReplicationDivertIsMySQLOnly`.
-
-### 1.14 MySQL admin command leaders degrade to `Command` (not a bogus `Alias` / `Column`)
-
-**What upstream does:** pinned sqlglot leaves several MySQL statement-initial keywords as bare `VAR` tokens,
-so its generic expression path mis-coerces them into an expression node: `STOP REPLICA`/`SLAVE`/
-`GROUP_REPLICATION`, `FLUSH …`, `UNLOCK INSTANCE`, `XA RECOVER`, `BINLOG '…'`, `HELP '…'` all become an
-`Alias` (`STOP AS REPLICA`), and bare `RESTART` / `SHUTDOWN` become a `Column`. The remaining `XA` forms
-(`XA START/END/PREPARE/COMMIT/ROLLBACK`) parse-error. Verified on the pinned reference.
-
-**What sqlglot-go does:** a MySQL statement-start dispatch (`parseMysqlCommandStatement`, keyed on the leader
-set `STOP`/`FLUSH`/`UNLOCK`/`XA`/`BINLOG`/`HELP`/`RESTART`/`SHUTDOWN`) degrades the whole statement to a raw
-`exp.Command`, round-tripping unchanged. Making `XA` a leader also unifies all `XA …` spellings under
-`Command` (stricter than the upstream 5-error/1-alias split). The dispatch fires **only at a top-level
-statement** (`statementDepth == 1`): unlike §1.8's `SAVEPOINT`, which retreats when its required name is
-absent, these leaders commit and consume to end, so at a nested `parseStatement` entry — a `SET` assignment
-RHS (`SET x = stop, y = 1`), a CTE body — they must stay ordinary identifiers/values rather than swallow the
-rest of the statement. So the words remain usable both in an expression position (`SELECT stop FROM t`) and
-as a nested value. `LOCK TABLES` / `UNLOCK TABLES` are unaffected — they already tokenize as a single
-`COMMAND` keyword handled earlier in `parseStatement`; only the bare `UNLOCK` (`UNLOCK INSTANCE`) reaches
-this dispatch, and both end up `Command`.
-
-**Why we diverge (correctness):** each is a real MySQL administrative statement, not `<kw> AS <x>` nor a bare
-column reference; upstream's expression node is a wrong structural claim, and it fails closed today only
-because the analyzer happens to route `Alias`/`Column` roots to unanalyzable — the same coercion that made
-§1.13's `START REPLICA` a `Transaction` could land any of these on a benign kind after a grammar change.
-`Command` makes fail-closed the design, not luck. Verified against MySQL 8.0.46 (`STOP REPLICA` executes;
-`RESTART`/`SHUTDOWN` are server-control statements). Implemented in `parser/stmt_mysql_command.go`
-(`mysqlCommandLeaders` + `parseMysqlCommandStatement`) + the top-level `parseStatement` hook in
-`parser/parser.go`; regression tests `TestMySQLCommandLeadersDegradeToCommand`,
-`TestMySQLCommandLeadersStayUsableAsIdentifiers`, `TestMySQLCommandLeadersNotDivertedInNestedStatement`,
-`TestMySQLCommandStatementDoesNotDuplicateComment`.
-
-### 1.15 MySQL `TABLE tbl` parses to `SELECT * FROM tbl` (not a bogus `Alias`)
-
-**What upstream does:** pinned sqlglot leaves a leading `TABLE` keyword to its generic expression path, so
-`TABLE users` mis-parses as an `Alias` — `` `TABLE` AS users`` (the expression `TABLE` aliased `AS users`).
-Verified on the pinned reference across mysql/postgres/base/duckdb; none models the table value constructor.
-
-**What sqlglot-go does:** a MySQL top-level statement dispatch (`parseMysqlTableStatement`, keyed on the
-leading `TABLE` token, `statementDepth == 1`) builds a real `Select{expressions:[Star], from_:From{this:Table{…}}}`
-— an AST **byte-identical** to the explicit `SELECT * FROM tbl` form, with schema qualification
-(`TABLE db.users`) and quoting (`` TABLE `weird table` ``) preserved. The operand must be a plain table
-identifier — a table function (`TABLE f()`), placeholder (`TABLE ?`), or other non-identifier is rejected so
-it does not fake a `Select`.
-
-**Scope (what is *not* modelled).** Only the bare `TABLE tbl_name` is a statement here. Real MySQL also
-permits `TABLE t ORDER BY … LIMIT …`, set operations (`TABLE a UNION TABLE b`), a parenthesized/subquery
-`TABLE`, and `INSERT … TABLE t` — none of those query-block positions is covered: the top-level trailer forms
-are left unconsumed and **fail closed** under the default (IMMEDIATE) parser (matching upstream, which also
-parse-errors `TABLE t ORDER BY …`), while a parenthesized `(TABLE t)` *inside* another query is not diverted
-and keeps upstream's wrong `Alias`. Because the dispatch is top-level only, a nested `SET x = TABLE t` also
-keeps the non-`Select` path. `CREATE`/`DROP`/`ALTER TABLE` (their own statement parsers) are untouched.
-
-**Why we diverge (correctness).** MySQL 8.0.19+ defines `TABLE tbl` as exactly `SELECT * FROM tbl` — verified
-on MySQL 8.0.46 (`TABLE u` and `SELECT * FROM u` return identical rows). Upstream's `Alias` is both a wrong
-structural claim and a lost read: a column-lineage consumer sees an aliased keyword instead of a full-table
-read of every column. Producing the equivalent `Select` gives the consumer the same lineage as the `SELECT`
-form. The **unqualified** `TABLE users` is a §1 correctness fix (upstream parses it structurally to the wrong
-`Alias`, not a `Command`/error — cf. the §1.8 note that bare `SAVEPOINT` is tracked here, not in the ledger);
-the **schema-qualified** `TABLE db.users` is grammar beyond pinned upstream (it parse-errors at the dot) and
-is registered in `testdata/upstream_extensions.jsonl` (`mysql-table-value`) with a tripwire. Implemented in
-`parser/stmt_mysql_table.go` (`parseMysqlTableStatement`) + the top-level `parseStatement` hook in
-`parser/parser.go`; regression tests `TestMySQLTableStatementIsSelectStar`, `TestMySQLTableStatementScope`,
-`TestMySQLCommandLeadersNotDivertedInNestedStatement`.
-
-### 1.16 MySQL `DROP INDEX <idx> ON <table>` accepts a db-qualified target
-
-**What upstream does:** pinned sqlglot v30.12.0 structures the unqualified `DROP INDEX idx ON users` as
-`Drop{kind:INDEX, cluster:OnProperty(this=Identifier(users))}`, but its shared `_parse_on_property`
-(parser.py:3345) parses the ON target with a single `_parse_schema(_parse_id_var())`, so the
-**db-qualified** `DROP INDEX idx ON db.users` parse-**errors** at the dot. Verified on the pinned
-reference. (The port itself previously degraded even the unqualified form to a raw `Command`, because it
-had no `exp.OnProperty` node — that gap is closed here too.)
-
-**What sqlglot-go does:** `parseDrop` parses the `ON` target with `parseTableParts`, so the whole
-statement is `Drop{kind:INDEX, this:Table(idx), cluster:OnProperty(this:Table(...))}` and the db
-qualifier survives: `DROP INDEX idx ON db.users` → `cluster.OnProperty.this = Table(this:users,
-schema:db)`, round-tripping unchanged. The target is a `Table` (not upstream's bare `Identifier`) so it
-can carry the qualifier — an output-identical AST-shape difference for the unqualified form. This is
-**scoped to DROP**: the shared `parseOnProperty` is left unchanged (returns nil for the ClickHouse
-`ON CLUSTER` half, out of this port's dialect scope), so CREATE/ALTER are untouched. A missing target
-(`DROP INDEX i ON`) fails closed via `parseTableParts`' own raise.
-
-**Why we diverge (correctness):** MySQL's `DROP INDEX index_name ON tbl_name` permits a db-qualified
-`tbl_name` — verified on MySQL 8.0.46 (`DROP INDEX idx_email ON zzq.users` executes). Upstream's
-single-id parse is a bug vs the real engine, and for the downstream consumer it turned a legitimate
-table-DDL statement into a parse-error/`Command` (over-denied). The unqualified form is a port
-completion (aligns with upstream's structured `Drop`); the **qualified** form — which pinned upstream
-parse-errors — is registered in `testdata/upstream_extensions.jsonl` (`mysql-drop-index-on-qualified`)
-with a tripwire, per the "grammar beyond upstream" discipline. Implemented in `parser/stmt_drop.go` (the
-`ON` branch) + the new `exp.OnProperty` node (`expressions/kinds.go`, `expressions/fidelity_properties.go`)
-+ generator `onPropertySQL` (`generator/create_properties.go`); regression test `TestParseDropIndexOnTable`.
+Each fixes a place upstream disagrees with the real engine; the port matches the engine.
+
+### 1.1 ASCII-only identifier case-folding
+Upstream folds unquoted identifiers full-Unicode (`str.lower()`): `CAFÉ` → `café`. Real engines fold
+ASCII-only on multibyte encodings (PG `downcase_identifier`), so the port folds only `A-Z`↔`a-z`:
+`CAFÉ` → `cafÉ`. Applies to every folding strategy. `dialects/dialect.go`;
+test `identifier_casefold_test.go`.
+
+### 1.2 MySQL-exact identifier folding (opt-in strategies)
+Upstream's MySQL is `CASE_SENSITIVE` (folds nothing) — unchanged by default. Two opt-in
+`NormalizationStrategy` values model real MySQL resolution:
+- `MySQLCaseInsensitive` (lctn=1/2): folds everything with MySQL's `utf8mb3_general_ci` map
+  (`dialects.MySQLLower`, generated table in `dialects/mysql_casefold_table.go` — accent-preserving,
+  not Go's `strings.ToLower`).
+- `MySQLCaseSensitiveTableNames` (lctn=0): role-aware — table/db names, table aliases, CTE names, and
+  column qualifiers stay case-sensitive; column names fold. `information_schema` relations fold
+  regardless (MySQL matches that schema case-insensitively).
+
+`schema.NewMappingSchema(normalize=true)` normalizes keys role-aware and **fails closed** on two raw
+keys folding to one normalized key (upstream `nested_set` is last-wins) — every folding dialect.
+Tests: `optimizer/qualify_tables_mysql_test.go`, `schema/` tests.
+
+### 1.3 Dialect settings string + DialectType polymorphism
+`dialects.GetOrRaise` accepts upstream's settings-string form (`"mysql, normalization_strategy=…"`)
+and the dialect-accepting entry points take `nil | string | *Dialect`, mirroring upstream
+`DialectType`. Gap-closure, not a divergence. Only `normalization_strategy` (plus the Go-only
+`mysql_version`/`mysql_ansi_quotes`) is supported; upstream's `version` is not.
+
+### 1.4 MySQL `--` comment requires trailing space
+Upstream comments out `SELECT 1--2` in every dialect. MySQL requires ASCII whitespace/control (or
+EOF) after `--`, so under mysql the port tokenizes `1--2` as `1 - -2`. Postgres/base unchanged.
+Test `tokenizer_mysql_comment_test.go`.
+
+### 1.5 MySQL executable comment activation (opt-in `mysql_version`)
+Default matches upstream: `/*! … */` bodies stay comments. With `mysql_version=<MYSQL_VERSION_ID>`
+set, a bare `/*! … */` body — and a gated `/*!NNNNN … */` body when version ≥ gate — is tokenized as
+SQL. Activation is semantic, not byte-preserving (`SELECT 1 /*!50000 + 100 */` regenerates as
+`SELECT 1 + 100`). Optimizer hints `/*+ … */` stay comments. Test `mysql_version_comment_test.go`.
+
+### 1.6 MySQL `RESET …` → `Command`
+Upstream parses `RESET MASTER` as `Alias(RESET AS MASTER)`. The port degrades all MySQL `RESET …` to
+`exp.Command`. `reset` as an identifier unaffected. `dialects/mysql.go`.
+
+### 1.7 Postgres `U&'…'` / `U&"…"` decoded
+Upstream mis-tokenizes `U&'\0067'` as `U & '…'` and errors on the identifier form. The port decodes
+the SQL-standard escapes into an ordinary `Literal`/`Identifier`. A custom `UESCAPE 'c'` clause fails
+closed. Ledger `pg-unicode-identifier`; tests `unicode_escape_test.go`, `tokens/unicode_escape_test.go`.
+
+### 1.8 `SAVEPOINT` / `RELEASE SAVEPOINT` → `Savepoint`
+Upstream parses `SAVEPOINT s` as an `Alias` and errors on `RELEASE SAVEPOINT s`. The port builds
+`exp.Savepoint{this, kind}`; bare `RELEASE <name>` (no keyword) is Postgres-only. Output normalizes
+release to `RELEASE SAVEPOINT <name>`. Ledger `release-savepoint`; test `savepoint_test.go`.
+
+### 1.9 Postgres/MySQL reject a bare string as table name/alias
+Upstream folds `FROM 'foo'` and `FROM t 'x'` into identifiers in every dialect; real PG/MySQL reject
+both. Gated by `Dialect.StringTableIdentifiers` (default true = upstream; false for postgres/mysql —
+parse error, or `Command` inside tryParse'd DDL). Explicit `AS '…'` table alias is still accepted
+(matches upstream; a pre-existing quirk). Test `parser/string_aliases_test.go`.
+
+### 1.10 Postgres `pg_catalog.<builtin>` resolves to the builtin
+Upstream leaves `pg_catalog.int4` USER-DEFINED. For postgres, a two-part `pg_catalog.<name>` whose
+tail is in a pinned allowlist of real pg_catalog type names resolves to the same node as the bare
+spelling (`pg_catalog.int4` → `INT`), across `::`/CAST/space-typed-literal spellings. Aliases PG
+rejects (`pg_catalog.integer`), other schemas, `pg_catalog.char`/`bit` (bare keyword is a different
+type), and modifier-bearing `oid(5)`-style names stay USER-DEFINED. `parser/parser_types.go`;
+test `TestParsePgCatalogBuiltinType`.
+
+### 1.11 MySQL `ANSI_QUOTES` (opt-in `mysql_ansi_quotes`)
+Upstream has no support; default MySQL treats `"…"` as a string. With `mysql_ansi_quotes=true`,
+`"…"` is a quoted identifier. Parse-only; the generator already emits `'`/backtick, valid in both
+modes. Test `mysql_ansi_quotes_test.go`.
+
+### 1.12 Postgres `SET var = "quoted"` keeps the quotes
+Upstream rewrites a quoted-identifier SET value to a bare `Var` (`SET search_path = "$user"` →
+`= $user`, invalid PG). The port keeps a quoted value verbatim. `parser/stmt_set.go`;
+test `TestPostgresSetMultiValue`.
+
+### 1.13 MySQL `START REPLICA|SLAVE|GROUP_REPLICATION` → `Command`
+Upstream parses these as `Transaction{modes:[REPLICA]}` (renders invalid `BEGIN REPLICA`). The port
+degrades them to `Command` at top level, MySQL-only. `parser/stmt_transaction.go`;
+tests `TestMySQLStartReplicationIsNotTransaction`, `TestStartReplicationDivertIsMySQLOnly`.
+
+### 1.14 MySQL admin command leaders → `Command`
+Upstream mis-parses `STOP …`/`FLUSH …`/`UNLOCK INSTANCE`/`XA …`/`BINLOG`/`HELP`/`RESTART`/`SHUTDOWN`
+as `Alias`/`Column` (some `XA` forms error). The port degrades the whole statement to `Command` —
+top-level only, so the words stay usable as identifiers and nested values.
+`parser/stmt_mysql_command.go`; tests `TestMySQLCommandLeaders*`.
+
+### 1.15 MySQL `TABLE tbl` → `SELECT * FROM tbl`
+Upstream parses `TABLE users` as an `Alias`. The port builds the equivalent `Select` (MySQL defines
+`TABLE t` as exactly that), top-level, plain table identifier only; trailer forms
+(`ORDER BY`/`UNION`/…) fail closed. Qualified `TABLE db.users` is ledgered (`mysql-table-value`).
+`parser/stmt_mysql_table.go`; tests `TestMySQLTableStatement*`.
+
+### 1.16 MySQL `DROP INDEX idx ON db.users`
+Upstream errors on the db-qualified target (single-id `_parse_on_property`). The port parses the ON
+target with `parseTableParts` into `OnProperty{this: Table}` — the qualifier survives; the target is
+a `Table`, not upstream's bare `Identifier`. Ledger `mysql-drop-index-on-qualified`;
+test `TestParseDropIndexOnTable`.
 
 ---
 
 ## Opt-in behavioral extensions beyond upstream
 
-### Search-path-aware table qualification
+Additive analysis features; default behavior and fixture output unchanged.
 
-Pinned upstream `qualify_tables` accepts one fixed `db`/`catalog` and stamps those parts without an
-existence check (`.reference/sqlglot-v30.12.0/sqlglot/optimizer/qualify_tables.py:16-23,62-75`). The
-Go-only `optimizer.QualifyOpts.SearchPath` adds a separate, opt-in resolution mode. The mode switch is
-exact: a nil or empty `SearchPath` uses the existing upstream-faithful fixed `DefaultSchema`/`Catalog`
-path unchanged, so all existing fixture output remains unchanged; only a non-empty `SearchPath` enables
-the extension.
+- **Search-path table qualification** (`QualifyOpts.SearchPath`): resolves the schema part by proven
+  existence against the supplied schema, in order; no fallback to `DefaultSchema`, no catalog stamp,
+  unproven stays unqualified (fail-closed). Names fold role-aware (§1.2). Empty path = upstream path.
+- **Qualify resolution report** (`QualifyOpts.ResolutionReport` → `SourceKind` per source): exposes
+  the source classification the qualify scope pass already computes. `Unresolved` is the zero value.
+  DML roots populate from the §6.1 analysis traversal.
 
-In non-empty mode, candidates are dialect-normalized and checked in order against the supplied schema.
-A candidate database is stamped only when `schema.Find(..., false, false)` returns a mapping for that
-candidate, and the first proven candidate wins. There is no fallback to the fixed `DefaultSchema`, and
-no catalog is added. If no candidate is proven, the table remains unqualified so downstream policy can
-fail closed. Absent, ambiguous, empty, flat, or otherwise schema-incapable schemas therefore produce no
-stamp. Already-qualified tables and CTE references are preserved and are not rewritten.
-
-The lookup requires a schema whose `SupportedTableArgs` includes `schema` (this is the port's renamed
-qualifier arg — upstream calls it `db`; see §7). An empty schema or a flat, table-only mapping is
-intentionally insufficient because it cannot prove that a table exists in a specific schema; probing it
-as though it could would allow a mapping implementation to truncate the schema-qualified lookup and
-return an unrelated unscoped table.
-
-This boundary is security-relevant: guessing a database can bind access analysis to a table that the
-actual database would not resolve, creating a wrong-ALLOW decision. Leaving the database absent when
-its resolution cannot be proven is the safe result.
-
-**Dimension resolved (schema only; catalog is the caller's).** `SearchPath` resolves the **schema**
-part of a table name; it never stamps `catalog`. The probe is a two-part `Table{this, schema}`, and this
-resolves correctly against a **three-level `catalog.schema.table`** schema too (verified: with a
-`{cat:{schema:{table}}}` mapping, `SELECT * FROM t` under `SearchPath=[schema…]` stamps `schema=<schema>`
-and leaves `catalog` unstamped) — `schema.Find` matches a schema-qualified probe by schema-level
-existence, not requiring the catalog level, so a depth-3 consumer is **not** silently over-denied. The
-stamp is a schema-level existence superset: a multi-catalog consumer supplies its own `catalog` (via
-`opts.Catalog` or downstream) and performs the full `catalog.schema.table` resolution, which fail-closes
-if the table does not exist in *its* catalog. So the division is: **R1 fixes the schema dimension by
-proven schema-existence; the caller fixes and enforces the catalog.**
-
-**Identifier folding (role-aware).** The `SearchPath`, `DefaultSchema`, and `Catalog` names are folded with the
-dialect's normalization strategy in a **relation-role context** — each is parsed and given a Table parent
-under its arg key before `NormalizeIdentifier` runs (`normalizeRelationIdentifier`) — so the role-aware
-MySQL `lower_case_table_names=0` strategy **preserves** a schema name's case (a detached identifier has
-no parent and would be misread as a foldable column, lowercasing `App` to `app`) and the
-INFORMATION_SCHEMA exception (§1.2) applies. A caller may therefore pass the search path in its **raw**
-case: under lctn=0, `SearchPath=["App"]` stamps `schema=App` (case-sensitive) and `["app"]` fails to resolve
-`App`; under lctn=1/2 both fold to `app`. Non-role-aware dialects (base/Postgres, default MySQL) ignore
-the parent, so their result is unchanged from a detached normalization.
-
-This is not a parse-grammar construct, so it is neither registered in
-[`testdata/upstream_extensions.jsonl`](./testdata/upstream_extensions.jsonl) nor governed by the
-grammar-extension tripwire.
-
-### Qualify resolution report
-
-The Go-only `optimizer.SourceKind`, `optimizer.ResolvedSource`, and
-`optimizer.QualifyOpts.ResolutionReport` API exposes the source resolution already performed by the
-qualify scope pass. It is additive: upstream's `Callable[[exp.Table], None]` callback shape remains
-unchanged as `QualifyOpts.OnQualify`, rather than being enriched with Go-only report data.
-
-Classification follows resolved scope relationships, not table-shaped syntax or name guessing. A
-selected source's dynamic type and `ScopeType` distinguish physical tables, CTEs, derived tables, and
-other scopes; physical identity comes from the resolved table's catalog, db, and name. `Unresolved` is
-intentionally the zero value so missing or unclassified results fail closed. Scalar and predicate
-subqueries are emitted from their existing `ScopeTypeSubquery` scopes.
-
-For a DML root (`UPDATE`/`DELETE`/`MERGE`), the report is populated from the R3 **analysis** traversal
-(`TraverseScope`), which carries the DML-root scope — so the DML target *and* its `FROM`/`USING`/`JOIN`
-read-sources classify (a physical source → Physical, a CTE/derived source → CTE/Derived), not just the
-target. Column qualification itself still uses the upstream-faithful optimizer traversal, which omits
-those DML-root scopes. A malformed/incomplete DML for which R3 omits the root scope falls back to
-supplementing only the exact grammatical target as Physical and leaving other root-level references
-Unresolved (fail-closed).
-
-A nil `ResolutionReport` performs no population and preserves all existing SQL and AST behavior. A
-caller-supplied map is populated during `Qualify`'s existing scope pass: a non-DML root reuses the
-`QualifyColumns` optimizer traversal (no second pass); a DML root uses the analysis traversal as above;
-and a minimal scope pass covers the column-qualification-disabled case. This is an analysis API, not a
-parse construct, so it does not add or change an entry in `testdata/upstream_extensions.jsonl` and no
-upstream-extension tripwire applies.
+Neither is a grammar construct — no ledger row.
 
 ---
 
 ## Grammar extensions beyond upstream
 
-Grammar extensions are output-round-tripping AST extensions: they preserve valid same-dialect SQL output
-but intentionally produce a more useful structured AST than pinned upstream. They are governed by the
-extension ledger in [`testdata/upstream_extensions.jsonl`](./testdata/upstream_extensions.jsonl), not by
-the §1 discipline for correctness fixes against real-engine bugs. The always-on
-`TestUpstreamExtensionsGoSide` checks the recorded Go root Kind, and the `.reference`-gated
-`TestUpstreamExtensionsTripwire` re-checks pinned upstream's behavior so a future reference bump cannot
-silently collide with an extension.
+Constructs upstream Commands or parse-errors that this port structures. Each is registered in
+`testdata/upstream_extensions.jsonl` by the id below (the ledger row records upstream's fallback and
+reconciliation note); malformed/engine-invalid forms fail closed to `Command` or a parse error.
 
-The first registered construct is ledger id
-[`pg-explain`](./testdata/upstream_extensions.jsonl). For Postgres, literal `EXPLAIN` tokenizes through the
-`DESCRIBE` statement path and builds a `Describe` root with structured `CopyParameter` option children, a
-parsed inner statement, and an internal `kind = "EXPLAIN"` discriminator. The Postgres generator uses that
-discriminator to render either parenthesized comma-separated options or legacy space-separated options;
-the existing base/MySQL literal `DESCRIBE` generation remains unchanged. Unsupported `EXPLAIN` forms
-fail closed to
-`Command` and round-trip verbatim. Pinned sqlglot v30.12.0 also returns `Command` for the ledgered example;
-use the stable ledger id and tripwire for its reconciliation lifecycle rather than copying the row's
-mutable reconciliation instructions here.
+| ledger id | construct → node |
+|---|---|
+| `pg-explain` | Postgres `EXPLAIN` → `Describe{kind:"EXPLAIN"}` with structured options + parsed inner statement |
+| `mysql-insert-set` | `INSERT INTO t SET a=1` → normalized `Insert` + one-row `Values` (renders as `INSERT … VALUES`) |
+| `mysql-replace` | `REPLACE INTO …` → `Insert{replace:true}` (MySQL generator renders `REPLACE`) |
+| `mysql-describe-column` | `DESCRIBE tbl col\|'wild'` → `Describe{this:Table, column}` (single identifier/wild only) |
+| `pg-set-role`, `pg-set-session-authorization`, `pg-set-time-zone`, `pg-set-names`, `pg-set-constraints`, `pg-set-session-characteristics` | Postgres SET special forms → `Set{SetItem{kind:…}}` |
+| `pg-set-transaction-deferrable` | PG `[NOT] DEFERRABLE` transaction mode (PG-only mode table) |
+| `pg-set-multi-value` | `SET search_path = a, b` → one `SetItem`, extra values in `expressions` (PG-only; strict `var_value` list) |
+| `pg-set-scoped-role` | `SET [SESSION\|LOCAL] ROLE\|SESSION AUTHORIZATION` → same kinds + `SetItem.scope` |
+| `mysql-set-password` | `SET PASSWORD [FOR user] = v` → `SetItem{kind:"PASSWORD"}` |
+| `mysql-set-role`, `mysql-set-default-role` | MySQL `SET [DEFAULT] ROLE …` → `SetItem{kind:"ROLE"\|"DEFAULT ROLE"}`; strict role-name/CSV grammar, engine-invalid forms fail closed |
+| `mysql-show-create-user` | `SHOW CREATE USER u` → `Show{this:"CREATE USER"}` |
+| `mysql-show-grants-user-host`, `mysql-show-grants-using` | `SHOW GRANTS [FOR user [USING roles]]` → structured `Show` |
+| `pg-show-guc`, `pg-reset` | PG `SHOW`/`RESET {name\|ALL\|special}` → `Show`/`Reset` with **canonical** `this` (lowercased, unquoted; `TIME ZONE`→`timezone`, `SESSION AUTHORIZATION`→`session_authorization`) |
+| `mysql-into-outfile`, `mysql-into-dumpfile` | `SELECT … INTO OUTFILE\|DUMPFILE '/path'` → `Into{kind, this:path}` + structured export options; placement/tail rules match MySQL, violations fail closed |
+| `pg-user-type-typed-literal` | PG `<type-name> 'str'` (space typed-literal) → the same `Cast` as `'str'::type`; also ports the `STRING_ALIASES` flag properly (base/PG reject implicit string aliases, MySQL accepts) |
+| `pg-start-transaction`, `mysql-start-transaction-snapshot` | `START TRANSACTION [modes]` → `Transaction` (PG `START`→BEGIN token; MySQL `WITH CONSISTENT SNAPSHOT`) |
+| `mysql-create-user`, `mysql-create-role`, `mysql-alter-user`, `mysql-drop-user`, `mysql-drop-role` | account DDL → structured `Create`/`Alter`/`Drop` root with `kind:"USER"\|"ROLE"`; body kept verbatim in a `Command` child |
 
-Ledger id [`mysql-insert-set`](./testdata/upstream_extensions.jsonl) registers MySQL `INSERT ... SET`,
-which pinned upstream rejects with a parse error. The MySQL parser intentionally normalizes assignments
-such as `INSERT INTO t SET a = 1, b = 2` directly to the existing `Insert` shape whose target is
-`Schema(Table, columns)` and whose source is one-row `Values(Tuple(values))`; it therefore renders as
-`INSERT INTO t (a, b) VALUES (1, 2)`, and that canonical form is idempotent across subsequent
-parse/generate cycles. The extension is MySQL-only. Use the stable ledger id for its reconciliation
-lifecycle.
-
-Ledger id [`mysql-replace`](./testdata/upstream_extensions.jsonl) registers structural MySQL `REPLACE`,
-which pinned upstream packs as a tokenizer-level `Command`. The MySQL tokenizer no longer performs that
-packing, and the parser represents supported statements as `Insert` with the Go-only optional
-`replace = true` marker. Only MySQL generation consults the marker and renders `REPLACE`; unmarked
-`Insert` nodes and other dialects retain their existing behavior. A leading `REPLACE(` retreats to
-ordinary expression parsing to disambiguate function calls from statements, while unsupported or
-partially consumed statement forms fail closed to a source-preserving `Command`. Use the stable ledger
-id for its reconciliation lifecycle.
-
-Ledger id [`mysql-describe-column`](./testdata/upstream_extensions.jsonl) registers MySQL's
-`{DESCRIBE|DESC|EXPLAIN} tbl_name [col_name | wild]` column/wildcard-filtered table describe, which pinned
-upstream rejects with a parse error. After a *plain* `DESCRIBE tbl` target is parsed, the MySQL parser
-consumes a single trailing `col_name` — a backtick-quoted identifier, or an unquoted **non-reserved** name
-(an unquoted reserved word like `NULL`/`ORDER`, which MySQL rejects here, is not consumed) — or a `wild`
-string, into a Go-only optional `column` arg, so `DESCRIBE users id` / `DESCRIBE users 'i%'` build
-`Describe{this: Table, column: ...}` instead of degrading to `Command`. The target stays `this` (a `Table`),
-so a consumer keying on `this.Kind()` classifies these as table-describes rather than fail-closed — closing a
-false-reject the `this.Kind()` discriminator would otherwise introduce for these common interactive-metadata
-statements.
-
-The col slot is deliberately a single identifier, **not** the general column-expression grammar: a
-parenthesized subquery, function call, cast, qualified/multi-part column, bracket, or literal is rejected
-(fail closed to `Command`), so a full `SELECT` (with its own table reads) can never be smuggled into the
-`column` arg behind `this = Table`. The grab is further gated so it fires only for a *bare* describe with no
-`style`/`format`/`kind` modifier and consumes no trailing clause: `EXPLAIN ANALYZE TABLE t` /
-`EXPLAIN FORMAT=JSON TABLE t` (which are explains of the MySQL `TABLE t` query — row-reading scans, not
-metadata), and any `PARTITION(...)` / `AS JSON` after a col, all stay `Command`. A statement target
-(`DESCRIBE SELECT ...`) never has a trailing token grabbed, and other dialects are untouched. The generator
-renders the column right after the table (`DESCRIBE users id`); the `DESC`/`EXPLAIN` leaders normalize to
-`DESCRIBE` as they already do for the bare form. Verified against MySQL 8.4. Use the stable ledger id for its
-reconciliation lifecycle.
-
-(Separately, and NOT changed here: the plain `EXPLAIN TABLE t` form — MySQL's `TABLE t` statement, a
-query-explain — already parses to `Describe{kind: "TABLE", this: Table(t)}` in both this port and pinned
-upstream. A consumer distinguishing query-explain from table-describe by `this.Kind()` must also treat
-`kind == "TABLE"` as a query-explain; this extension does not widen that pre-existing shape.)
-
-Ledger ids [`pg-set-role`, `pg-set-session-authorization`, `pg-set-time-zone`, `pg-set-names`,
-`pg-set-constraints`, `pg-set-session-characteristics`](./testdata/upstream_extensions.jsonl) register the
-Postgres `SET` special-forms, each of which pinned upstream degrades to a raw `Command`. The ordinary
-assignment forms (`SET x = v` / `SET x TO v`, with optional `SESSION`/`LOCAL`/`GLOBAL` scope) already parse
-to `Set`; these six keyword forms did not. Structuring them into `Set{SetItem{kind: ...}}` lets a consumer
-read `SetItem.kind` to tell a **privileged** SET (`ROLE`, `SESSION AUTHORIZATION` — which change the
-effective role/user) from a **benign** one (`TIME ZONE`, `NAMES`, `CONSTRAINTS`, `SESSION CHARACTERISTICS`).
-Values are modeled fully — `TIME ZONE` accepts a string, a signed number, a bare zone name,
-`LOCAL`/`DEFAULT`, or an `INTERVAL '…' … TO …`; `CONSTRAINTS` holds either the unquoted `ALL` keyword (a
-*quoted* `"ALL"` stays a specific constraint name so round-trip can't broaden it to every constraint) or a
-comma-separated list of (optionally schema-qualified) constraint names in `expressions`, and the
-`DEFERRED`/`IMMEDIATE` mode (validated against exactly those two words) in `this`; `SESSION CHARACTERISTICS`
-requires `AS TRANSACTION` and uses a **Postgres-only** transaction-mode set (`pgTransactionCharacteristics`)
-that **extends upstream** with the valid Postgres `[NOT] DEFERRABLE` transaction_mode (upstream's
-`TRANSACTION_CHARACTERISTICS` omits it, so `SET SESSION CHARACTERISTICS AS TRANSACTION DEFERRABLE` Commands
-there and `SET TRANSACTION DEFERRABLE` raises "Unknown option"; a consumer's uniform PG-SET fail-close would
-false-deny the benign form). Ledger id `pg-set-transaction-deferrable`. The DEFERRABLE mode is kept OUT of the
-dialect-shared `transactionCharacteristics` (used by the base/MySQL `SET TRANSACTION` path via the copied SET
-parsers) because MySQL/base reject it — `SET TRANSACTION DEFERRABLE` is ERROR 1064 on MySQL; `parseSetTransaction`
-selects `pgTransactionCharacteristics` only under the postgres dialect. A characteristic still outside the (now-extended) set — e.g.
-`READ UNCOMMITTED`, which the shared table blocks via a typo in its `READ UNCOMMITTED` entry — fails closed to
-`Command` rather than raising. **Known limitation:** the mode list is parsed comma-separated (`parseCsv`, 1:1
-with upstream `_parse_set_transaction`), so a **space**-separated multi-mode (`… READ ONLY DEFERRABLE`, valid PG)
-degrades to `Command` — an upstream-shared gap; the comma form (`… READ ONLY, DEFERRABLE`) structures. `NAMES`
-takes a string literal,
-`DEFAULT`, or nothing (and, unlike MySQL's, no `COLLATE` — an unquoted charset is invalid Postgres and fails
-closed). The parsers live in `parser/dialect_postgres_set.go` (dispatched via a
-Postgres-specific `SET_PARSERS` table; `SESSION AUTHORIZATION`/`SESSION CHARACTERISTICS` are disambiguated
-inside the `SESSION` assignment parser because the dispatch trie matches `SESSION` first), with two
-generator branches in `generator/stmt_set.go` for the `CONSTRAINTS`/`SESSION CHARACTERISTICS` shapes.
-
-**The `kind` is not sufficient on its own for a privilege check.** Postgres also exposes `role` and
-`session_authorization` as *ordinary GUCs*, so `SET role = x` (bare or `SESSION`/`LOCAL`-scoped) and
-`SET session_authorization = x` perform the same privilege change as the keyword forms but parse as ordinary
-assignments (`SetItem.kind` `""`/`"SESSION"`/`"LOCAL"`, `this = EQ(<var>, <value>)`). A consumer must
-therefore ALSO deny an assignment whose LHS variable name is `role`/`session_authorization`
-(case-insensitive) — not only `kind ∈ {ROLE, SESSION AUTHORIZATION}`. The disambiguator is a following
-assignment delimiter (`=`/`:=`/`TO`): only the no-delimiter spelling is the privileged keyword form.
-**SECURITY — the bare `SET role = x`** is load-bearing and newly modeled here: because `ROLE` is a SET dispatch
-key, without the delimiter check it fell closed to a raw `Command`, and a consumer whose Command-SET fallback is
-a benign session passthrough (allow) would then let a bare `SET role = admin` through as a privilege
-escalation. `parseSetItemRole` now retreats on a following delimiter and builds the readable `EQ` (the scoped
-and `session_authorization` spellings already did). The alias *surface* is still not closable by
-keyword-spelling detection alone — every special form has a plain-assignment alias — which is exactly why a
-consumer must gate on the `EQ` LHS too.
-
-Fail-closed to `Command`: a form missing or malforming its required value (`parseSet` also rejects a
-zero-item `Set`); and a comma-combined multi-item Postgres SET (real Postgres SET is single top-level item, so
-`len(items) > 1` on Postgres degrades — this is the only way a special form gets mixed into a comma list,
-which the server rejects). The extension is Postgres-only; base/MySQL leave these forms as `Command` (MySQL's
-own multi-item `SET a=1, b=2` is unaffected). Verified against PostgreSQL 17.6. Use the stable ledger ids for
-the reconciliation lifecycle.
-
-Ledger id [`pg-set-multi-value`](./testdata/upstream_extensions.jsonl) structures a Postgres single-GUC
-**comma value list** — `SET search_path = a, b` / `SET search_path TO a, b` / `SET x = 1, 2` — which pinned
-upstream Commands. This is a **multi-VALUE** assignment (ONE `SetItem`: the EQ holds the variable + first value
-in `this`, the remaining values in `SetItem.expressions`), distinct from the **multi-ITEM** `SET a = 1, b = 2`
-above (two assignments, which real Postgres rejects — the second `name = value` is a syntax error — and which
-stays fail-closed to `Command`). A value list admits only Postgres `var_value`s (`isPgSetListValue`: an
-identifier, string, number, boolean, or signed number); an element that is an expression (`a + b`), a cast
-(`a::text`), a subquery, the `DEFAULT` keyword (valid only as the sole value, never in a list), or a nested
-`name = value` assignment is a Postgres syntax error and fails closed — so `SET x = a + b, c` /
-`SET search_path = a, DEFAULT` stay `Command`. (The single-value RHS keeps the pre-existing upstream parse,
-which still over-accepts a lone expression/subquery value like `SET x = a + b` — an inherited, fail-safe gap
-for a gating consumer, not introduced or widened by this list feature.) A consumer
-still reads the variable name off `SetItem→EQ→this` exactly as for a single-value assignment, so a value list on
-a privileged GUC alias (`SET role = a, b`) is gated on the LHS name unchanged. The value list is **Postgres-only**
-(base/MySQL commas separate items, not values — `parseSetItemAssignment` only reads a value list under the
-postgres dialect); a trailing/embedded-assignment element fails closed. `SET x = 1, 2` is *syntactically* valid
-Postgres (it structures) even though PG rejects it *semantically* ("SET x takes only one argument") — GUC-type
-knowledge is beyond a parser, and structuring a syntactically-valid statement is faithful to the grammar (a
-gating consumer denies the LHS as usual; PG rejects the non-list value at run time). Depends on §1.12 (quoted
-value preservation) so the common `SET search_path = "$user", public` round-trips (a quoted `"DEFAULT"` is an
-ordinary identifier value and stays, distinct from the bare `DEFAULT` keyword which is rejected in a list). Parser
-value-list branch in `parser/stmt_set.go`; generator fold in `generator/stmt_set.go`. Verified against
-PostgreSQL 17.6. Regression test `TestPostgresSetMultiValue`.
-
-**Fail-safe fidelity gap — bare reserved-keyword values.** `isPgSetListValue` admits any single-part identifier,
-so a *fully-reserved* PostgreSQL keyword used as an unquoted value (`SET search_path = user, public` /
-`order, public`) is over-accepted: real PG rejects it (`USER`/`ORDER`/… can't be a bare `var_value`), but this
-port has **no PostgreSQL reserved-keyword table** to consult — upstream leaves PG's `RESERVED_KEYWORDS` empty
-(only MySQL populates one), and the tokenizer lexes these words as `VAR`. This is fail-safe for a gating consumer
-(the LHS is still read for gating; PG rejects the statement at parse, so it never executes) and pre-exists on the
-single-value path; the list feature widens it to list shape but does not change its class. Two related
-inherited-parse quirks: a bare unparenthesized `SELECT`/`INSERT`/… value (`SET x = select, public`) is swallowed
-whole by the RHS `parseStatement` (comma included, so the list branch never runs) and renders malformed — a
-pre-existing single-value-path artifact (`origin/main` produces the identical output); and an unquoted dotted
-single value (`SET x = a.b`) flattens lossily to `b`. Closing these to strict PG `var_value` purity would require
-modeling PG's reserved-word set (a non-upstream data addition) and is deferred; none is a security gap.
-
-Ledger id [`pg-set-scoped-role`](./testdata/upstream_extensions.jsonl) extends the above to the
-**`SESSION`/`LOCAL`-scoped** privileged forms — `SET [SESSION|LOCAL] ROLE r` and
-`SET [SESSION|LOCAL] SESSION AUTHORIZATION u` — which pinned upstream also Commands. They parse to the SAME
-`SetItem.kind` as the bare form (`ROLE` / `SESSION AUTHORIZATION`, so a consumer's privilege check is
-unchanged), with the scope word preserved in a new `SetItem.scope` arg for a faithful round-trip. Critically,
-the same GUC-alias caveat is honored structurally: `SET SESSION role = x` (an assignment on the `role` GUC)
-is disambiguated from `SET SESSION ROLE x` (the privileged form) by the following assignment delimiter
-(`=`/`:=`/`TO`) — only the no-delimiter spelling is the privileged form, so the GUC-alias assignment stays an
-`EQ` whose LHS a consumer can read. Parser in `parser/stmt_set.go` (`parseSetItemAssignment`).
-
-Ledger id [`mysql-set-password`](./testdata/upstream_extensions.jsonl) registers MySQL
-`SET PASSWORD [FOR user] = value` — an account mutation pinned upstream Commands (the `FOR` form) — into
-`Set{SetItem{kind:"PASSWORD", this:<user|nil>, expressions:[<value>]}}`, so a consumer reads
-`kind = "PASSWORD"` instead of scanning the raw tail. The optional `FOR <user>` is a MySQL user spec
-`name[@host]` captured verbatim (quoting preserved) so it round-trips byte-for-byte; the bare
-`SET PASSWORD = x` (previously a plain assignment) now folds into the same `kind=PASSWORD` shape. Parser in
-`parser/dialect_mysql_set_show.go` (`parseSetItemPassword` + `parseMySQLUserSpec`), generator branch in
-`generator/stmt_set.go`.
-
-Ledger ids [`mysql-set-role`, `mysql-set-default-role`](./testdata/upstream_extensions.jsonl) register MySQL
-`SET ROLE { DEFAULT | NONE | ALL [EXCEPT role,…] | role,… }` and
-`SET DEFAULT ROLE { NONE | ALL | role,… } TO user,…` — privilege operations pinned upstream Commands — into
-`Set{SetItem{kind:"ROLE"}}` and `Set{SetItem{kind:"DEFAULT ROLE"}}`. The point is that a consumer gates a
-**MySQL** role change on the SAME `SetItem.kind="ROLE"` it already uses for the Postgres `SET ROLE` form
-(§ pg-set-role) — rather than blanket-denying every MySQL raw `Command` SET because a role change might hide in
-it. The `DEFAULT/NONE/ALL/EXCEPT/TO` keywords are matched **unquoted** (so a quoted `SET ROLE 'ALL'` is a role
-literally named `ALL`, not the keyword — matches MySQL); the roles/users are MySQL account names `name[@host]`
-captured verbatim, so the statement round-trips (a role/user *list* re-spaces `a,b`→`a, b`, the generator's
-systemic CSV canonicalization applied to every comma list — `SELECT a,b` too — valid→valid, semantics
-preserved). `SET DEFAULT ROLE` (an admin op that sets a
-*user's* default roles) is a distinct statement from `SET ROLE` (which activates roles in the current session),
-so it takes a distinct `kind="DEFAULT ROLE"` and its mandatory `TO user,…` list lands in a new `SetItem.to` arg
-(with `SetItem.except` marking the `ALL EXCEPT` form). Both are MySQL-only (the Postgres `SET ROLE` keeps its
-own parser/generator path — same shared kind).
-
-Because a SQL-authorization consumer keys on the resulting structured node, the role/user grammar is parsed
-**strictly** so that only SQL MySQL 8.0.33 actually accepts becomes a `Set` — anything the server rejects fails
-closed to `Command` rather than laundering an engine-invalid statement into an executable-looking role mutation
-(dual-review 2026-07-23, Sol + Codex; every case DB-verified). Four guards, beyond the permissive
-`parseMySQLUserSpec` that `SET PASSWORD` reuses: (a) the role/user list is a **strict CSV** (`parseMySQLRoleList`)
-— a leading, trailing, or doubled comma (`SET ROLE admin,`, `,admin`, `admin,,dev` → ERROR 1064) fails closed,
-where the generic `parseCsv` would silently drop the dangling separator and regenerate valid SQL, and a trailing
-comma after a keyword alternative (`SET ROLE ALL,`) is rejected by a standalone-form check so it cannot be eaten
-by the outer CSV and regenerated as the different `SET ROLE ALL`; (b) an unquoted name (`parseMySQLRoleName`) must
-first be a single **plain-identifier word** (`isPlainMySQLName` — identifier chars, not all-digit, no embedded
-space), which rejects the token texts the tokenizer produces for non-name lexemes (a placeholder `?`, a hex/bit
-literal `x'6162'`/`b'01'`, an operator `<=`/`->`, a bare number) and for MULTIWORD keyword tokens (`CHARACTER SET`,
-`GROUP BY` — a single tokenizer token whose text spans two words), all ERROR 1064 on MySQL; the validated word is
-then checked against the pinned **MySQL reserved-keyword table** (`Dialect.IsReservedKeyword`) *plus*
-`mysqlNonRoleNameWords`. Those two together are the right oracle in BOTH directions this tokenizer mis-lexes: the
-reserved table rejects reserved words lexed as a plain `VAR` (`TO`, `ACCESSIBLE`, `ADD`, and
-`CURRENT_USER`/`TRUE`/`FALSE`/`NULL`; `SET ROLE TRUE`, `… TO CURRENT_USER` → ERROR 1064) *and* the plain-word gate
-accepts nonreserved words lexed as a dedicated keyword token (`BEGIN`, `SESSION`, `FORMAT`; MySQL parses these as
-valid role names). `mysqlNonRoleNameWords` covers the words MySQL's `sql_yacc.yy` `role_keyword` grammar excludes
-that are NOT in the reserved table: the top-level alternatives `NONE`/`ALL`/`DEFAULT` (invalid mid-list:
-`SET ROLE admin, NONE` → ERROR 1064) and the `ident_keywords_ambiguous_1_roles_and_labels` /
-`ident_keywords_ambiguous_3_roles` categories (`EVENT`, `EXECUTE`, `FILE`, `PROCESS`, `PROXY`, `RELOAD`,
-`REPLICATION`, `RESOURCE`, `RESTART`, `SHUTDOWN`, `SUPER` — nonreserved everywhere else but a syntax error in
-role-name position: `SET ROLE EVENT`, `SET DEFAULT ROLE admin TO SUPER` → ERROR 1064). A *quoted* `'ALL'`/`'NONE'`/
-`'EVENT'`/`'TO'` stays a valid role name. (Verified exhaustively against MySQL 8.0.33/8.0.46 — a 757-keyword sweep
-in both list positions — dual-review round 3, Sol + Codex.) (c) `SET ROLE`/`SET DEFAULT ROLE` are enforced as
-**standalone** statements (the `standaloneInMultiItem` guard in `parseSet`, née `passwordInMultiItem`, extended to
-these kinds), so comma-combining with any other SET item in either position (`SET NAMES utf8, ROLE admin`,
-`SET @x = 1, DEFAULT ROLE r TO u` → ERROR 1064) fails closed; the dispatch is made **atomic** (`parseSetItem`
-retreats fully when a special-form sub-parser fails) so a partially-consumed item can never leave a lossy
-truncated `Set` (`SET DEFAULT ROLE NONE, @x = 1` no longer drops the role part); (d) `SET ROLE = x` / `:= x` is
-the generic variable-assignment production (MySQL parses it as an attempt to set a run-time variable named
-`role`, ERROR 1193 — syntactically valid), so on a `=`/`:=` delimiter the ROLE dispatch retreats and parses a
-plain assignment (`isMySQLSetAssignmentDelimiterAhead`, mirroring the Postgres `parseSetItemRole` precedent),
-rather than swallowing it to `Command`; MySQL has no `TO` delimiter, so `SET ROLE TO admin` (ERROR 1064) stays
-`Command`. A bare `SET ROLE`, a `SET DEFAULT ROLE` missing its `TO`, or an empty role/user list also fails closed. **Fail-safe under-acceptance:** an unquoted dotted/IP host (`SET ROLE admin@127.0.0.1`, which
-MySQL accepts) degrades to `Command` — the same single-token-host limitation `parseMySQLUserSpec` documents
-below; quoted `'admin'@'127.0.0.1'` round-trips exactly, and the consumer denies the `Command` either way.
-Parser in `parser/dialect_mysql_set_role.go`; generator branch (`mysqlSetRoleSQL`, gated on the MySQL dialect so
-it does not collide with the Postgres `kind="ROLE"` generic render) in `generator/stmt_set.go`.
-
-Ledger id [`mysql-show-create-user`](./testdata/upstream_extensions.jsonl) registers MySQL
-`SHOW CREATE USER <user>` — pinned upstream omits it from its `SHOW_PARSERS` and Commands it — modeled like
-the sibling `SHOW CREATE {TABLE,VIEW,…}` forms as `Show{this:"CREATE USER"}`, via a dedicated strict
-`parseShowCreateUser`: a user target is **required** and no trailing clause is allowed (MySQL rejects
-`SHOW CREATE USER 'u' LIKE …`/`FROM …`/`LIMIT …` and a bare `SHOW CREATE USER`), so those fail closed to a raw
-`Command`. All three are valid syntax on MySQL 8.0.33 / PostgreSQL 17.6.
-
-Ledger ids [`mysql-show-grants-user-host` / `mysql-show-grants-using`](./testdata/upstream_extensions.jsonl)
-register MySQL `SHOW GRANTS [FOR <user> [USING <role>, …]]`. Pinned upstream reads the `FOR` target as a single
-token, so `SHOW GRANTS FOR 'u'@'h'`, `… CURRENT_USER()`, and `… USING 'r1'` are hard parse **errors** there.
-`parseShowGrants` reads the target and each role via `parseMySQLUserSpec`; engine-invalid forms (`FOR` without
-a user, `USING` without `FOR`, trailing `LIKE`/`LIMIT`) fail closed to `Command`. The generator emits
-` FOR`/` USING` only when present — upstream's bare-form render `SHOW GRANTS FOR` is invalid MySQL. Verified
-against MySQL 8.0.46.
-
-The `name[@host]` user target (used by `SET PASSWORD FOR …`, `SHOW CREATE USER`, and `SHOW GRANTS`) is parsed by
-`parseMySQLUserSpec`, which enforces MySQL's `user` grammar rather than accepting anything id-var-shaped: the
-name must be an identifier/string (not a number or `?` placeholder), empty parens `()` are valid only on
-`CURRENT_USER` (`foo()` is not a user), the host must touch the `@` (`'u'@ 'h'` is ERROR 1064), and
-`CURRENT_USER` takes no `@host`. Reserved keywords (`ALL`) as an unquoted name are over-accepted — the port
-does not model MySQL's reserved-word table; fail-safe, since consumers gate on the statement kind. The `SET PASSWORD` auth
-value must be a plain string literal (`= '…'`) or `TO RANDOM` — a placeholder (`= ?`), number, or bare
-identifier fails closed. Every engine-invalid form thus degrades to `Command` instead of a structured
-privileged node (verified against MySQL 8.0.33).
-
-**Quoted dispatch keywords fail closed (all SET/SHOW dispatch).** A quoted keyword is never an unquoted
-dispatch keyword — real engines reject `SET "ROLE" x` / `SET "LOCAL" ROLE x` / `SHOW `` `CREATE` `` USER` as
-syntax errors, and read `` `PASSWORD` `` = x` as an ordinary (non-existent) variable assignment — so matching a
-quoted token by text would launder engine-invalid SQL into a structured, valid-looking **privileged** statement
-(e.g. regenerating `SET "ROLE" x` as the executable `SET ROLE x`). This whole *quote-blind hand-rolled matcher*
-class is closed:
-- the shared `findParser`/trie stops on a quoted `IDENTIFIER`/`STRING` token (the *dispatch* keyword — the
-  first word), affecting every dispatched SET/SHOW keyword, not only the privileged ones;
-- every keyword the privileged SET paths match with `matchTextSeq` — the second word of a phrase and the
-  surrounding keywords (`SESSION AUTHORIZATION`, `SESSION CHARACTERISTICS AS TRANSACTION`, `SET [GLOBAL|SESSION]
-  TRANSACTION`, MySQL `PASSWORD`'s `FOR`/`TO RANDOM`) — uses `matchUnquotedTextSeq`, so `SET SESSION
-  "AUTHORIZATION" x` / `SET PASSWORD TO `` `RANDOM` ``` fail closed;
-- MySQL `SET PASSWORD`'s `=`/`:=` delimiter check excludes a quoted `IDENTIFIER` (`` SET PASSWORD `=` 'x' ``
-  no longer builds the mutation);
-- and a **quoted config-parameter name** that would change meaning when regenerated unquoted is rejected by
-  `isPlainConfigIdent`: `RESET "all"` (an unknown parameter) must not become `RESET all` (= reset everything),
-  and `RESET "SESSION AUTHORIZATION"` (a quoted name with a space) must not become the privileged phrase — both
-  fail closed to `Command` (the parser keeps the quotes verbatim in that raw form).
-
-This is a §1-style correctness alignment (matches the DB); pinned upstream's `_find_parser`/`_match_texts`
-match quoted tokens by text.
-
-Ledger ids [`pg-show-guc`, `pg-reset`](./testdata/upstream_extensions.jsonl) register Postgres
-`SHOW { name | ALL | special }` and `RESET { name | ALL }` — session run-time-parameter introspection and
-reset that pinned upstream Commands (`postgres.py` maps `RESET`→`COMMAND` and leaves `SHOW` in the
-tokenizer's Commands set, so both pack their tail into one raw `STRING`). This port parses them from real
-tokens into `Show{this:<name>}` and `Reset{this:<name>}` (a new `KindReset` node), so a consumer classifies
-the GUC introspection/reset structurally. Two contained tokenizer changes make the real tokens available:
-`SHOW` is removed from the Postgres Commands set (exactly as `dialects/mysql.go` already does), and `RESET`
-is left as a plain `VAR` instead of `COMMAND` (so it is dispatched by leading text like `SAVEPOINT`, and stays
-usable as an ordinary identifier — `SELECT reset FROM t` is unaffected). A shared `parsePostgresConfigParam`
-accepts exactly what PostgreSQL 17.6's grammar accepts: a one-or-two-part name (`search_path`, `ext.var`,
-quoted `"search_path"`), `ALL`, or one of the special multi-word phrases `TIME ZONE` / `TRANSACTION ISOLATION
-LEVEL` / `SESSION AUTHORIZATION` (each required to be **unquoted** keywords — Postgres treats `"time"` as a
-parameter name, not the `TIME` keyword). A trailing token (`SHOW search_path extra`), a bare `SHOW`/`RESET`, a
-non-name token (`SHOW 1`, `SHOW (x)`), or a **reserved word** Postgres rejects as a `var_name`
-(`SHOW NULL`/`RESET CURRENT_USER`/`SHOW DEFAULT`/…) all **fail closed** to a raw `Command` — matching what the
-engine rejects.
-
-**`this` is a CANONICAL identity, not the raw spelling** — this is a security property. PostgreSQL's GUC lookup
-is case- and quote-insensitive (`RESET ROLE` == `reset role` == `RESET "RoLe"`), and its special phrases are
-exact aliases of underscore GUCs (`RESET SESSION AUTHORIZATION` == `RESET session_authorization`, `TIME ZONE`
-== `timezone`, `TRANSACTION ISOLATION LEVEL` == `transaction_isolation` — all verified on PG 17.6). So the
-parser folds every spelling to **one** identity: a generic name to its ASCII-lowercased, unquoted form
-(§1.1), and each special phrase to its underscore-GUC name. `RESET ROLE`/`role`/`"RoLe"` all yield
-`this="role"`; every spelling of the session-authorization reset yields `this="session_authorization"`. A
-consumer gating a privilege-relevant reset (`RESET ROLE`/`RESET SESSION AUTHORIZATION` restore the login
-identity — a potential escalation) can therefore match a single canonical `this` and cannot be defeated by a
-case/quote/phrase variant. This mirrors how SET already canonicalizes `SetItem.kind`. Round-trip regenerates
-the canonical spelling (`SHOW TIME ZONE` → `SHOW timezone`; `RESET "RoLe"` → `RESET role`) — semantically
-identical valid Postgres, the same normalization philosophy as SET's `TO`→`=`. `SHOW` additionally treats a
-quoted `"all"` as the `ALL` form (real PG: `SHOW "all"` lists every setting), whereas `RESET "all"` is an
-ordinary parameter named `all` — the one place SHOW and RESET diverge, handled by a `showAll` flag.
-
-**MySQL `RESET` is deliberately left as `Command`** (§1.6) — `RESET MASTER`/`RESET REPLICA` is a privileged
-replication-admin op, semantically unrelated to the Postgres GUC reset, so a consumer must keep treating it as
-opaque. Parser in `parser/dialect_postgres_show_reset.go` + the `parseShow` postgres branch in
-`parser/stmt_show.go`; generators in `generator/stmt_show.go` (postgres `showSQL` branch) and
-`generator/stmt_transaction.go` (`resetSQL`).
-
-**Known limitation — the name grammars approximate the engines' keyword classification (all fail-safe).**
-Exactly matching PostgreSQL's `var_name`/`ColId` and MySQL's `user`/reserved-word tables would require porting
-those keyword-category tables; this port instead approximates them with its tokenizer's token classes, which
-over- or under-accepts a handful of keyword-shaped names. All cases fail **safe** — a consumer gates on the
-statement's structural identity (`Show.this`/`Reset.this` canonical GUC, `SetItem.kind`), never on whether an
-odd name was accepted:
-- *Under-acceptance* (engine-valid → `Command`, a legibility gap): a three-part GUC name (`SHOW a.b.c` /
-  `RESET a.b.c`); a config name whose component tokenizes as a keyword rather than `VAR` (`SHOW schema` —
-  `SCHEMA` is a valid PG `ColId`); a MySQL dotted-IP host (`u@1.2.3.4`); and MySQL
-  `SET PASSWORD … REPLACE …/RETAIN CURRENT PASSWORD` clauses.
-- *Over-acceptance* (engine-invalid → structured, but never a privileged **bypass** — it structures a form the
-  engine rejects, which a consumer still denies): a PG reserved word the tokenizer leaves as `VAR`
-  (`SHOW CURRENT_ROLE`/`SHOW USER` — PG rejects these, but there is no real `current_role`/`user` GUC, so
-  nothing privileged hides behind it), and a MySQL reserved-word account name (`SET PASSWORD FOR ACCESSIBLE =
-  …`). The clearly-reserved *value* keywords (`NULL`/`TRUE`/`DEFAULT`/`CURRENT_USER`/`SESSION_USER`) and a
-  numeric name/host *are* rejected.
-
-These are fidelity gaps, not safety gaps: none lets an engine-executable privileged statement parse as benign
-or regenerate into a different privileged statement (that laundering class is closed — see the quoted-keyword
-note above and the `isPlainConfigIdent` guard, which reject a quoted parameter name whose unquoted
-regeneration would change meaning).
-
-Ledger ids [`mysql-into-outfile`, `mysql-into-dumpfile`](./testdata/upstream_extensions.jsonl) register
-MySQL's `SELECT ... INTO {OUTFILE|DUMPFILE} '/path'` server-side file writes, which pinned upstream rejects
-with a parse error. These parse to the existing `Into` node (hung off the `Select`'s `into` arg) with a new
-`kind` marker (`"OUTFILE"`/`"DUMPFILE"`; **unset** for a normal `INTO tbl/@var`) and `this` = the path
-`Literal`, so a consumer detects the file-write — and its target path — structurally via `Into.kind` rather
-than scanning raw SQL. `OUTFILE` additionally models the export grammar into dedicated args — `CHARACTER SET`
-(`charset`), the `{FIELDS|COLUMNS}` clause (`fields_terminated`, `optionally_enclosed`, `enclosed`, `escaped`,
-plus a `columns` marker distinguishing the `COLUMNS` synonym), and the `LINES` clause (`lines_starting`,
-`lines_terminated`); `DUMPFILE` takes no options (trailing option tokens fail closed, matching MySQL). The
-path is required to be a plain string `Literal` (MySQL rejects a placeholder/parameter/number here); the
-`CHARACTER SET` operand is a bare charset name (`utf8mb4`) or a quoted string (`'utf8'`) — a number, `NULL`,
-a parenthesized/function expression, or a placeholder is rejected; and each `FIELDS`/`LINES` option value is
-a single plain-string or hex/bit literal (`X'2c'`/`0x2c`, `b'101'`/`0b101`) — the national-string form
-(`N'…'`) and adjacent-string concatenation (`'a' 'b'`, which MySQL rejects in this slot) fail closed rather
-than folding into a `CONCAT`. Within a `FIELDS`/`LINES` block the sub-options may appear in **any order**
-(repetition: last wins), matching MySQL; the generator re-emits a canonical order, so a reordered/repeated
-input normalizes rather than round-tripping byte-for-byte (semantically identical, valid MySQL). Every
-matched option introducer requires its operand and a bare `FIELDS`/`COLUMNS`/`LINES` is rejected — all fail
-closed.
-
-MySQL accepts `INTO` both before `FROM` and at the trailing position; the trailing form is canonical and is
-where this port re-emits it (the before-`FROM` spelling parses to the same shape and normalizes to trailing
-on output). The trailing grab in `parseQueryModifiers` fires only for an **unquoted** `OUTFILE`/`DUMPFILE`
-keyword on a MySQL `Select` with no existing `into`; a plain trailing `INTO tbl/@var`, and a backtick-quoted
-`` `outfile` `` (an ordinary INTO target name that MySQL accepts), are left as upstream. Because
-`INTO OUTFILE` is a file write, not a table materialization, the generator renders it inline via `intoSQL`
-and never as the `CREATE TABLE … AS` rewrite a plain `SELECT INTO` takes on non-`SUPPORTS_SELECT_INTO`
-dialects.
-
-**Fail-closed, detection-preserving.** Having matched `OUTFILE`/`DUMPFILE` the parser is committed to the
-file-write grammar, so a malformed tail (missing path, dangling option, modifier after a trailing `INTO`)
-raises a parse error — a hard failure at the default `IMMEDIATE` level that `sqlglot.ParseOne`/`Parse` use.
-The core guarantee is that a **well-formed** file-write is never silently lost: the `Into` node is built with
-its `kind` before any tail is validated, so a malformed *plain SELECT/UNION* file-write still exposes a
-kind-tagged `Into` even at the lenient `WARN`/`IGNORE` levels (reachable via the public
-`parser.NewWithErrorLevel`) — it can never degrade to a plain `SELECT` with the `INTO` dropped. (The one
-exception is a malformed file-write nested inside a speculatively-parsed `CREATE`/`REPLACE`, whose
-`tryParse` forces `IMMEDIATE` and, on the raised error, discards the partial tree back to a raw `Command`
-with no `Into`; such input is invalid MySQL and cannot execute, so this is a limit of the lenient-level
-guarantee, not an executable bypass.) **Trailing position:** a trailing `INTO` must be the last clause except
-for a following locking clause (`FOR UPDATE`/`LOCK IN SHARE MODE`, which MySQL accepts on either side); an
-`ORDER BY`/`LIMIT`/`WHERE`/`GROUP BY` after it is rejected (MySQL 1064) rather than silently reordered ahead
-of the `INTO`. **Set operations:** a file-write `INTO` on the last branch of a `UNION`/`EXCEPT`/`INTERSECT` is
-hoisted to the set-operation node (like `ORDER BY`/`LIMIT`) and rendered at the trailing position, so
-`… UNION … ORDER BY … INTO OUTFILE '/x'` round-trips as valid MySQL and stays detectable; the
-parenthesized-last-branch spelling (`… UNION (SELECT …) INTO OUTFILE`) fails closed. **Placement:** a
-per-top-level-statement check (covering `SELECT`/`UNION`, a leading `EXPLAIN`/`DESCRIBE`, and non-SELECT
-roots like `UPDATE`/`DELETE`/`INSERT`) requires the file-write `Into` to sit at the top-level query root's own
-`into` arg (directly, or after the final-branch hoist, or the query explained by `EXPLAIN`). A file-write
-`INTO` inside a subquery/derived table, on a non-final UNION branch, or nested in an `UPDATE`/`DELETE`/`INSERT`
-— all of which MySQL rejects with error 3954/1064 — fails closed. Detection is never lost in any of these
-cases; the checks keep the accepted grammar aligned with MySQL. **Executable comments:** a file-write hidden
-in a MySQL executable comment (`SELECT 1 /*! INTO OUTFILE '/x' */`) is invisible by default because the
-default strips `/*! … */` for all content (§1.5, matching upstream); it becomes a detectable `Into` node when
-`mysql_version` is set — the documented, opt-in way to see any executable-comment SQL — so this extension
-composes with §1.5 rather than adding its own comment handling.
-
-The extension is MySQL-only; other dialects do not treat `OUTFILE` specially. Verified syntactically against
-MySQL 8.0.33 — the production target — via a differential accept/reject sweep (each accepted form reaches
-runtime `secure-file-priv`, i.e. parses cleanly; each rejected form matches MySQL's `1064`/`3954`). Use the
-stable ledger ids for the reconciliation lifecycle.
-
-Ledger id [`pg-user-type-typed-literal`](./testdata/upstream_extensions.jsonl) registers the Postgres
-user-type **space typed-literal** — `<type-name> 'string'` with no `AS`, e.g. `public.evil_domain 'x'` or
-`"t" 'x'` — which pinned upstream parse-errors. In Postgres a bare string is **never** a valid column alias
-(`SELECT 1 'x'` and even `SELECT 1 AS 'x'` are syntax errors), so `<name> 'string'` is unambiguously a typed
-literal: the name is a type and the string is its value. This port folds it into
-`Cast(Literal, DataType(user-defined))` — the **same node** `'x'::a.b` / `CAST('x' AS a.b)` already produce
-(the type name derived from the parsed name via `ColumnsToDot`, preserving each part's quoting so the Cast
-round-trips exactly) — so a consumer detects the user-type coercion (a `DOMAIN`/type `CHECK` runs a user
-function on the shared session — a code-exec/error-oracle vector) structurally via `FindAll(KindDataType)`,
-the same walk it already uses for the `::`/CAST spellings. The space form normalizes to the canonical `CAST`
-spelling on output. (The `to` is `DataType(user-defined)` for a genuine user type; when the name is a
-`pg_catalog`-qualified real builtin — `pg_catalog.text 'x'` — it resolves to the builtin node instead, exactly
-as the `::`/CAST forms do, because `pgTypedLiteralCast` reuses the same `resolvePgCatalogBuiltin` — see **§1.10**.)
-
-**Recognized at the primary-expression level** (`parseAtom`, and `parseType`'s keyword-name fallback), NOT in
-alias parsing — so it folds into a `Cast` in *every* position a value can appear: a SELECT projection, a
-function argument, a `WHERE`/`HAVING` predicate, an `UPDATE … SET` value, `VALUES`, a binary-operator operand,
-and before a postfix `::` (`public.foo 'x'::text` → nested `Cast`). This is essential for the security use
-case — the coercion is detectable as a `DataType` wherever it hides, not only in a projection. Any postfix ops
-after the literal are re-applied to the `Cast`, and a trailing alias (`<type> 'x' AS bar` / `<type> 'x' bar`)
-is then handled by ordinary alias parsing.
-
-This also corrects a pre-existing port divergence: sqlglot-go's `parseAlias` previously called
-`parseStringAsIdentifier` **unconditionally**, whereas upstream gates the string-as-alias behind
-`STRING_ALIASES` — `False` for base/postgres (`parser.py:1780`), overridden to `True` only by
-mysql/tsql/sqlite (`parsers/mysql.py:302` et al.). So the port previously accepted `public.evil_domain 'x'`
-as a string **alias** and round-tripped it to a *different* statement (`… AS "x"`). `STRING_ALIASES` is now
-ported as a proper per-dialect flag (`Dialect.StringAliases`, default `False`, set `True` for MySQL), and
-`parseAlias`'s string-as-alias call is gated by it — so the **implicit** (no-`AS`) string-alias fails closed
-for **both base and postgres**: a trailing string that is not a typed literal (`SELECT 1 'x'`, or a second
-string as in `public.foo 'a' 'b'`) is an unexpected token, matching upstream base + postgres (both raise)
-and the real engines (PostgreSQL rejects it; MySQL — `STRING_ALIASES = True` — accepts it, folding the
-string into a backtick-quoted identifier alias). (The **explicit** `AS '…'` form — `SELECT 1 AS 'x'` — is a
-separate, pre-existing quirk: it still parses as a quoted-identifier `Alias` via `parseIdVar`'s any-token
-path, matching pinned upstream, even though real PG rejects it; that path is unchanged here and out of
-scope.) This flag gates only the **projection/expression** alias (`parseAlias`); the string-as-identifier for
-a table **name** (`_parse_table_part`, `parser.py:4668`) and a table **alias** (`_parse_table_alias`,
-`parser.py:4111`) are unconditional upstream — not gated by `STRING_ALIASES` — and are handled by a separate
-per-dialect flag, `Dialect.StringTableIdentifiers` (base keeps upstream's accept; postgres/mysql reject, since
-their real engines do). See **§1.9** for that gate; the closing of the base/postgres *projection* string-alias
-divergence here needs no new §1 entry (gated base/postgres now match upstream), but the *table* forms do
-diverge from upstream to match the engines and are tracked as §1.9.
-
-The type name is validated structurally as a real identifier chain — a `Dot` built by postfix
-`.field`/`.*`/`[…]` access over an arbitrary base (`(t2.a).city`, `foo().bar`, `arr[1].foo`, `t.*`) is
-rejected (Postgres rejects each as a syntax error). A **bare reserved value-function** (`current_user`,
-`session_user`, `current_catalog`, …) is excluded by a check on the *leading token type* — not by blanket
-keyword membership, which would false-reject the ~57 non-reserved keywords (`type`, `format`, `schema`,
-`view`, `current_schema`, …) that Postgres accepts unquoted as type names. (`user` / `current_role` are also
-PG-reserved but this port lexes them as `VAR`, so they fold as *accept-invalid* — harmless: Postgres rejects
-them and a consumer denies the resulting `Cast` either way; a pre-existing tokenizer gap, not this feature.)
-The value accepts every Postgres string-constant form — plain, escape (`E'…'` → `ByteString`), and
-dollar-quoted (`$$…$$`/`$tag$…$tag$` → `RawString`) — but not national (`N'…'`) or bit/hex (`B'…'`/`X'…'`),
-which Postgres rejects in this production; a comment between the name and the string is carried onto the
-`Cast` (so `Cast.this` is the string-constant node — a `Literal` for a plain string, `ByteString`/`RawString`
-for the escape/dollar forms). Only a `::`/`.:` cast may directly follow the literal (`public.foo 'x'::text` →
-nested `Cast`); a postfix `.field`/`[…]`/`.*` (which Postgres requires parentheses for) fails closed. Verified
-against PostgreSQL 17.6 with a differential accept/reject sweep across all positions (each accepted form
-reaches type resolution — `type "…" does not exist` — i.e. parses as a typed literal; each rejected form is a
-PG `syntax error`).
-
-**Known limitations** (all *fail closed under the default `IMMEDIATE` error level* that `sqlglot.ParseOne`
-uses — a parse error, so a consumer denies them — or produce a still-detectable `Cast`; none is a
-detection bypass, they are grammar-completeness gaps left for a follow-up): a type name carrying a **type
-modifier** (`public.foo(3) 'x'`) parses as a function call, not a type-name chain, so it is not folded (parse
-error under `IMMEDIATE`); a **keyword-named user type** that this port lexes as a non-`VAR` statement keyword
-(e.g. a type actually named `alter`) likewise doesn't reach the fold; **newline-separated string
-continuation** (`public.foo 'a'\n'b'`, which Postgres concatenates) is parsed as a single string then fails
-on the second; and the two PG-reserved value-keywords this port lexes as `VAR` (`user`, `current_role`) fold
-as *accept-invalid* (Postgres rejects them; the resulting `Cast` is denied anyway). Use the stable ledger id
-for the reconciliation lifecycle.
-
-Ledger ids [`pg-start-transaction`, `mysql-start-transaction-snapshot`](./testdata/upstream_extensions.jsonl)
-register `START TRANSACTION` transaction-control statements that pinned upstream parse-errors. Upstream maps
-`START` → `BEGIN` for mysql/presto/oracle but **not** postgres, so `parse_one("START TRANSACTION", "postgres")`
-mis-parses `START` as an expression and errors on the trailing `TRANSACTION`/modes; upstream also errors on
-Postgres `START TRANSACTION READ ONLY` (postgres lexes `ONLY` as a dedicated token, not `VAR`) and on MySQL
-`START TRANSACTION WITH CONSISTENT SNAPSHOT`. This port maps the postgres `START` keyword to the `BEGIN` token
-(as the other dialects already do upstream) so `START TRANSACTION [<modes>]` routes through the shared
-`parseTransaction` and builds `exp.Transaction{this, modes}`; the mode loop also consumes the `ONLY` token
-(postgres `READ ONLY`) and, **for MySQL only**, the `WITH CONSISTENT SNAPSHOT` phrase (a single mode string).
-`START TRANSACTION` normalizes to `BEGIN` on output, carrying the comma-separated modes. `COMMIT`/`ROLLBACK`/
-`BEGIN` and `start` used as an ordinary identifier/table/CTE/alias are unaffected (`tokens.BEGIN` is already
-in the id/alias token sets). The parser is permissive about mode content (matching upstream's mode loop), so a
-mode a given engine rejects at runtime — MySQL's standalone `ISOLATION LEVEL`, or a `START TRANSACTION READ
-ONLY` under a dialect that lacks it — may still parse to `Transaction`; only `WITH CONSISTENT SNAPSHOT` is
-dialect-gated (real MySQL 8.0.33 accepts it, real PostgreSQL 17.6 rejects it). This is a transaction boundary
-an AST consumer needs to route to session passthrough. Verified against PostgreSQL 17.6 and MySQL 8.0.33;
-implemented in `dialects/postgres.go` and `parser/stmt_transaction.go`; regression test
-`pg_start_transaction_test.go`. Use the stable ledger ids for the reconciliation lifecycle.
-
-**Known limitation** (a grammar-completeness gap, not a detection bypass): a user-defined Postgres function
-literally named `start` — `SELECT start()` — no longer parses as a function call (the `START` keyword now
-tokenizes as `BEGIN`), matching how pinned upstream already treats `start()` under mysql/presto/oracle. Bare
-`start` as a column/table/CTE/alias is unaffected; only the rare `start(...)` call form is lost. This is the
-same trade-off upstream itself makes for its `START`→`BEGIN` dialects.
-
-Ledger ids [`mysql-create-user`, `mysql-create-role`, `mysql-alter-user`, `mysql-drop-user`,
-`mysql-drop-role`](./testdata/upstream_extensions.jsonl) register MySQL account-management statements —
-`CREATE/ALTER/DROP {USER|ROLE}` — which pinned upstream leaves as a raw `Command` (`USER` and `ROLE` lex as
-bare `VAR` tokens and neither is a `CREATABLE`/`ALTERABLE`, so the structured parsers decline). The
-consequence upstream leaves for a consumer is that the leading keyword (`CREATE`/`ALTER`/`DROP`) is shared
-with the schema-object forms, so `CREATE USER` cannot be told apart from `CREATE TABLE`. The MySQL parser
-instead builds a structured `Create`/`Alter`/`Drop` **root** carrying the object type as the canonical
-`kind` arg (`"USER"`/`"ROLE"`, the same discriminator + casing `TABLE` uses), so a consumer classifies by
-root `Kind` + `kind`. The statement body (the user/role list, `IF [NOT] EXISTS`, `IDENTIFIED BY` /
-`RANDOM PASSWORD` / `WITH` plugin / `REQUIRE` / resource-option clauses) is **not** modeled: it is preserved
-verbatim inside a `Command` child (held as `this` for `Create`/`Drop` and as the sole `actions` element for
-`Alter`, which requires a non-empty `actions`), and the generator keys on that `Command` child to emit it —
-so these round-trip exactly as the plain `Command` fallback does (an inline/trailing comment normalizes the
-same way it does for any `Command`). The extension is MySQL-only (Postgres keeps upstream's `Command`), and `RENAME USER` plus any
-other unmodeled object stay fail-closed `Command`. Implemented in `parser/stmt_account_object.go` (+ the
-`parseCreate`/`parseAlter`/`parseDrop` hooks) and the `createSQL`/`alterSQL`/`dropSQL` `kind` branches;
-regression test `mysql_account_object_test.go`. Use the stable ledger ids for the reconciliation lifecycle.
+Cross-cutting rules for the SET/SHOW family:
+- **Quoted dispatch keywords never match** — `SET "ROLE" x`, `` SET PASSWORD `=` 'x' ``,
+  `RESET "all"` fail closed rather than regenerate as the unquoted (different) statement.
+  Upstream's `_find_parser`/`_match_texts` match quoted tokens by text; the port does not.
+- The privileged keyword forms are disambiguated from same-named GUC assignments by the following
+  `=`/`:=`/`TO` delimiter (`SET role = x` parses as an assignment `EQ`, readable LHS).
+- `parseMySQLUserSpec` enforces MySQL's `user` grammar (`name[@host]`, `CURRENT_USER[()]`); a dotted
+  unquoted host under-accepts to `Command`.
+- Known approximation: the port has no PG reserved-word table (upstream leaves it empty), so a few
+  keyword-shaped names over/under-accept — all fail-safe (documented per-site in the parsers).
 
 ---
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)
 
-The port's verified goal is **same-dialect round-trip** (read X → write X). Cross-dialect
-transpilation (read X → write Y) is explicitly out of scope and only partially correct. These differ
-from upstream only on the cross-dialect path:
-
-- **Generator `TRANSFORMS` / `TYPE_MAPPING` not ported** for presto/trino/hive/athena (the
-  parser+tokenizer side is ported for lineage; generators are skipped). Same-dialect functions
-  round-trip via the base generator + `Anonymous` fallback. See `ROADMAP.md` "Athena support".
-- **Functions left `Anonymous` instead of structured** where structuring would only matter for
-  canonicalization/transpile: Presto/Trino `DATE_FORMAT`/`DATE_PARSE`/`TO_CHAR`/`DATE_TRUNC`/`REGEXP_*`/
-  `LOCALTIME[STAMP]`, and `CONCAT_WS` (`parser/parser_functions.go`, `dialects/presto.go`). Lineage
-  still sees their column args; same-dialect `.sql()` echoes them verbatim.
+Cross-dialect transpilation is out of scope. Presto/trino/hive/athena generator
+`TRANSFORMS`/`TYPE_MAPPING` are not ported, and several of their functions parse as `Anonymous`
+(`DATE_FORMAT`, `DATE_PARSE`, `TO_CHAR`, `DATE_TRUNC`, `REGEXP_*`, `LOCALTIME[STAMP]`, `CONCAT_WS`)
+— lineage still sees column args; same-dialect `.sql()` echoes them.
 
 ---
 
-## 3. Output-preserving, Go-necessitated divergences (same output, internal difference)
+## 3. Output-preserving, Go-necessitated divergences
 
-Go's static typing / lack of metaclasses forces these; none change `.sql()` output:
-
-- **Arg ordering:** `newNode` orders args by the per-Kind `argTypes` declaration order, not caller
-  insertion order (Python dict preserves insertion). Equality/hash/find/walk are unaffected; the
-  generator iterates `argTypes` order too. (`expressions/core.go`; `ROADMAP.md` known-divergences.)
-- **`parseTable` fast-path skip** — a parse-order optimization divergence, same result
-  (`parser/parser.go`).
-- **`IsWrapper` uses the `truthy` helper** rather than Python's `v is None` (the port doesn't store nil
-  args); equivalent for stored args.
-- **`matchTextSeq` retreat has no logger** vs upstream's debug log (`parser/parser_stmt_common.go`).
+None change `.sql()`:
+- `newNode` orders args by per-Kind `argTypes` declaration order, not insertion order.
+- `parseTable` fast-path skip (parse-order optimization).
+- `IsWrapper` uses the `truthy` helper (no nil args stored).
+- `matchTextSeq` retreat has no debug logger.
 
 ---
 
-## 4. Cosmetic AST-shape divergences (round-trip output identical, `.ToS()`/repr differs)
+## 4. Cosmetic AST-shape divergences (output identical, `.ToS()` differs)
 
-- **Comment bubbling:** a trailing comment can attach to a slightly different node than upstream; the
-  comment still renders in the same textual position, so round-trip output matches (`parser` — see
-  `ROADMAP.md`).
-- **MySQL `PARTITION BY RANGE (YEAR|MONTH(col))`:** upstream wraps the 11 MySQL date functions in
-  `TsOrDsToDate` in the parser and removes it in the generator; the port elides both consistently.
-  Round-trips to identical SQL; only the incidental partition-expression arg shape differs
-  (`generator/dialect_funcs.go`; capped in `fidelity_test.go` `maxASTDivergences`).
+- Comment bubbling: a trailing comment can attach to a slightly different node.
+- MySQL `PARTITION BY RANGE (YEAR(col))`: upstream wraps/unwraps `TsOrDsToDate`; the port elides
+  both (capped in `fidelity_test.go` `maxASTDivergences`).
 
 ---
 
-## 5. Deferred / fail-closed (parse to `exp.Command` where a future slice would structure)
+## 5. Deferred / fail-closed (`Command` where a future slice would structure)
 
-These currently produce a raw-text `Command` (round-trips verbatim, fails closed) pending future work:
-
-- **Postgres `CREATE FUNCTION ... AS $$...$$`** dollar-quoted (heredoc) bodies — `exp.Heredoc` unmodeled
-  (`parser/parser_ddl.go`).
-- **Hive CREATE-DDL property callbacks** (`CLUSTERED`/`EXTERNAL`/`LOCATION`/`ROW`/`STORED`/
-  `TBLPROPERTIES`/`USING`) live in Hive's `PropertyParsers` overlay, deliberately kept out of the shared
-  base registry until a paired parser+generator slice, so base/mysql/postgres/presto keep failing them
-  closed (`parser/dialect_hive_overrides.go`).
+- Postgres `CREATE FUNCTION … AS $$…$$` dollar-quoted bodies (`exp.Heredoc` unmodeled).
+- Hive CREATE-DDL property callbacks (kept in Hive's `PropertyParsers` overlay; base/mysql/postgres
+  fail them closed).
 
 ---
 
 ## 6. Go-only analysis API extensions
 
 ### 6.1 Top-level UPDATE/DELETE/MERGE scopes
+Upstream `traverse_scope` yields no scope for a DML root. `TraverseScope`/`BuildScope` additionally
+yield a root `Scope` (target + FROM/USING/JOIN sources), complete-or-none (a malformed source omits
+the root scope, never emits a partial one). The optimizer passes use a separate compatibility
+traversal reproducing upstream exactly. Tests `optimizer/scope_dml_test.go`.
 
-**What upstream does:** in v30.12.0, `traverse_scope` traverses the CTE and nested-query scopes under
-an `Update`, `Delete`, or `Merge`, then returns without yielding a scope for the DML root itself
-(`.reference/sqlglot-v30.12.0/sqlglot/optimizer/scope.py:700-706`).
-
-**What sqlglot-go does:** the public analysis APIs, `TraverseScope` and `BuildScope`, and the
-package-private `traverseScope` analysis traversal additionally yield a root `Scope` over the original
-`Update`, `Delete`, or `Merge` AST, but only after resolving its complete source graph. Sources are registered in
-deterministic order and comprise the physical write target plus `FROM` / `USING` sources and
-recursively attached `JOIN` `Table` / `Subquery` sources. Existing CTE and nested-query scopes are
-preserved and attached: unqualified read-side table references bind to `WITH` CTE scopes, and source
-subqueries bind to their child scopes.
-
-**Fail-closed guarantee:** if a source has a malformed or unsupported shape, traversal logs a warning
-and omits only the DML-root scope. It retains all CTE and nested-query child scopes already traversed,
-never emits a root with a partial source set, and never panics. A missing source can hide columns from
-lineage or access analysis and produce a wrong-ALLOW result, so this deliberate Go extension favors
-complete-or-none DML-root scope emission.
-
-**Optimizer containment:** `QualifyTables`, `QualifyColumns`, `ValidateQualifyColumns`, and
-`IsolateTableSelects` use a separate internal compatibility traversal that reproduces pinned
-v30.12.0 behavior. It excludes the entire R3-only augmentation: both the DML-root scope and any
-source-query scopes traversed solely to bind that root. Filtering only the root is incorrect because
-upstream's generic DML walk is shape-dependent, as verified by differential tests: `UPDATE` `FROM` /
-`JOIN` source subqueries can remain unvisited, while `DELETE` / `MERGE` `USING` subqueries can be
-traversed and qualified. Preserving that asymmetry avoids same-dialect output drift and
-correlated-subquery validation panics. This optimizer-only compatibility route does not weaken the
-public analysis path's complete-or-none source-set guarantee for lineage and access analysis.
-
-**Tests and parse/generate status:** DML scope and source-subquery optimizer-parity regressions are
-covered in `optimizer/scope_dml_test.go`. No `upstream_extensions.jsonl` entry applies because this
-extension changes neither parsing nor SQL generation; it exposes additional analysis scopes over the
-existing AST and grammar.
+### 6.2 Projection source spans
+Upstream discards token positions at parse time. The port stamps each SELECT projection (inside any
+`Alias`) with `meta["span"]` (rune offsets) and `meta["spanText"]` (verbatim text — `1 +    1` keeps
+its spacing), both-or-neither, via `parseSpanned`. Meta survives `Copy()`, never affects output/
+`HashKey`/`Equal`; a rewrite that replaces the node drops it. Accessors in `expressions/span.go`.
+Tests `expressions/span_test.go`, `parser/parser_span_test.go`, `optimizer/qualify_span_test.go`.
 
 ---
 
-### 6.2 Projection source spans (`Span`/`SetSpan`/`SpanText`)
+## 7. Qualifier arg renamed `db` → `schema`
 
-**What upstream does:** v30.12.0 keeps token positions (`Token.line/col/start/end`) but discards
-them at parse time — no expression node records where in the source it came from.
+Upstream calls the middle table/column qualifier `db` — a misnomer for the ANSI **schema**. The port
+renames that one qualifier everywhere: arg-key `"schema"`, `SchemaName()`,
+`TablePartKeys = {this, schema, catalog}`, builders `Table_(table, schema, catalog, …)`,
+`QualifyOpts.DB` → `QualifyOpts.DefaultSchema`. `.sql()` output unchanged; `.ToS()` renders
+`schema=` where Python renders `db=`.
 
-**What sqlglot-go does:** the parser stamps each top-level SELECT-list expression with its rune
-span (`meta["span"]`, start-inclusive/end-exclusive) and verbatim source text (`meta["spanText"]`
-— `1 +    1` keeps its exact spacing). Meta survives `Copy()` and never affects `HashKey`,
-`Equal`, or generated SQL. Stamped on the expression *inside* any `Alias` wrapper. Accessors:
-`SetSpan`/`Span`, `SetSpanText`/`SpanText` (`expressions/span.go`). The capture hook is generic
-(`Parser.parseSpanned`); wrap more parse entry points to extend coverage — projections are the
-first stamped site (consumer: MySQL's verbatim column label for unaliased computed projections).
+**NOT renamed** (genuine databases): `Show.db` (`SHOW … FROM <db>`), `Use`, `CREATE DATABASE`,
+`TruncateTable.is_database`, the `DATABASE` token, schema-mapping data keys, and 1:1-ported flag
+names like `Dialect.RenameTableWithDB`. The `is_db_reference` construct reuses the (now-`schema`)
+slot for a database name, as upstream reuses `db` — discriminated by `is_database`.
 
-**Semantics:** spans describe the original source *at parse time*, stamped both-or-neither.
-`Copy()` carries them; a rewrite that replaces the node (qualify building a fresh `Column`)
-drops them — read spans off the freshly parsed tree. `SpanText` returns `ok=false` on an
-unstamped node.
-
-**Tests and parse/generate status:** `expressions/span_test.go`, `parser/parser_span_test.go`. No
-`upstream_extensions.jsonl` entry: no grammar change, no output change — analysis metadata only.
+**Porting rule:** upstream code touching a Table/Column `db` arg / `.db` → translate to `schema`;
+leave genuine-database `db` alone. Python-captured `fidelity_cases.txt` oracles: apply
+`s/\bdb=/schema=/` (qualifier only).
 
 ---
 
-## 7. Table/column qualifier arg renamed `db` → `schema` (API + `.ToS()`; round-trip identical)
+## Not deviations
 
-**What upstream does:** upstream names the middle table/column qualifier `db` — the `Table`/`Column`
-`db` arg, the `.db` property, `TABLE_PARTS = ("this", "db", "catalog")` /
-`COLUMN_PARTS = ("this", "table", "db", "catalog")`, and `repr()` renders it `db=…`. The name is a
-**misnomer**: this level is the ANSI **schema** (the middle qualifier), *not* a database. Upstream's own
-`table_` builder docstring says so — a table path is `[catalog].[schema].[table]`, and it assigns
-`catalog, db, this = split_num_words(sql_path, ".", 3)`, i.e. the `db` slot **is** the schema
-(`.reference/sqlglot-v30.12.0/sqlglot/expressions/builders.py:360`). The confusion is cross-engine:
-Postgres's *database* is the ANSI **catalog** (→ sqlglot's `catalog` arg), and only MySQL conflates
-`database == schema`. This role ambiguity is what forced the role-aware search-path/`db`/`catalog`
-folding in `qualify_tables` (commit `49965a3`; see *Search-path-aware table qualification* above).
-
-**What sqlglot-go does:** the port renames this one qualifier **everywhere** to `schema`, so the ANSI
-level is explicit in the code:
-- arg-key string `"db"` → `"schema"` on `KindTable` / `KindColumn` (`expressions/kinds.go`);
-- accessor `Node.DbName()` → `Node.SchemaName()` (+ the `Expression` interface) (`expressions/core.go`);
-- `TablePartKeys = []string{"this", "schema", "catalog"}` and the `Parts()` / generator / `qualify`
-  part-order loops (`expressions/core.go`, `generator/sql.go`, `optimizer/qualify_tables.go`);
-- builder params: `Table_(table, schema, catalog, …)`, `Column_(col, table, schema, catalog, …)`,
-  and `QualifyTables(expression, schemaName, catalog, …)` (`schemaName`, not `schema`, because the
-  `schema` package is imported there; likewise `parseTableParts` uses the local `schemaPart` because
-  its `schema bool` DDL-position param already owns the name `schema`);
-- the public qualify option field `QualifyOpts.DB` → `QualifyOpts.DefaultSchema` (`optimizer/qualify.go`),
-  the field that becomes the stamped `schema` arg. It is `DefaultSchema`, not `Schema`, because
-  `QualifyOpts.Schema` is the column-metadata mapping (upstream's `schema=` kwarg) — upstream likewise
-  carries both a `schema=` mapping and a `db=` default qualifier, so the two must stay distinct here.
-The ANSI **catalog** keeps its `catalog` name unchanged.
-
-**Scope boundary — the rename covers the qualifier arg and its direct accessors/setters, not
-upstream-ported symbol names that merely reference the concept.** Dialect/generator flag names ported
-1:1 from upstream keep upstream's `DB` spelling to preserve grep-correspondence with `.reference/` — in
-particular `Dialect.RenameTableWithDB` (← upstream's `RENAME_TABLE_WITH_DB`, `generator.py:344`), which
-governs whether `ALTER TABLE … RENAME` retains the qualifier. It reads/acts on the (renamed) `schema`
-arg but keeps its upstream name.
-
-**Explicitly NOT renamed — genuine "database" sites** (here `db`/`database` really means a database):
-`KindShow`'s `db` arg (`SHOW … FROM <db>`), `KindUse`, `CREATE DATABASE`, `TruncateTable.is_database`,
-the `DATABASE` token, and schema-**mapping data** whose top key happens to be `"db"`. A blanket
-find-replace of `"db"` would corrupt these; they are left as-is.
-
-**One inherited overload — `is_db_reference`.** For the `is_db_reference` construct (e.g. ClickHouse
-`TRUNCATE DATABASE <db>`; `parser.go` `parseTableParts`), upstream reuses the Table's `db` slot to hold
-a genuine **database** name (with `this` empty). The port reuses the same slot, so that name now lives
-under the Table's **`schema`** arg — i.e. `SchemaName()` returns a database there. This is upstream's
-own overloading of the qualifier slot, not a separate site to special-case; the enclosing node's
-`is_database` flag is the discriminator. Round-trip is unchanged (see `parser/stmt_comment_truncate_test.go`).
-
-**Observability:** `.sql()` round-trip output is **unchanged** (identity corpus stays 1847/1847). Two
-surfaces change: (1) the Go API — `SchemaName()` / arg-key `"schema"` / builder params — which is a
-**breaking change** for downstream consumers (use `SchemaName()` and `Arg("schema")`); and (2) `.ToS()`
-/ repr now renders `schema=…` where upstream `repr()` renders `db=…`. The fidelity goldens were updated
-to match (`testdata/fidelity_cases.txt`), so `TestFidelity`'s `WantAST` is the Python oracle **with the
-documented `db=` → `schema=` substitution** — see the porting rule below.
-
-**Porting rule (READ before porting any slice that touches Table/Column qualifiers):** when porting
-upstream code that reads or writes the `db` arg / `.db` property of a `Table` or `Column` (including
-`TABLE_PARTS`/`COLUMN_PARTS` ordering and any `repr` oracle captured from Python), translate `db` →
-`schema`. Do **not** touch the genuine-database `db` listed above. When capturing a new
-`fidelity_cases.txt` `want_ast` from live Python, apply `s/\bdb=/schema=/` to the Table/Column
-qualifier key.
-
----
-
-## Not deviations (called out to avoid confusion)
-
-- Where a reviewer flagged an "upstream bug," the port generally **keeps upstream's behavior 1:1** (e.g.
-  a qualify_columns edge case, `optimizer/qualify_columns.go`) rather than silently "fixing" it — that
-  is *faithfulness*, the opposite of a deviation. §1.1 is the deliberate exception, made only because it
-  is a genuine correctness/safety issue against the modeled engine.
+Where a reviewer flags an "upstream bug", the port generally keeps upstream 1:1 (faithfulness);
+§1 entries are the deliberate exceptions, each matching the real engine.
