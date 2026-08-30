@@ -18,6 +18,19 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.28.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.27.0...v0.28.0) (2026-08-30)
+
+
+### Features
+
+* **parser:** parse procedure BEGIN...END blocks and PG dollar-quoted bodies ([#76](https://github.com/ridi-oss/sqlglot-go/issues/76)) ([e37f2d0](https://github.com/ridi-oss/sqlglot-go/commit/e37f2d015b59489ce8f41d9889cbf99aa1250f02))
+* **parser:** statement-level source spans + trailing-semicolon comment parity ([#77](https://github.com/ridi-oss/sqlglot-go/issues/77)) ([ce6d667](https://github.com/ridi-oss/sqlglot-go/commit/ce6d667995949e3674a241c4e8be401b9c7d3f96))
+
+
+### Documentation
+
+* slim DEVIATIONS.md to an intent ledger ([#74](https://github.com/ridi-oss/sqlglot-go/issues/74)) ([f0022ce](https://github.com/ridi-oss/sqlglot-go/commit/f0022ce2cb70b8c7ceff0ef65c1cd94aca41d756))
+
 ## [0.27.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.26.0...v0.27.0) (2026-08-30)
 
 
