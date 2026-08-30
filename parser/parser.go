@@ -391,11 +391,19 @@ func (p *Parser) expression(instance exp.Expression, token *tokens.Token, commen
 	return instance
 }
 
+// parseBatchStatements ports _parse_batch_statements (parser.py:2114-2135). Each statement is
+// additionally stamped with its source span + verbatim text (parseSpanned, Go-only §6.2), so a
+// batch consumer can recover the exact submitted bytes per statement; a statement whose body
+// consumed several chunks (a procedure BEGIN...END) spans them all, inner semicolons included.
 func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirstStatement bool) []exp.Expression {
+	parseStamped := func() exp.Expression {
+		startTok := p.curr
+		return p.statementSpanned(parseMethod(), startTok, p.prev)
+	}
 	expressions := []exp.Expression{}
 	if sepFirstStatement {
 		p.match(tokens.BEGIN)
-		expressions = append(expressions, parseMethod())
+		expressions = append(expressions, parseStamped())
 	}
 	chunksLength := len(p.chunks)
 	for p.chunkIndex < chunksLength {
@@ -404,10 +412,10 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 			return expressions
 		}
 		if len(expressions) > 0 && !p.next.IsValid() && p.match(tokens.END) {
-			expressions = append(expressions, exp.EndStatement(nil))
+			expressions = append(expressions, p.spanned(exp.EndStatement(nil), p.prev, p.prev))
 			continue
 		}
-		stmt := parseMethod()
+		stmt := parseStamped()
 		expressions = append(expressions, stmt)
 		// MySQL file-write INTO placement is validated per top-level statement so it also covers
 		// non-SELECT roots (UPDATE/DELETE/INSERT/CREATE) and EXPLAIN, not just parseExpressionStatement.
@@ -2811,14 +2819,39 @@ func (p *Parser) parseExpressions() []exp.Expression { return p.parseCsv(p.parse
 // to extend span coverage to more node kinds.
 func (p *Parser) parseSpanned(parseMethod func() exp.Expression) exp.Expression {
 	startTok := p.curr
-	this := parseMethod()
-	if this != nil && startTok.IsValid() && p.prev.IsValid() {
-		if text := p.findSQL(startTok, p.prev); text != "" {
-			this.SetSpan(startTok.Start, p.prev.End+1)
+	return p.spanned(parseMethod(), startTok, p.prev)
+}
+
+// spanned stamps this with the span/text covering start..end (see parseSpanned).
+func (p *Parser) spanned(this exp.Expression, start, end tokens.Token) exp.Expression {
+	if this != nil && start.IsValid() && end.IsValid() {
+		if text := p.findSQL(start, end); text != "" {
+			this.SetSpan(start.Start, end.End+1)
 			this.SetSpanText(text)
 		}
 	}
 	return this
+}
+
+// statementSpanned is spanned for a whole top-level statement: a boundary token spliced out
+// of an activated MySQL executable comment is widened to the comment's delimiters
+// (Token.WrapStart/WrapEnd), so the slice keeps `/*!NNNNN ... */` and stays executable MySQL.
+// Statement-level ONLY — a projection's boundary token may share the comment's wrap extent
+// with sibling projections, so widening there would stamp the wrong text. When the comment
+// spans a statement boundary (a `;` inside the executable comment splits its body across
+// statements), no in-source slice can represent either half with its wrapper — the span is
+// left unset (absent, never wrong).
+func (p *Parser) statementSpanned(this exp.Expression, start, end tokens.Token) exp.Expression {
+	if start.WrapEnd > 0 && start.WrapStart < start.Start {
+		start.Start = start.WrapStart
+	}
+	if end.WrapEnd > end.End {
+		end.End = end.WrapEnd
+	}
+	if (start.WrapEnd > end.End) || (end.WrapEnd > 0 && end.WrapStart < start.Start) {
+		return this
+	}
+	return p.spanned(this, start, end)
 }
 
 // parseProjection parses one SELECT-list item, stamping the span on the expression itself
@@ -3631,6 +3664,11 @@ var statementParsers = map[tokens.TokenType]func(*Parser) exp.Expression{}
 var queryModifierParsers map[tokens.TokenType]func(*Parser) (string, any)
 
 func init() {
+	// parser.py:1110: a SEMICOLON statement token (a trailing `;` chunk kept for its comments,
+	// see parse()) becomes an empty exp.Semicolon carrying them.
+	statementParsers[tokens.SEMICOLON] = func(p *Parser) exp.Expression {
+		return exp.Semicolon(nil)
+	}
 	statementParsers[tokens.INSERT] = (*Parser).parseInsert
 	statementParsers[tokens.UPDATE] = (*Parser).parseUpdate
 	statementParsers[tokens.DELETE] = (*Parser).parseDelete

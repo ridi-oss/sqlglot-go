@@ -22,6 +22,12 @@ type Token struct {
 	Start     int // inclusive rune offset into the original source
 	End       int // inclusive rune offset into the original source
 	Comments  []string
+	// WrapStart/WrapEnd (set iff WrapEnd > 0) widen a token spliced out of an activated MySQL
+	// executable comment to the `/*!NNNNN`/`*/` delimiters. Start/End keep the exact lexeme;
+	// span slicing must use the widened extent or the slice loses the wrapper and stops being
+	// executable MySQL (`SELECT 1 /*!40101 + 2` has no closing `*/`).
+	WrapStart int
+	WrapEnd   int
 }
 
 var SentinelNone = Token{TokenType: SENTINEL}

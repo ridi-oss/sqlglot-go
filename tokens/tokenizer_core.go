@@ -450,6 +450,11 @@ func (c *TokenizerCore) scanComment(commentStart string) bool {
 				}
 			}
 			if len(bodyTokens) > 0 {
+				wrapEnd := bodyEnd + commentEndSize - 1
+				bodyTokens[0].WrapStart, bodyTokens[0].WrapEnd = c.start, wrapEnd
+				bodyTokens[len(bodyTokens)-1].WrapStart, bodyTokens[len(bodyTokens)-1].WrapEnd = c.start, wrapEnd
+			}
+			if len(bodyTokens) > 0 {
 				if len(c.comments) > 0 {
 					comments := append([]string(nil), c.comments...)
 					bodyTokens[0].Comments = append(comments, bodyTokens[0].Comments...)

@@ -71,6 +71,7 @@ func init() {
 	dispatch[expressions.KindWhileBlock] = (*Generator).whileBlockSQL
 	dispatch[expressions.KindEndStatement] = (*Generator).endStatementSQL
 	dispatch[expressions.KindHeredoc] = (*Generator).heredocSQL
+	dispatch[expressions.KindSemicolon] = (*Generator).semicolonSQL
 	dispatch[expressions.KindPlaceholder] = (*Generator).placeholderSQL
 	dispatch[expressions.KindTuple] = (*Generator).tupleSQL
 	dispatch[expressions.KindWith] = (*Generator).withSQL

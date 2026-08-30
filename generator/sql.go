@@ -2614,6 +2614,11 @@ func (g *Generator) heredocSQL(e expressions.Expression) string {
 	return "$" + tag + "$" + g.sqlKey(e, "this") + "$" + tag + "$"
 }
 
+// semicolon_sql (generator.py:5421-5422): the node is only a comment carrier.
+func (g *Generator) semicolonSQL(expressions.Expression) string {
+	return ""
+}
+
 // exp.EndStatement: lambda *_: "END" (generator.py:183).
 func (g *Generator) endStatementSQL(expressions.Expression) string {
 	return "END"
