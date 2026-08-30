@@ -50,6 +50,8 @@ type Expression interface {
 	MetaGet(key string) any
 	SetSpan(start, end int)
 	Span() (start, end int, ok bool)
+	SetSpanText(text string)
+	SpanText() (text string, ok bool)
 	Is(Trait) bool
 	IsPrimitive() bool
 	IsLeaf() bool

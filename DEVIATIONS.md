@@ -1324,18 +1324,18 @@ existing AST and grammar.
 **What upstream does:** v30.12.0 keeps token positions (`Token.line/col/start/end`) but discards
 them at parse time — no expression node records where in the source it came from.
 
-**What sqlglot-go does:** the parser stamps each top-level SELECT-list expression with its source
-span — rune offsets into the SQL string, start-inclusive/end-exclusive — stored in `Node.meta`
-(`meta["span"]`), so it survives `Copy()` and never affects `HashKey`, `Equal`, or generated SQL.
-The span is set on the expression *inside* any `Alias` wrapper. Accessors: `Expression.SetSpan` /
-`Expression.Span` (`expressions/span.go`), plus `exp.SpanText(sql, e)` returning the verbatim
-source slice. The capture hook is generic (`Parser.parseSpanned`); coverage can grow to more node
-kinds by wrapping their parse entry points — projections are the first stamped site (consumer:
-recovering MySQL's verbatim column label for unaliased computed projections).
+**What sqlglot-go does:** the parser stamps each top-level SELECT-list expression with its rune
+span (`meta["span"]`, start-inclusive/end-exclusive) and verbatim source text (`meta["spanText"]`
+— `1 +    1` keeps its exact spacing). Meta survives `Copy()` and never affects `HashKey`,
+`Equal`, or generated SQL. Stamped on the expression *inside* any `Alias` wrapper. Accessors:
+`SetSpan`/`Span`, `SetSpanText`/`SpanText` (`expressions/span.go`). The capture hook is generic
+(`Parser.parseSpanned`); wrap more parse entry points to extend coverage — projections are the
+first stamped site (consumer: MySQL's verbatim column label for unaliased computed projections).
 
-**Semantics:** a span means "where this node's text was in the original source *at parse time*".
-Rewrites (qualify, transforms) copy the stale span along; read spans off the freshly parsed tree.
-`SpanText` fails closed (`ok=false`) on missing, inverted, or out-of-range spans.
+**Semantics:** spans describe the original source *at parse time*, stamped both-or-neither.
+`Copy()` carries them; a rewrite that replaces the node (qualify building a fresh `Column`)
+drops them — read spans off the freshly parsed tree. `SpanText` returns `ok=false` on an
+unstamped node.
 
 **Tests and parse/generate status:** `expressions/span_test.go`, `parser/parser_span_test.go`. No
 `upstream_extensions.jsonl` entry: no grammar change, no output change — analysis metadata only.

@@ -18,6 +18,7 @@ type Parser struct {
 	parserOverrideName  string
 	strictCast          bool
 	sql                 string
+	sqlRunes            []rune // lazy cache of []rune(sql); findSQL runs once per projection
 	errors              []*sqlerrors.ParseError
 
 	tokens     []tokens.Token
@@ -71,6 +72,7 @@ func newWithErrorLevelAndOverrideName(d *dialects.Dialect, level sqlerrors.Error
 
 func (p *Parser) Reset() {
 	p.sql = ""
+	p.sqlRunes = nil
 	p.errors = nil
 	p.tokens = nil
 	p.tokensSize = 0
@@ -221,11 +223,13 @@ func (p *Parser) isConnected() bool {
 }
 
 func (p *Parser) findSQL(start, end tokens.Token) string {
-	runes := []rune(p.sql)
-	if start.Start < 0 || end.End >= len(runes) || start.Start > end.End {
+	if p.sqlRunes == nil {
+		p.sqlRunes = []rune(p.sql)
+	}
+	if start.Start < 0 || end.End >= len(p.sqlRunes) || start.Start > end.End {
 		return ""
 	}
-	return string(runes[start.Start : end.End+1])
+	return string(p.sqlRunes[start.Start : end.End+1])
 }
 
 func (p *Parser) raiseError(message string, tok ...tokens.Token) {
@@ -2765,14 +2769,17 @@ func (p *Parser) parseCsv(parseMethod func() exp.Expression, sep ...tokens.Token
 func (p *Parser) parseExpressions() []exp.Expression { return p.parseCsv(p.parseExpression) }
 
 // parseSpanned runs parseMethod and stamps the result with its source span (rune offsets into
-// the SQL being parsed, end-exclusive; see exp.SetSpan). Go-only extension, DEVIATIONS.md §6.2.
-// Wrap any parse entry point with it to extend span coverage to more node kinds.
+// the SQL being parsed, end-exclusive; see exp.SetSpan) and the verbatim source text
+// (exp.SetSpanText). Go-only extension, DEVIATIONS.md §6.2. Wrap any parse entry point with it
+// to extend span coverage to more node kinds.
 func (p *Parser) parseSpanned(parseMethod func() exp.Expression) exp.Expression {
-	startValid := p.curr.IsValid()
-	start := p.curr.Start
+	startTok := p.curr
 	this := parseMethod()
-	if this != nil && startValid && p.prev.IsValid() {
-		this.SetSpan(start, p.prev.End+1)
+	if this != nil && startTok.IsValid() && p.prev.IsValid() {
+		if text := p.findSQL(startTok, p.prev); text != "" {
+			this.SetSpan(startTok.Start, p.prev.End+1)
+			this.SetSpanText(text)
+		}
 	}
 	return this
 }
