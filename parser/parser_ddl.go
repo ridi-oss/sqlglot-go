@@ -149,7 +149,12 @@ func (p *Parser) parseCreateStructured(start tokens.Token) exp.Expression {
 		return nil
 	}
 	if p.curr.IsValid() && !p.matchSet(rParenCommaSet, false) {
-		return nil
+		// Upstream degrades IN PLACE here (`return self._parse_as_command(start)`,
+		// parser.py:2624): the Command spans through the chunk the parse stopped in (a block
+		// body may have consumed several), and the batch loop resumes at the NEXT chunk. A
+		// nil-retreat instead would rewind the chunk state and re-enter the body chunks at
+		// top level, where the ELSE rule can drop trailing statements.
+		return p.parseAsCommand(start)
 	}
 
 	kind := stringsUpper(createToken.Text)
@@ -247,8 +252,8 @@ func (p *Parser) parseFunctionParameter() exp.Expression {
 
 // parseCreateFunction ports the CREATE FUNCTION/PROCEDURE branch of _parse_create
 // (parser.py:2414-2472): the UDF signature, its RETURNS/LANGUAGE/... properties (both
-// before and after the body), and the body itself (a string literal, a nested statement, or
-// - left unsupported, see parseUserDefinedFunction - a heredoc/BEGIN block).
+// before and after the body), and the body itself (a string literal, a nested statement, a
+// BEGIN block, or - left unsupported - a heredoc).
 func (p *Parser) parseCreateFunction(ctt tokens.TokenType) (this, expression exp.Expression, properties []exp.Expression, begin any) {
 	extendProperties := func(parsed exp.Expression) {
 		if parsed != nil {
@@ -260,17 +265,18 @@ func (p *Parser) parseCreateFunction(ctt tokens.TokenType) (this, expression exp
 	// exp.Properties.Location.POST_SCHEMA (parser.py:2417): properties parsed before AS.
 	extendProperties(p.parseProperties())
 
-	// _parse_heredoc (parser.py:9368-9370) only matches TokenType.HEREDOC_STRING - a
-	// dollar-quoted UDF body (e.g. postgres `AS $$ ... $$`), which this port doesn't model
-	// (no exp.Heredoc Kind - deferred, no target-gap SQL needs it). `AS` is still matched
-	// here (mirroring upstream's self._match(TokenType.ALIAS) gate); a genuine heredoc body
-	// is left unconsumed below (bailing out before the generic parseStatement fallback, which
-	// - unlike upstream's own HEREDOC_STRING-only _parse_heredoc - would otherwise happily
-	// misparse it as an ordinary string literal), so the caller's trailing-token check
-	// degrades the whole CREATE to a Command.
-	p.match(tokens.ALIAS)
-	if p.curr.TokenType == tokens.HEREDOC_STRING {
-		return this, nil, properties, begin
+	// _parse_heredoc's HEREDOC_STRING branch (parser.py:9368-9370): a dollar-quoted UDF body
+	// (postgres `AS $$ ... $$` - the tokenizer packs the whole body into one HEREDOC_STRING
+	// token, tag included in Start/End but not Text). Upstream's `$`-textseq fallback branch
+	// (parser.py:9372-9399, for dialects that don't lex heredocs) is not ported: for
+	// base/mysql pinned upstream itself produces a broken round-trip (`... END AS $$`), so
+	// those dialects keep the generic paths below.
+	if p.match(tokens.ALIAS) && p.match(tokens.HEREDOC_STRING) {
+		args := exp.Args{"this": p.prev.Text}
+		if tag := p.heredocTag(p.prev); tag != "" {
+			args["tag"] = tag
+		}
+		expression = p.expression(exp.Heredoc(args), nil, nil)
 	}
 
 	// upstream's table-overload/MacroOverloads detection (parser.py:2422-2436) is a
@@ -283,6 +289,9 @@ func (p *Parser) parseCreateFunction(ctt tokens.TokenType) (this, expression exp
 	// AS/the overload attempt, without the generic key=value fallback.
 	properties = append(properties, p.parseTailProperties()...)
 
+	if expression != nil {
+		return this, expression, properties, begin
+	}
 	if p.match(tokens.COMMAND) {
 		expression = p.parseAsCommand(p.prev)
 		return this, expression, properties, begin
@@ -296,11 +305,11 @@ func (p *Parser) parseCreateFunction(ctt tokens.TokenType) (this, expression exp
 		extendProperties(p.parseProperties())
 	} else if ctt == tokens.FUNCTION {
 		// _parse_user_defined_function_expression (parser.py:7108-7109) is just
-		// self._parse_statement(); exp.Block (the PROCEDURE body fallback, parser.py:2462)
-		// isn't ported (deferred - no target-gap SQL needs it), so a PROCEDURE with a
-		// non-string body simply leaves `expression` nil here, degrading to a Command via
-		// the caller's trailing-token check.
+		// self._parse_statement().
 		expression = p.parseStatement()
+	} else {
+		// exp.Block: the PROCEDURE body fallback (parser.py:2463).
+		expression = p.parseBlock()
 	}
 	if returnMatched {
 		expression = p.expression(exp.Return(exp.Args{"this": expression}), nil, nil)
@@ -672,6 +681,20 @@ func (p *Parser) parseColumnConstraint() exp.Expression {
 		return p.expression(exp.ColumnConstraint(exp.Args{"this": this, "kind": constraint}), nil, nil)
 	}
 	return this
+}
+
+// heredocTag recovers the dollar-quote tag ("fn" for `$fn$...$fn$`, "" for `$$...$$`) from a
+// HEREDOC_STRING token's source span, since Token.Text carries only the inner body. divergence:
+// pinned upstream drops a named tag on parse (Heredoc gets no "tag" from this branch) and always
+// regenerates `$$...$$`, which real PostgreSQL rejects whenever the body itself contains `$$`
+// (that's what the named tag was for). Keeping the tag matches the real engine; see DEVIATIONS.
+func (p *Parser) heredocTag(tok tokens.Token) string {
+	raw := p.findSQL(tok, tok)
+	if inner := len(raw) - len(tok.Text); inner >= 4 && (inner%2 == 0) &&
+		len(raw) >= inner && raw[0] == '$' {
+		return raw[1 : inner/2-1]
+	}
+	return ""
 }
 
 func (p *Parser) parseAsCommand(start tokens.Token) exp.Expression {

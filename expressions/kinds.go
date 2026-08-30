@@ -426,9 +426,7 @@ const (
 	KindRowFormatProperty
 	// KindReturn ports exp.Return (query.py:882, `pass` - default {"this": True}): the
 	// `RETURN <expr>` wrapper _parse_create can apply to a UDF/procedure body
-	// (parser.py:2469-2470). Reachable only via the BEGIN/RETURN body path, which this port
-	// otherwise defers (no exp.Block/heredoc support) - kept for completeness/robustness
-	// rather than any target-gap SQL actually needing it.
+	// (parser.py:2469-2470).
 	KindReturn
 	// KindIndex/KindOpclass port exp.Index (query.py:558-566) and exp.Opclass (core.py:1817-
 	// 1818, `col opclass_name` inside an index column list, e.g. `USING gin(title
@@ -667,6 +665,15 @@ const (
 	KindSessionUser    // functions.py:325-326
 	KindLocaltime      // temporal.py:49-50
 	KindLocaltimestamp // temporal.py:53-54
+	// KindWhileBlock/KindEndStatement port exp.WhileBlock/EndStatement (query.py:2115-2120):
+	// the WHILE statement and the trailing END of a BEGIN...END block, both produced by
+	// _parse_batch_statements/_parse_whileblock (parser.py:2114-2135, 2278-2281). KindBlock
+	// (already ported) is the body container.
+	KindWhileBlock
+	KindEndStatement
+	// KindHeredoc ports exp.Heredoc (ddl.py:177-178): a dollar-quoted UDF/procedure body
+	// (postgres `AS $$ ... $$`), built by _parse_heredoc (parser.py:9368-9370).
+	KindHeredoc
 )
 
 type Trait uint32
@@ -779,6 +786,9 @@ var argTypes = map[Kind][]argSpec{
 	KindOffset:              {{"this", false}, {"expression", true}, {"expressions", false}},
 	KindHint:                {{"expressions", true}},
 	KindBlock:               {{"expressions", true}},
+	KindWhileBlock:          {{"this", true}, {"body", true}},
+	KindEndStatement:        {},
+	KindHeredoc:             {{"this", true}, {"tag", false}},
 	KindPlaceholder:         {{"this", false}, {"kind", false}, {"widget", false}, {"jdbc", false}},
 	KindTuple:               {{"expressions", false}},
 	KindWith:                {{"expressions", true}, {"recursive", false}, {"search", false}},
@@ -1600,6 +1610,9 @@ var className = map[Kind]string{
 	KindOffset:                              "Offset",
 	KindHint:                                "Hint",
 	KindBlock:                               "Block",
+	KindWhileBlock:                          "WhileBlock",
+	KindEndStatement:                        "EndStatement",
+	KindHeredoc:                             "Heredoc",
 	KindPlaceholder:                         "Placeholder",
 	KindTuple:                               "Tuple",
 	KindWith:                                "With",

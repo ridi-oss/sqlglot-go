@@ -18,8 +18,8 @@ import (
 // CREATE FUNCTION rows contain a nested Command in upstream itself; add new
 // oracle rows by raising the applicable floor, never by lowering either one.
 const (
-	minFidelityCases       = 95
-	minCommandFreeFidelity = 93
+	minFidelityCases       = 100
+	minCommandFreeFidelity = 98
 	// maxASTDivergences caps the rows whose Go AST legitimately differs from the
 	// pinned Python repr because of a scoped, documented node deferral (see
 	// ast_divergence below). This is a CEILING — it must not grow without a
@@ -91,6 +91,8 @@ func fidelityRootKind(t *testing.T, upstreamNode string) exp.Kind {
 		return exp.KindComment
 	case "Create":
 		return exp.KindCreate
+	case "Block":
+		return exp.KindBlock
 	default:
 		t.Fatalf("unsupported upstream node %q", upstreamNode)
 		return exp.KindExpression

@@ -114,6 +114,12 @@ target with `parseTableParts` into `OnProperty{this: Table}` — the qualifier s
 a `Table`, not upstream's bare `Identifier`. Ledger `mysql-drop-index-on-qualified`;
 test `TestParseDropIndexOnTable`.
 
+### 1.17 Postgres dollar-quote tag preserved
+Upstream drops a named heredoc tag on parse and always regenerates `$$…$$`; real PostgreSQL rejects
+that whenever the body itself contains `$$` (the reason a named tag exists). The port keeps the tag
+on `Heredoc.tag` (`$fn$…$fn$` round-trips verbatim). `parser_ddl.go` `heredocTag`;
+test `TestHeredocTagPreserved`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream
@@ -199,9 +205,11 @@ None change `.sql()`:
 
 ## 5. Deferred / fail-closed (`Command` where a future slice would structure)
 
-- Postgres `CREATE FUNCTION … AS $$…$$` dollar-quoted bodies (`exp.Heredoc` unmodeled).
 - Hive CREATE-DDL property callbacks (kept in Hive's `PropertyParsers` overlay; base/mysql/postgres
   fail them closed).
+- Upstream `_parse_heredoc`'s `$`-textseq fallback (parser.py:9372-9399, for dialects that don't lex
+  dollar-quotes): pinned upstream's own base/mysql round-trip of it is broken (`… END AS $$`), so
+  only the HEREDOC_STRING branch is ported (Postgres bodies parse to `exp.Heredoc`).
 
 ---
 
