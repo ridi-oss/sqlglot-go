@@ -142,6 +142,11 @@ func (g *Generator) localtimestampSQL(e expressions.Expression) string {
 // class name, string.py:33-38) via functionFallbackSQL, matching pre-dispatch-entry behavior
 // (e.g. testdata/identity.sql's STR_POSITION(haystack, needle[, pos]) cases).
 func (g *Generator) strPositionSQL(e expressions.Expression) string {
+	// opaque_functions: only POSITION(a IN b) parses to StrPosition, so render that grammar
+	// back verbatim — never the STR_POSITION/LOCATE canonicalization.
+	if g.dialect.OpaqueFunctions {
+		return "POSITION(" + g.sqlKey(e, "substr") + " IN " + g.sqlKey(e, "this") + ")"
+	}
 	if g.dialect.Name != "mysql" {
 		return g.functionFallbackSQL(e)
 	}

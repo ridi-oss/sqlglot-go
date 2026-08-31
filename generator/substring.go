@@ -15,7 +15,9 @@ import "github.com/ridi-oss/sqlglot-go/expressions"
 // entry existed (falling through to the TraitFunc fallback in genWithComment), so base and
 // mysql SUBSTR/SUBSTRING identity fixtures are unaffected.
 func (g *Generator) substringSQL(e expressions.Expression) string {
-	if g.dialect.Name != "postgres" {
+	// opaque_functions: only the keyword form parses to Substring, so render FROM/FOR
+	// form-faithfully on every dialect (comma form round-trips as Anonymous).
+	if g.dialect.Name != "postgres" && !g.dialect.OpaqueFunctions {
 		return g.functionFallbackSQL(e)
 	}
 

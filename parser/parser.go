@@ -29,9 +29,13 @@ type Parser struct {
 	prev       tokens.Token
 
 	prevComments []string
-	chunks       [][]tokens.Token
-	chunkIndex   int
-	nodeCount    int
+	// opaqueFuncName carries the current call's name as written (original case/spelling) into a
+	// form-split function parser under dialect.OpaqueFunctions, so its comma-form branch can build
+	// an exp.Anonymous with the verbatim name. Set by parseFunctionCall just before dispatch.
+	opaqueFuncName string
+	chunks         [][]tokens.Token
+	chunkIndex     int
+	nodeCount      int
 
 	// statementDepth is the parseStatement recursion depth: 1 at a top-level statement, >1 when
 	// parseStatement is re-entered for a nested value/body (SET assignment RHS, CTE body, CREATE
@@ -3200,7 +3204,11 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 	this := token.Text
 	upper := stringsUpper(token.Text)
 	afterDot := prev.TokenType == tokens.DOT
-	if parser := p.noParenFunctionParserFor(upper); optionalParens && parser != nil && tokenType != tokens.IDENTIFIER && tokenType != tokens.STRING && !afterDot {
+	opaque := p.dialect.OpaqueFunctions
+	// opaque_functions: IF(...) is a name-lookup call and goes opaque; only the keyword
+	// IF ... THEN form keeps parseIf. CASE/ANY are pure grammar and stay.
+	skipNoParen := opaque && upper == "IF" && p.next.TokenType == tokens.L_PAREN
+	if parser := p.noParenFunctionParserFor(upper); !skipNoParen && optionalParens && parser != nil && tokenType != tokens.IDENTIFIER && tokenType != tokens.STRING && !afterDot {
 		p.advance()
 		return p.parseWindow(parser(p), false)
 	}
@@ -3235,13 +3243,26 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 		// FunctionByName/Functions entries.
 	} else if !funcTokens[tokenType] && !(tokenType == tokens.VALUES && p.dialect.ValuesIsFunction) &&
 		!(tokenType == tokens.CHARACTER_SET && p.dialect.CharsetIsFunction) &&
+		!skipNoParen &&
 		p.dialect.Functions[upper] == nil && exp.FunctionByName[upper] == nil {
 		return nil
 	}
 	p.advance(2)
 	var result exp.Expression
 	parser := p.functionParser(upper)
+	if opaque && tokenType == tokens.IDENTIFIER {
+		// A QUOTED name is never keyword grammar — `"TRIM"(x)` is a user call and must keep its
+		// quoting through the Anonymous branch, not enter parseTrim and lose it.
+		parser = nil
+	}
+	if opaque && parser != nil && opaqueDroppedFunctionParsers[upper] {
+		// opaque_functions: pure name-lookup conveniences lose their parser and fall through
+		// to the Anonymous branch; grammar parsers (CAST, EXTRACT, ...) stay, and the
+		// form-split parsers below self-select Anonymous when no keyword grammar appears.
+		parser = nil
+	}
 	if parser != nil && !anonymous {
+		p.opaqueFuncName = this
 		result = parser(p)
 	} else {
 		if subqueryPredicate := subqueryPredicates[tokenType]; subqueryPredicate != nil {
@@ -3261,7 +3282,7 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 			functions = mergedDialectFunctions(p.dialect)
 		}
 		function := functions[upper]
-		knownFunction := function != nil && !anonymous
+		knownFunction := function != nil && !anonymous && !opaque
 		alias := !knownFunction
 		args := p.parseFunctionArgs(alias)
 		if knownFunction {

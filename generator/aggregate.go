@@ -1,6 +1,10 @@
 package generator
 
-import "github.com/ridi-oss/sqlglot-go/expressions"
+import (
+	"strings"
+
+	"github.com/ridi-oss/sqlglot-go/expressions"
+)
 
 // groupConcatSQL ports groupconcat_sql (dialects/dialect.py:2423-2467), dialect-gated per
 // its only override in this codebase's scope, generators/postgres.py:313-315: postgres
@@ -66,6 +70,9 @@ func (g *Generator) groupConcatSQL(e expressions.Expression) string {
 		modifiers = g.gen(order) + modifiers
 	}
 
+	if boolValue(e.Arg("within_group")) {
+		return g.funcCall("STRING_AGG", []any{args}, "(", ")", true) + " WITHIN GROUP (" + strings.TrimPrefix(modifiers, " ") + ")"
+	}
 	finalArgs := args
 	if modifiers != "" {
 		finalArgs = args + modifiers
