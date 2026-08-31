@@ -30,10 +30,33 @@ func NormalizeIdentifiers(expression exp.Expression, dialect dialects.DialectTyp
 			continue
 		}
 		if node.Kind() == exp.KindIdentifier {
+			if d.OpaqueFunctions && isOpaqueCallIdentifier(node) {
+				// opaque_functions contract: a function call's name and schema qualifier stay
+				// spelled as written — the EngineCatalog resolver folds for lookup itself.
+				continue
+			}
 			d.NormalizeIdentifier(node)
 		}
 	}
 	return expression
+}
+
+// isOpaqueCallIdentifier reports whether the identifier is an Anonymous call's quoted-name
+// ("this") or the schema qualifier of Dot(Identifier, Anonymous).
+func isOpaqueCallIdentifier(node exp.Expression) bool {
+	parent := node.Parent()
+	if parent == nil {
+		return false
+	}
+	if parent.Kind() == exp.KindAnonymous && node.ArgKey() == "this" {
+		return true
+	}
+	if parent.Kind() == exp.KindDot && node.ArgKey() == "this" {
+		if e := asExpression(parent.Arg("expression")); e != nil && e.Kind() == exp.KindAnonymous {
+			return true
+		}
+	}
+	return false
 }
 
 func NormalizeIdentifiersString(name string, dialect dialects.DialectType) exp.Expression {

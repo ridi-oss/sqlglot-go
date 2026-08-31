@@ -36,7 +36,14 @@ type QualifyOpts struct {
 	OnQualify                 func(exp.Expression)
 	// ResolutionReport receives source classifications; nil disables all report work.
 	ResolutionReport map[exp.Expression]ResolvedSource
-	SQL              string
+	// EngineCatalog enables NON-UPSTREAM function/relation identity resolution (see
+	// engine_catalog.go): with a non-nil catalog, CallReport/RelationReport (whichever are
+	// non-nil) receive per-node classifications after the qualify passes run. Never rewrites
+	// the AST. SearchPath doubles as the PG function search path.
+	EngineCatalog  *EngineCatalog
+	CallReport     map[exp.Expression]ResolvedCall
+	RelationReport map[exp.Expression]ResolvedRelation
+	SQL            string
 }
 
 func DefaultQualifyOpts() QualifyOpts {
@@ -82,6 +89,10 @@ func Qualify(expression exp.Expression, opts QualifyOpts) exp.Expression {
 
 	if opts.ValidateQualifyColumns {
 		ValidateQualifyColumns(expression, opts.SQL)
+	}
+
+	if opts.EngineCatalog != nil {
+		ResolveEngineIdentities(expression, opts.EngineCatalog, dialect, opts.SearchPath, opts.CallReport, opts.RelationReport)
 	}
 
 	return expression
