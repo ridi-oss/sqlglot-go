@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.28.3](https://github.com/ridi-oss/sqlglot-go/compare/v0.28.2...v0.28.3) (2026-08-31)
+
+
+### Bug Fixes
+
+* **parser:** unterminated BEGIN body and bare MySQL END fail closed ([#82](https://github.com/ridi-oss/sqlglot-go/issues/82)) ([afa4141](https://github.com/ridi-oss/sqlglot-go/commit/afa4141d3012dc5f76b1d03a6cd190ddd69755a6))
+
 ## [0.28.2](https://github.com/ridi-oss/sqlglot-go/compare/v0.28.1...v0.28.2) (2026-08-31)
 
 
