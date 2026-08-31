@@ -1605,20 +1605,27 @@ func (g *Generator) createSQL(e expressions.Expression) string {
 	}
 
 	begin := ""
+	atomicBody := false
 	if boolValue(e.Arg("begin")) {
 		begin = " BEGIN"
+	} else if str, ok := e.Arg("begin").(string); ok && str != "" {
+		begin = " BEGIN " + str // PG `BEGIN ATOMIC` bodies keep the modifier
+		atomicBody = true
 	}
 	expressionSQL := g.sqlKey(e, "expression")
 	if expressionSQL != "" {
 		expressionSQL = begin + g.sep() + expressionSQL
-		postAliasSQL := g.renderProperties(
-			g.propertiesExpression(propertyLocations[propertyLocationPostAlias], e),
-			"", ", ", "", false,
-		)
-		if postAliasSQL != "" {
-			postAliasSQL = " " + postAliasSQL
+		// PG rejects `AS BEGIN ATOMIC`: the SQL-standard body replaces the AS clause.
+		if !atomicBody {
+			postAliasSQL := g.renderProperties(
+				g.propertiesExpression(propertyLocations[propertyLocationPostAlias], e),
+				"", ", ", "", false,
+			)
+			if postAliasSQL != "" {
+				postAliasSQL = " " + postAliasSQL
+			}
+			expressionSQL = " AS" + postAliasSQL + expressionSQL
 		}
-		expressionSQL = " AS" + postAliasSQL + expressionSQL
 	}
 
 	postIndexSQL := g.renderProperties(
@@ -1704,10 +1711,11 @@ func (g *Generator) columnDefSQL(e expressions.Expression) string {
 
 	// Postgres places a function parameter mode (IN/OUT/INOUT/VARIADIC) BEFORE the
 	// parameter name and omits it from the trailing constraints
-	// (generators/postgres.py:409-419). Unlike upstream, which pop()s the constraint,
-	// we render around it so Generate() stays side-effect free.
+	// (generators/postgres.py:409-419); MySQL's IN/OUT/INOUT modes render the same way
+	// (§15.1.17). Unlike upstream, which pop()s the constraint, we render around it so
+	// Generate() stays side-effect free.
 	modePrefix := ""
-	if g.dialect.Name == "postgres" {
+	if g.dialect.Name == "postgres" || g.dialect.Name == "mysql" {
 		for _, item := range listFromValue(e.Arg("constraints")) {
 			if c, ok := item.(expressions.Expression); ok && c != nil && c.Kind() == expressions.KindInOutColumnConstraint {
 				modePrefix = g.gen(c) + " "
@@ -2605,6 +2613,12 @@ func (g *Generator) tupleSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) blockSQL(e expressions.Expression) string {
+	stmts := e.Expressions()
+	// A routine-body block (trailing EndStatement) renders as MySQL's stmt_list, each
+	// statement `;`-terminated; other blocks (a single-statement function body) join plainly.
+	if n := len(stmts); n > 0 && stmts[n-1] != nil && stmts[n-1].Kind() == expressions.KindEndStatement {
+		return g.compoundBodySQL(stmts)
+	}
 	return g.expressions(exprsOptions{expression: e, sep: "; ", flat: true})
 }
 
@@ -2624,8 +2638,12 @@ func (g *Generator) endStatementSQL(expressions.Expression) string {
 	return "END"
 }
 
-// whileblock_sql (generator.py:6208-6210): base has no WHILE rendering (T-SQL overrides it).
-func (g *Generator) whileBlockSQL(expressions.Expression) string {
+// whileblock_sql (generator.py:6208-6210): base has no WHILE rendering (T-SQL overrides
+// it). mysql renders the compound-grammar form `WHILE cond DO stmts; END WHILE [label]`.
+func (g *Generator) whileBlockSQL(e expressions.Expression) string {
+	if g.dialect.Name == "mysql" {
+		return g.labelWrap(e, "WHILE "+g.sqlKey(e, "this")+" DO "+g.bodyKeySQL(e, "body")+" END WHILE")
+	}
 	g.unsupported("Unsupported While block syntax")
 	return ""
 }

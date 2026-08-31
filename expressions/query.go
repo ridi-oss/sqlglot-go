@@ -16,6 +16,12 @@ func WhileBlock(args Args) Expression          { return newNode(KindWhileBlock, 
 func EndStatement(args Args) Expression        { return newNode(KindEndStatement, args) }
 func Heredoc(args Args) Expression             { return newNode(KindHeredoc, args) }
 func Semicolon(args Args) Expression           { return newNode(KindSemicolon, args) }
+func IfBlock(args Args) Expression             { return newNode(KindIfBlock, args) }
+func LoopBlock(args Args) Expression           { return newNode(KindLoopBlock, args) }
+func RepeatBlock(args Args) Expression         { return newNode(KindRepeatBlock, args) }
+func CaseBlock(args Args) Expression           { return newNode(KindCaseBlock, args) }
+func Declare(args Args) Expression             { return newNode(KindDeclare, args) }
+func DeclareItem(args Args) Expression         { return newNode(KindDeclareItem, args) }
 func With(args Args) Expression                { return newNode(KindWith, args) }
 func CTE(args Args) Expression                 { return newNode(KindCTE, args) }
 func RecursiveWithSearch(args Args) Expression { return newNode(KindRecursiveWithSearch, args) }

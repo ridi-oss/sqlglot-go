@@ -678,6 +678,20 @@ const (
 	// `;`'s comments — a SEMICOLON token with comments becomes its own statement chunk
 	// (parser.py:2159-2161) and parses via STATEMENT_PARSERS (parser.py:1110).
 	KindSemicolon
+	// MySQL compound-statement grammar (reference manual §15.6; upstream sqlglot does not
+	// parse these — grammar extension, DEVIATIONS §1.18). KindIfBlock ports exp.IfBlock
+	// (query.py:2111-2112, T-SQL's shape: this=condition, true=Block, false=Block|IfBlock
+	// for ELSEIF chains). LoopBlock/RepeatBlock/CaseBlock are original nodes for
+	// `LOOP…END LOOP`, `REPEAT…UNTIL…END REPEAT`, and the CASE *statement*
+	// (`CASE…WHEN…THEN <stmts>…END CASE`), each with an optional MySQL statement label.
+	KindIfBlock
+	KindLoopBlock
+	KindRepeatBlock
+	KindCaseBlock
+	// KindDeclare/KindDeclareItem port exp.Declare/DeclareItem (ddl.py:164-170): MySQL
+	// `DECLARE <name> <type> [DEFAULT <expr>]` local variables (also T-SQL upstream).
+	KindDeclare
+	KindDeclareItem
 )
 
 type Trait uint32
@@ -789,11 +803,17 @@ var argTypes = map[Kind][]argSpec{
 	KindLimit:               {{"this", false}, {"expression", true}, {"offset", false}, {"limit_options", false}, {"expressions", false}},
 	KindOffset:              {{"this", false}, {"expression", true}, {"expressions", false}},
 	KindHint:                {{"expressions", true}},
-	KindBlock:               {{"expressions", true}},
-	KindWhileBlock:          {{"this", true}, {"body", true}},
+	KindBlock:               {{"expressions", true}, {"label", false}},
+	KindWhileBlock:          {{"this", true}, {"body", true}, {"label", false}},
 	KindEndStatement:        {},
 	KindHeredoc:             {{"this", true}, {"tag", false}},
 	KindSemicolon:           {},
+	KindIfBlock:             {{"this", true}, {"true", true}, {"false", false}},
+	KindLoopBlock:           {{"expressions", true}, {"label", false}},
+	KindRepeatBlock:         {{"expressions", true}, {"until", true}, {"label", false}},
+	KindCaseBlock:           {{"this", false}, {"whens", true}, {"else_", false}},
+	KindDeclare:             {{"expressions", true}, {"replace", false}},
+	KindDeclareItem:         {{"this", true}, {"kind", false}, {"default", false}},
 	KindPlaceholder:         {{"this", false}, {"kind", false}, {"widget", false}, {"jdbc", false}},
 	KindTuple:               {{"expressions", false}},
 	KindWith:                {{"expressions", true}, {"recursive", false}, {"search", false}},
@@ -1619,6 +1639,12 @@ var className = map[Kind]string{
 	KindEndStatement:                        "EndStatement",
 	KindHeredoc:                             "Heredoc",
 	KindSemicolon:                           "Semicolon",
+	KindIfBlock:                             "IfBlock",
+	KindLoopBlock:                           "LoopBlock",
+	KindRepeatBlock:                         "RepeatBlock",
+	KindCaseBlock:                           "CaseBlock",
+	KindDeclare:                             "Declare",
+	KindDeclareItem:                         "DeclareItem",
 	KindPlaceholder:                         "Placeholder",
 	KindTuple:                               "Tuple",
 	KindWith:                                "With",
