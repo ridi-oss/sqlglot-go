@@ -179,12 +179,27 @@ func (p *Parser) matchPair(a, b tokens.TokenType, advance bool) bool {
 	return false
 }
 
+// textMatchExcludedTokens ports TEXT_MATCH_EXCLUDED_TOKENS (parser.py:664-679, v30.17.0):
+// tokens whose text comes from delimited source (quoted identifiers, string literals) are
+// never keywords when matching by text.
+var textMatchExcludedTokens = map[tokens.TokenType]bool{
+	tokens.BIT_STRING:      true,
+	tokens.BYTE_STRING:     true,
+	tokens.HEREDOC_STRING:  true,
+	tokens.HEX_STRING:      true,
+	tokens.IDENTIFIER:      true,
+	tokens.NATIONAL_STRING: true,
+	tokens.RAW_STRING:      true,
+	tokens.STRING:          true,
+	tokens.UNICODE_STRING:  true,
+}
+
 func (p *Parser) matchTexts(texts map[string]bool, advance ...bool) bool {
 	shouldAdvance := true
 	if len(advance) > 0 {
 		shouldAdvance = advance[0]
 	}
-	if p.curr.TokenType != tokens.STRING && texts[stringsUpper(p.curr.Text)] {
+	if !textMatchExcludedTokens[p.curr.TokenType] && texts[stringsUpper(p.curr.Text)] {
 		if shouldAdvance {
 			p.advance()
 		}
@@ -196,7 +211,7 @@ func (p *Parser) matchTexts(texts map[string]bool, advance ...bool) bool {
 func (p *Parser) matchTextSeq(texts ...string) bool {
 	index := p.index
 	for _, text := range texts {
-		if p.curr.TokenType != tokens.STRING && stringsUpper(p.curr.Text) == text {
+		if !textMatchExcludedTokens[p.curr.TokenType] && stringsUpper(p.curr.Text) == text {
 			p.advance()
 		} else {
 			p.retreat(index)
@@ -1079,10 +1094,11 @@ func (p *Parser) parseIntoOutfile(kind string) exp.Expression {
 // matched introducer REQUIRES its operand and a bare `FIELDS`/`COLUMNS`/`LINES` with no sub-option
 // is rejected — all fail closed via raiseError rather than silently dropping the malformed clause.
 func (p *Parser) parseOutfileExportOptions(args exp.Args) {
-	// "CHARACTER SET" tokenizes as a single CHARACTER_SET token (tokenizer.go:160). MySQL's
-	// charset operand is a bare charset name (utf8mb4) or a quoted string ('utf8'); a number,
-	// NULL, a parenthesized/function expression, or a placeholder is rejected (fail closed).
-	if p.match(tokens.CHARACTER_SET) {
+	// "CHARACTER SET" is two tokens (v30.17 dropped the compound keyword); mysql's bare
+	// CHARSET still lexes as CHARACTER_SET. The charset operand is a bare charset name
+	// (utf8mb4) or a quoted string ('utf8'); a number, NULL, a parenthesized/function
+	// expression, or a placeholder is rejected (fail closed).
+	if p.match(tokens.CHARACTER_SET) || p.matchTextSeq("CHARACTER", "SET") {
 		var cs exp.Expression
 		// A charset name is a quoted string or a bare identifier keyword (utf8mb4, binary). The
 		// token type is checked first so parseCharsetName's placeholder/parameter fallback can't

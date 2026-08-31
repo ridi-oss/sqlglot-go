@@ -22,11 +22,15 @@ func (p *Parser) parsePropertyBefore() exp.Expression {
 	}
 
 	isDefault := p.matchTextSeq("DEFAULT")
-	if !p.matchTexts(p.propertyParserKeys()) {
-		p.retreat(index)
-		return nil
+	if p.matchTexts(p.propertyParserKeys()) {
+		return p.propertyParser(stringsUpper(p.prev.Text))(p, isDefault)
 	}
-	return p.propertyParser(stringsUpper(p.prev.Text))(p, isDefault)
+	// "CHARACTER SET" is two tokens since v30.17 (parser.py:2878-2880).
+	if p.matchTextSeq("CHARACTER", "SET") {
+		return p.parseCharacterSet(isDefault)
+	}
+	p.retreat(index)
+	return nil
 }
 
 // parseWrappedProperties ports _parse_wrapped_properties (parser.py:2792-2793), flattening
@@ -51,8 +55,17 @@ func (p *Parser) parseProperty() exp.Expression {
 	if p.matchTexts(p.propertyParserKeys()) {
 		return p.propertyParser(stringsUpper(p.prev.Text))(p, false)
 	}
-	if p.match(tokens.DEFAULT) && p.matchTexts(p.propertyParserKeys()) {
-		return p.propertyParser(stringsUpper(p.prev.Text))(p, true)
+	// "CHARACTER SET" is two tokens since v30.17 (parser.py:2890-2898).
+	if p.matchTextSeq("CHARACTER", "SET") {
+		return p.parseCharacterSet(false)
+	}
+	if p.match(tokens.DEFAULT) {
+		if p.matchTexts(p.propertyParserKeys()) {
+			return p.propertyParser(stringsUpper(p.prev.Text))(p, true)
+		}
+		if p.matchTextSeq("CHARACTER", "SET") {
+			return p.parseCharacterSet(true)
+		}
 	}
 	// A MySQL compound-statement leader here is a routine BODY starting (grammar
 	// extension, mysql_compound.go) — never a key=value property; without this stop the

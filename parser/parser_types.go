@@ -539,7 +539,7 @@ func (p *Parser) parseCast(strict bool, safe any) exp.Expression {
 	}
 	if to == nil {
 		p.raiseError("Expected TYPE after CAST")
-	} else if exp.IsType(to, exp.DTypeChar) && p.match(tokens.CHARACTER_SET) {
+	} else if exp.IsType(to, exp.DTypeChar) && (p.match(tokens.CHARACTER_SET) || p.matchTextSeq("CHARACTER", "SET")) {
 		// parser.py:7900-7901 (elif branch): CAST(x AS CHAR CHARACTER SET <cs>) captures the
 		// charset via the synthetic CHARACTER_SET data type; the generator renders it as
 		// `CHAR CHARACTER SET <kind>` (generator/sql.go:1472-1473). FORMAT/COMMA and the

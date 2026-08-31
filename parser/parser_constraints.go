@@ -293,7 +293,7 @@ func (p *Parser) parseGeneratedAsIdentityBase() exp.Expression {
 	identity := p.matchTextSeq("IDENTITY")
 
 	if p.match(tokens.L_PAREN) {
-		if p.match(tokens.START_WITH) {
+		if p.matchTextSeq("START", "WITH") {
 			this.Set("start", p.parseBitwise())
 		}
 		if p.matchTextSeq("INCREMENT", "BY") {
