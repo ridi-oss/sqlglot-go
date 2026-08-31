@@ -36,17 +36,16 @@ func TestLambdaSQL(t *testing.T) {
 // top-level `a -> b` (outside any function call's argument list) must keep parsing as
 // exp.JSONExtract, not exp.Lambda (parser.go:1341/parser_lambda.go). The base case stays on the
 // JSON_EXTRACT(...) function form (base never sets only_json_types); the postgres case now
-// round-trips through the operator/function split driven by only_json_types (generator/
-// json_arrow.go) - verified against the pinned oracle: `x::JSON -> 'd' ->> -1` parses as
-// JSONExtractScalar(JSONExtract(CAST(x AS JSON), 'd', only_json_types=True), Neg(1)); the inner
-// literal RHS ('d') sets only_json_types so it renders as the `->` operator, but the outer RHS
-// (-1, a Neg wrapping a Literal, not itself a Literal) does not, so the outer renders as the
-// JSON_EXTRACT_PATH_TEXT function form wrapping the inner operator expression.
+// round-trips through the operator/function split driven by only_json_types + the single
+// non-literal-path infix rule (generator/json_arrow.go, v30.17.0): `x::JSON -> 'd' ->> -1`
+// keeps BOTH operators infix — the inner literal RHS sets only_json_types, and the outer Neg
+// RHS is a single non-literal segment, which renders infix rather than the jsonb-unsafe
+// JSON_EXTRACT_PATH_TEXT function form.
 func TestLambdaSQLNotAJSONArrow(t *testing.T) {
 	if got := roundTrip(t, "", "SELECT a -> b"); got != "SELECT JSON_EXTRACT(a, b)" {
 		t.Errorf("SELECT a -> b -> %q, want JSON_EXTRACT(a, b) (JSONExtract, not Lambda)", got)
 	}
-	if got := roundTrip(t, "postgres", "SELECT x::JSON -> 'd' ->> -1"); got != "SELECT JSON_EXTRACT_PATH_TEXT(CAST(x AS JSON) -> 'd', -1)" {
+	if got := roundTrip(t, "postgres", "SELECT x::JSON -> 'd' ->> -1"); got != "SELECT CAST(x AS JSON) -> 'd' ->> -1" {
 		t.Errorf("postgres JSON arrow chain -> %q", got)
 	}
 }
@@ -55,9 +54,9 @@ func TestLambdaSQLNotAJSONArrow(t *testing.T) {
 // (parsed via jsonExtractFunction, expressions/functions.go). Upstream build_extract_json_with_path
 // (parser.py:104-118) preserves the 3rd+ path arguments only for JSONExtract, so JSON_EXTRACT(a,
 // b, c) keeps `c` (base/mysql under the JSON_EXTRACT name, postgres renamed to JSON_EXTRACT_PATH),
-// while JSON_EXTRACT_SCALAR(a, b, c) drops it: base -> JSON_EXTRACT_SCALAR(a, b), postgres ->
-// JSON_EXTRACT_PATH_TEXT(a, b), mysql -> the `a ->> b` arrow form. Verified against the pinned
-// oracle (bare-identifier args, so no JSONPath rewrite is involved).
+// while JSON_EXTRACT_SCALAR(a, b, c) drops it: base -> JSON_EXTRACT_SCALAR(a, b), and mysql AND
+// postgres render the `a ->> b` arrow form (postgres since v30.17.0: a single non-literal path
+// renders infix, JSON_EXTRACT_PATH_TEXT is jsonb-unsafe). Verified against the pinned oracle.
 func TestJSONExtractFunctionFormVarargs(t *testing.T) {
 	cases := []struct{ dialect, sql, want string }{
 		{"", "SELECT JSON_EXTRACT(a, b, c)", "SELECT JSON_EXTRACT(a, b, c)"},
@@ -65,7 +64,7 @@ func TestJSONExtractFunctionFormVarargs(t *testing.T) {
 		{"postgres", "SELECT JSON_EXTRACT(a, b, c)", "SELECT JSON_EXTRACT_PATH(a, b, c)"},
 		{"", "SELECT JSON_EXTRACT_SCALAR(a, b, c)", "SELECT JSON_EXTRACT_SCALAR(a, b)"},
 		{"mysql", "SELECT JSON_EXTRACT_SCALAR(a, b, c)", "SELECT a ->> b"},
-		{"postgres", "SELECT JSON_EXTRACT_SCALAR(a, b, c)", "SELECT JSON_EXTRACT_PATH_TEXT(a, b)"},
+		{"postgres", "SELECT JSON_EXTRACT_SCALAR(a, b, c)", "SELECT a ->> b"},
 	}
 	for _, tc := range cases {
 		if got := roundTrip(t, tc.dialect, tc.sql); got != tc.want {

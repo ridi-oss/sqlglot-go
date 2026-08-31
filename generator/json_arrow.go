@@ -23,6 +23,19 @@ func jsonExtractArgs(e expressions.Expression) []any {
 // only_json_types signal, which is equivalent for every corpus case (see ROADMAP's JSONPath
 // deferral note).
 
+// pgJSONPathIsInfix ports _json_extract_sql's first branch (generators/postgres.py:186-192,
+// v30.17.0): a single non-literal path segment with no variadic tail renders infix, not
+// JSON_EXTRACT_PATH[_TEXT] (which is jsonb-unsafe). This port has no JSONPath/Variadic node;
+// the equivalent test is "expression is not a string Literal" (a bare literal path takes the
+// only_json_types branch instead, and a numeric index is likewise infix upstream).
+func pgJSONPathIsInfix(e expressions.Expression) bool {
+	path := asExpression(e.Arg("expression"))
+	if path == nil || len(listFromValue(e.Arg("expressions"))) > 0 {
+		return false
+	}
+	return path.Kind() != expressions.KindLiteral || !path.IsString()
+}
+
 // jsonExtractSQL ports the base/mysql default (functionFallbackSQL - neither dialect overrides
 // exp.JSONExtract in TRANSFORMS), postgres's _json_extract_sql("JSON_EXTRACT_PATH", "->")
 // (generators/postgres.py:322), and Trino's JSON_QUERY-specific override
@@ -30,7 +43,7 @@ func jsonExtractArgs(e expressions.Expression) []any {
 // spelling remains authoritative even if a caller supplies a JSONExtract with json_query set.
 func (g *Generator) jsonExtractSQL(e expressions.Expression) string {
 	if g.dialect.Name == "postgres" {
-		if boolValue(e.Arg("only_json_types")) {
+		if boolValue(e.Arg("only_json_types")) || pgJSONPathIsInfix(e) {
 			return g.binary(e, "->")
 		}
 		return g.funcCall("JSON_EXTRACT_PATH", jsonExtractArgs(e), "(", ")", true)
@@ -66,7 +79,7 @@ func (g *Generator) jsonExtractSQL(e expressions.Expression) string {
 // per-dialect TRANSFORMS dict precedence.
 func (g *Generator) jsonExtractScalarSQL(e expressions.Expression) string {
 	if g.dialect.Name == "postgres" {
-		if boolValue(e.Arg("only_json_types")) {
+		if boolValue(e.Arg("only_json_types")) || pgJSONPathIsInfix(e) {
 			return g.binary(e, "->>")
 		}
 		return g.funcCall("JSON_EXTRACT_PATH_TEXT", jsonExtractArgs(e), "(", ")", true)

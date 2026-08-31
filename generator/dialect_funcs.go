@@ -1,6 +1,10 @@
 package generator
 
-import "github.com/ridi-oss/sqlglot-go/expressions"
+import (
+	"strings"
+
+	"github.com/ridi-oss/sqlglot-go/expressions"
+)
 
 // dayOfMonthSQL/dayOfWeekSQL/dayOfYearSQL/weekOfYearSQL port generators/mysql.py:170-173's
 // `_remove_ts_or_ds_to_date(rename_func("DAYOFMONTH"))` etc. This port never wraps the "this"
@@ -67,6 +71,22 @@ func (g *Generator) currentSchemaSQL(e expressions.Expression) string {
 	// functionFallback (CURRENT_SCHEMA()), matching pinned upstream's default generator (base
 	// generator.py has no CurrentSchema entry at all).
 	return g.functionFallbackSQL(e)
+}
+
+// dayMonthYearSQL ports _day_month_year_sql (generators/postgres.py:80-91, v30.17.0): under
+// postgres, Day/Month/Year render as `EXTRACT(<part> FROM this)` — PG has no DAY()/MONTH()/
+// YEAR() functions. The upstream TsOrDsToDate/default_date integer branch is unreachable here
+// (this port defers TsOrDsToDate; see fidelity ast_divergence). Other dialects keep the
+// function fallback.
+func (g *Generator) dayMonthYearSQL(e expressions.Expression) string {
+	if g.dialect.Name != "postgres" {
+		return g.functionFallbackSQL(e)
+	}
+	part := expressions.Var(expressions.Args{"this": strings.ToUpper(expressions.ClassName(e.Kind()))})
+	extract := expressions.New(expressions.KindExtract, expressions.Args{
+		"this": part, "expression": e.Arg("this"),
+	})
+	return g.gen(extract)
 }
 
 // niladicBareDialects are the dialects whose generator renders CurrentTimestamp/CurrentUser as the
@@ -192,6 +212,9 @@ func (g *Generator) currentDateSQL(e expressions.Expression) string {
 }
 
 func init() {
+	dispatch[expressions.KindDay] = (*Generator).dayMonthYearSQL
+	dispatch[expressions.KindMonth] = (*Generator).dayMonthYearSQL
+	dispatch[expressions.KindYear] = (*Generator).dayMonthYearSQL
 	dispatch[expressions.KindDayOfMonth] = (*Generator).dayOfMonthSQL
 	dispatch[expressions.KindDayOfWeek] = (*Generator).dayOfWeekSQL
 	dispatch[expressions.KindDayOfYear] = (*Generator).dayOfYearSQL
