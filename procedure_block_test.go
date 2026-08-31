@@ -76,16 +76,14 @@ func TestBlockEndTerminates(t *testing.T) {
 			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
 		{"CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END; UPDATE t SET a = 1",
 			[]exp.Kind{exp.KindCreate, exp.KindUpdate}},
-		{"CREATE PROCEDURE p() BEGIN WHILE (x < 3) BEGIN SELECT 1; END; END; SELECT 9",
+		// MySQL WHILE requires DO (real MySQL 8.0 rejects the DO-less T-SQL form).
+		{"CREATE PROCEDURE p() BEGIN WHILE (x < 3) DO SELECT 1; END WHILE; END; SELECT 9",
 			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
 		// Empty body (`BEGIN END`, valid MySQL): terminates the same way instead of
 		// upstream's Column(END) mis-parse.
 		{"CREATE PROCEDURE p() BEGIN END; SELECT 2",
 			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
-		// A WHILE body without its own BEGIN is the single following statement, so it cannot
-		// steal the routine's END.
-		{"CREATE PROCEDURE p() BEGIN WHILE (x < 3) SELECT 1; END; SELECT 9",
-			[]exp.Kind{exp.KindCreate, exp.KindSelect}},
+
 		// Multiple trailers all stay separate statements.
 		{"CREATE PROCEDURE p() BEGIN SELECT 1; END; SELECT 2; SELECT 3",
 			[]exp.Kind{exp.KindCreate, exp.KindSelect, exp.KindSelect}},
@@ -153,6 +151,13 @@ func TestRoutineBodyOneStatement(t *testing.T) {
 			[]string{"CREATE PROCEDURE p() IF 1 THEN SELECT 1; END IF", "SELECT 99"}},
 		{"CREATE PROCEDURE p() REPEAT SELECT 1; UNTIL x END REPEAT", "mysql",
 			[]string{"CREATE PROCEDURE p() REPEAT SELECT 1; UNTIL x END REPEAT"}},
+		// Bare CASE routine bodies (all three forms; verified on real MySQL 8.0.46).
+		{"CREATE PROCEDURE p() CASE x WHEN 1 THEN SELECT 1; SELECT 2; END CASE", "mysql",
+			[]string{"CREATE PROCEDURE p() CASE x WHEN 1 THEN SELECT 1; SELECT 2; END CASE"}},
+		{"CREATE PROCEDURE p() CASE WHEN x = 1 THEN SELECT 1; END CASE", "mysql",
+			[]string{"CREATE PROCEDURE p() CASE WHEN x = 1 THEN SELECT 1; END CASE"}},
+		{"CREATE PROCEDURE p() CASE x WHEN 1 THEN SELECT 1; END CASE; SELECT 9", "mysql",
+			[]string{"CREATE PROCEDURE p() CASE x WHEN 1 THEN SELECT 1; END CASE", "SELECT 9"}},
 		// IF()/REPEAT() as ordinary function calls inside a degraded body don't open blocks.
 		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = IF(1, 2, 3); END; SELECT 9", "mysql",
 			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = IF(1, 2, 3); END", "SELECT 9"}},
@@ -189,6 +194,7 @@ func TestRoutineBodyOneStatement(t *testing.T) {
 			[]string{"CREATE PROCEDURE p() BEGIN DECLARE CONTINUE HANDLER FOR no_table IF 1 THEN SELECT 1; END IF; END", "SELECT 9"}},
 		{"CREATE PROCEDURE p() BEGIN SET @a = CASE end WHEN 1 THEN 2 ELSE 3 END; END; SELECT 9", "mysql",
 			[]string{"CREATE PROCEDURE p() BEGIN SET @a = CASE end WHEN 1 THEN 2 ELSE 3 END; END", "SELECT 9"}},
+
 		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = if; END; SELECT 9", "mysql",
 			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = if; END", "SELECT 9"}},
 		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT loop FROM t; END; SELECT 9", "mysql",
@@ -240,8 +246,6 @@ func TestDegradedCreateFailsClosed(t *testing.T) {
 		// Unterminated body: without the depth>0 check this merged the DROP into the Command.
 		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; DROP TABLE users",
 
-		// `end` as a bare value deflates it -> the residual top-level END chunk errors.
-		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = end; END; SELECT 2",
 		// Empty trailing chunk while unbalanced: an error, not a slice-bounds panic.
 		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a=1;;",
 		"SELECT 1; END",
@@ -263,6 +267,9 @@ func TestDegradedCreateFailsClosed(t *testing.T) {
 		"CREATE PROCEDURE p() BEGIN DO IF(1,2,3); END IF; DROP TABLE users; END",
 		"CREATE PROCEDURE p() BEGIN DO REPEAT(1,2); END REPEAT; DROP TABLE users; END",
 		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT 1 AS case; END CASE; DROP TABLE users; END",
+		// A body statement missing its terminating `;` before END (real MySQL 1064).
+		"CREATE PROCEDURE p() BEGIN SELECT 1 END",
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET NEW.a = NOW() END",
 		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT case FROM t; END CASE; DROP TABLE u; END",
 		// whenAhead across a subquery WHEN + broken expression CASE + PG RULE header IF:
 		// all must error, never merge the DROP.
@@ -330,16 +337,20 @@ func TestQualifiedKeywordNotBlockToken(t *testing.T) {
 	}
 }
 
-// A body statement the parser can't fully consume (MySQL DECLARE) degrades the whole
-// definition to ONE verbatim Command — never a silently mangled structured AST.
-func TestUnsupportedBodyStatementDegradesWhole(t *testing.T) {
+// DECLARE bodies parse STRUCTURALLY under the MySQL compound-statement grammar
+// (parser/mysql_compound.go): a Create whose Block holds a real exp.Declare — no more
+// Command degrade, and the span still covers the whole definition.
+func TestDeclareBodyParsesStructurally(t *testing.T) {
 	sql := "CREATE FUNCTION f() RETURNS INT BEGIN DECLARE x INT DEFAULT 1; RETURN x; END"
 	e, err := sqlglot.ParseOne(sql, "mysql")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if e.Kind() != exp.KindCommand {
-		t.Fatalf("root Kind=%s, want Command", exp.ClassName(e.Kind()))
+	if e.Kind() != exp.KindCreate {
+		t.Fatalf("root Kind=%s, want Create", exp.ClassName(e.Kind()))
+	}
+	if e.Find(exp.KindDeclare) == nil {
+		t.Fatalf("no Declare node in body:\n%s", e.ToS())
 	}
 	if got, _ := e.SpanText(); got != sql {
 		t.Errorf("SpanText()=%q, want the whole definition", got)
@@ -391,26 +402,11 @@ func TestHeredocTagPreserved(t *testing.T) {
 	}
 }
 
-// A structured CREATE whose block parse stopped mid-statement degrades to Command IN PLACE
-// (parser.py:2624): the Command spans through the chunk the parse stopped in — a block body
-// may have consumed several — and parsing resumes at the next chunk, so trailing statements
-// survive. Upstream yields [Command("...SELECT 1; ELSE"), Select] for this input.
+// A bare ELSE inside a BEGIN body is invalid MySQL (no enclosing IF/CASE): the compound
+// grammar fails closed — never upstream's silent [Command, Select] quirk split.
 func TestCreateProcedureDegradeSpansConsumedChunks(t *testing.T) {
-	statements, err := sqlglot.Parse("CREATE PROCEDURE p() BEGIN SELECT 1; ELSE; SELECT 2", "mysql")
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if len(statements) != 2 {
-		t.Fatalf("got %d statements, want 2 (Command + Select)", len(statements))
-	}
-	if statements[0].Kind() != exp.KindCommand {
-		t.Errorf("statements[0] Kind=%s, want Command", exp.ClassName(statements[0].Kind()))
-	}
-	if got, want := statements[0].Text("this")+statements[0].Text("expression"), "CREATE PROCEDURE p() BEGIN SELECT 1; ELSE"; got != want {
-		t.Errorf("Command text %q, want %q", got, want)
-	}
-	if statements[1].Kind() != exp.KindSelect {
-		t.Errorf("statements[1] Kind=%s, want Select", exp.ClassName(statements[1].Kind()))
+	if _, err := sqlglot.Parse("CREATE PROCEDURE p() BEGIN SELECT 1; ELSE; SELECT 2", "mysql"); err == nil {
+		t.Fatalf("bare ELSE in BEGIN body parsed; want error")
 	}
 }
 

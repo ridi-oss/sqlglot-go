@@ -120,55 +120,32 @@ that whenever the body itself contains `$$` (the reason a named tag exists). The
 on `Heredoc.tag` (`$fn$…$fn$` round-trips verbatim). `parser_ddl.go` `heredocTag`;
 test `TestHeredocTagPreserved`.
 
-### 1.18 `END` terminates a routine's `BEGIN…END` block
-Upstream `_parse_block` consumes ALL remaining chunks, folding
-`CREATE PROCEDURE p() … END; SELECT 2` into ONE `Create` whose Block smuggles the trailing
-`Select` after `EndStatement`. Real PostgreSQL 16 — the engine that parses this form server-side
-(`BEGIN ATOMIC`) — treats the trailing statement as its own statement (verified: the SELECT runs
-separately). The port returns the block at its terminating `END` chunk, yielding
-`[Create, Select]`; a well-formed body is unchanged (its `END` is the last chunk). Applies to
-every `parseBlock` (a top-level `WHILE (…) BEGIN … END; SELECT 2` also splits). Three adjacent
-divergences in the same machinery: an empty body (`BEGIN END`, valid MySQL) terminates the same
-way instead of upstream's `Column(END)` mis-parse; a bare top-level `ELSE` chunk is a parse error
-(real MySQL/PG reject it) instead of upstream's silent drop of every later statement; and a WHILE
-body without its own `BEGIN` is the single following statement (T-SQL's actual binding), so it
-cannot steal the enclosing routine's `END`. `parser.go` `parseBatchStatements`/`parseWhileBlock`;
-test `TestBlockEndTerminates`.
+### 1.18 MySQL compound-statement grammar; routine bodies are one statement
+Upstream parses no procedural grammar: `DECLARE` mangles into an Alias, a routine's
+`END; SELECT 2` folds the trailing statement into the routine's Block, and truncated
+definitions leave dangling `EndStatement` fragments. This port parses MySQL's compound
+statements STRUCTURALLY (`parser/mysql_compound.go`, reference manual §15.6, verified on real
+MySQL 8.0.46): `BEGIN…END`, `DECLARE` variables (exp.Declare)/handlers/conditions/cursors,
+`IF…THEN…ELSEIF…ELSE…END IF` (exp.IfBlock), `CASE…WHEN…END CASE` (exp.CaseBlock),
+`LOOP`/`REPEAT…UNTIL`/`WHILE…DO` (exp.LoopBlock/RepeatBlock/WhileBlock), statement labels,
+ITERATE/LEAVE/DO, SIGNAL/RESIGNAL/GET DIAGNOSTICS, and routine parameter modes
+(`IN`/`OUT`/`INOUT`). Grammar extension (upstream parses none of it).
 
-The same rule covers every routine form, not just PROCEDURE — upstream leaves the others' `END`
-as a dangling top-level `EndStatement` fragment (a truncated definition plus a bare `END`, each
-"authorized/executed" as a statement the user never wrote):
-- MySQL `CREATE FUNCTION … BEGIN … END` takes the block path when a `BEGIN` body is present
-  (upstream: single-statement body, dangling `END`).
-- A CREATE the structured parse degrades (MySQL TRIGGER/DECLARE bodies, bare
-  IF/LOOP/REPEAT/WHILE/CASE routine bodies, PG `BEGIN ATOMIC` —
-  the block's first statement now gets the trailing-token check, so an unconsumable body
-  statement degrades the whole definition instead of a mangled structured AST) becomes a
-  `Command` extended through the block's balancing `END` chunk (`parseCreateAsCommand` +
-  `blockStack`: a KIND-MATCHED stack, not a counter — openers push their kind, every
-  `END [kw]` must pop exactly that kind, mismatch → parse error. Opener gating is
-  contextual: bare IF/LOOP/REPEAT/WHILE only at statement starts (chunk start, after
-  THEN/ELSE/BEGIN/ROW/DO/label-COLON; header positions like the signature `)` and routine
-  characteristics only while no block is open), a leader before `(` only when the balanced
-  paren group is followed by THEN/DO, and CASE only with a WHEN ahead. Identifiers named
-  if/loop/case, `IF NOT EXISTS`, `IF(…)`/`DO IF(…)` calls, and subquery aliases never
-  inflate the stack, so a later matching `END <kw>` cannot rebalance a frame that was
-  never opened. The remaining ambiguity direction is FAIL CLOSED, never merge). PG 16 executes `BEGIN ATOMIC … END; SELECT 2` as exactly
-  [definition, SELECT].
-- The stack is token-level, so ambiguity FAILS CLOSED, never merges: a non-empty or
-  mismatched stack at batch end (unterminated body, a closer against the wrong kind)
-  is a parse error, and a residual bare top-level `END` chunk is a parse
-  error under MySQL (real MySQL 8.0 rejects it) rather than upstream's `EndStatement`
-  fragment. The same rule holds on the structured path: a `BEGIN` body that exhausts the
-  batch without its terminating `END` (`CREATE PROCEDURE p() BEGIN SELECT 1;`) is a parse
-  error in EVERY dialect (MySQL rejects it with 1064, PG's `BEGIN ATOMIC` likewise requires
-  `END`; upstream silently truncates) — a body without `BEGIN` (`CREATE PROCEDURE p()
-  SELECT 1`, a valid single-statement routine) is unaffected. A bare `END` as the whole
-  MySQL batch is a parse error too (real MySQL 1064; upstream mis-parses `Column(END)`). Under postgres a top-level bare `END` chunk
-  is COMMIT wherever it appears (`BEGIN; SELECT 1; END` → [Transaction, Select, Commit],
-  matching real PG 16; upstream leaves the mid-batch one an `EndStatement`).
-Tests `TestRoutineBodyOneStatement`, `TestDegradedCreateFailsClosed`,
-`TestQualifiedKeywordNotBlockToken`, `TestUnsupportedBodyStatementDegradesWhole`.
+Consequences, all engine-verified:
+- Every routine definition is exactly ONE statement; trailing batch statements are separate.
+  PG `BEGIN ATOMIC` bodies parse structurally too (`begin="ATOMIC"` on the Create).
+- Terminators match exactly: `END IF` against a BEGIN, a mismatched `END <kw>`, an
+  unterminated body, and any MySQL top-level statement leading with `END` are parse errors
+  (real MySQL 1064) — never truncated fragments or silently merged statements.
+- A bare top-level `ELSE` chunk is a parse error (upstream silently DROPS all later
+  statements). Under postgres a bare `END` chunk is COMMIT wherever it appears (real PG 16).
+- Every nonempty body statement requires its terminating `;` before the block's `END`
+  (`BEGIN SELECT 1 END` is real MySQL 1064). With the `;` present, an unquoted identifier
+  spelled `end` is an ordinary column reference (`SET @a = end;`), matching the engine.
+- The merge invariant (a statement following a routine is never inside the routine's span)
+  is enforced by `TestBlockExtentInvariantFuzz` (3000 generated adversarial bodies; fails on
+  v0.28.3, which had a live WHILE merge).
+Tests `procedure_block_test.go`, `statement_span_test.go`, `block_stack_fuzz_test.go`.
 
 ---
 

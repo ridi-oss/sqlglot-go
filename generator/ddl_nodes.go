@@ -209,7 +209,15 @@ func (g *Generator) triggerPropertiesSQL(e expressions.Expression) string {
 	if when := g.sqlKey(e, "when"); when != "" {
 		parts = append(parts, "WHEN ("+when+")")
 	}
-	parts = append(parts, g.sqlKey(e, "execute"))
+	execute := asExpression(e.Arg("execute"))
+	if execute != nil && execute.Kind() == expressions.KindBlock {
+		// A MySQL inline trigger body (grammar extension): a Block renders as
+		// `BEGIN <stmts>; END` — blockSQL joins with "; " and the trailing EndStatement
+		// child supplies the END, so only the BEGIN prefix is added here.
+		parts = append(parts, "BEGIN "+g.gen(execute))
+	} else {
+		parts = append(parts, g.sqlKey(e, "execute"))
+	}
 	return strings.Join(parts, g.sep())
 }
 

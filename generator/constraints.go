@@ -123,7 +123,7 @@ func (g *Generator) inOutColumnConstraintSQL(e expressions.Expression) string {
 	input := boolValue(e.Arg("input_"))
 	output := boolValue(e.Arg("output"))
 	if input && output {
-		if g.dialect.Name == "postgres" {
+		if g.dialect.Name == "postgres" || g.dialect.Name == "mysql" {
 			return "INOUT"
 		}
 		return "IN OUT"

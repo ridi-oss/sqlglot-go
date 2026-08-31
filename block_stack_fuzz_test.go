@@ -86,5 +86,29 @@ func TestBlockExtentInvariantFuzz(t *testing.T) {
 		if span, ok := statements[0].SpanText(); ok && strings.Contains(span, sentinel) {
 			t.Fatalf("MERGE: trailing statement absorbed into routine span\nsql:  %s\nspan: %s", sql, span)
 		}
+		// Escape (the dual fail-open): body text surfacing as extra top-level statements.
+		// A successful parse of `<routine>; <sentinel>` is exactly those two statements.
+		if len(statements) != 2 {
+			t.Fatalf("ESCAPE: %d statements from routine+sentinel\nsql: %s", len(statements), sql)
+		}
+	}
+
+	// Unterminated bodies (the closing END missing): the routine is invalid (real MySQL
+	// 1064), and the sentinel written INSIDE it must never execute as its own statement.
+	for i := 0; i < 1000; i++ {
+		open := []string{"BEGIN ", "IF @a THEN ", "lbl: LOOP ", "WHILE @x DO ", "CASE @x WHEN 1 THEN "}[rng.Intn(5)]
+		sql := headers[rng.Intn(len(headers))] + " " + open + stmts[rng.Intn(len(stmts))] + "; " + sentinel
+		statements, err := sqlglot.Parse(sql, "mysql")
+		if err != nil {
+			continue
+		}
+		for _, s := range statements[1:] {
+			if s == nil {
+				continue
+			}
+			if span, ok := s.SpanText(); ok && strings.Contains(span, sentinel) {
+				t.Fatalf("ESCAPE: unterminated body emitted its content as a top-level statement\nsql: %s", sql)
+			}
+		}
 	}
 }

@@ -54,6 +54,15 @@ func (p *Parser) parseProperty() exp.Expression {
 	if p.match(tokens.DEFAULT) && p.matchTexts(p.propertyParserKeys()) {
 		return p.propertyParser(stringsUpper(p.prev.Text))(p, true)
 	}
+	// A MySQL compound-statement leader here is a routine BODY starting (grammar
+	// extension, mysql_compound.go) — never a key=value property; without this stop the
+	// key parse would route `IF 1 THEN ...` into the IF() function parser and error.
+	// CASE has its own token type; a bare CASE statement body stops the same way.
+	if p.dialect.Name == "mysql" &&
+		((p.curr.TokenType == tokens.VAR && compoundWords[stringsUpper(p.curr.Text)]) ||
+			p.curr.TokenType == tokens.CASE) {
+		return nil
+	}
 	return p.parseKeyValueProperty(nil)
 }
 

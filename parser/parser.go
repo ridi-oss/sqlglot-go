@@ -438,6 +438,12 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 		// statement parser (parseEndTransaction -> Commit) instead of this EndStatement fast
 		// path: real PG 16 executes `BEGIN; SELECT 1; END` with END as COMMIT; upstream
 		// returns [Transaction, Select, EndStatement]. See DEVIATIONS §1.18.
+		if !sepFirstStatement && p.dialect.Name == "mysql" && p.curr.TokenType == tokens.END {
+			// Real MySQL rejects any statement leading with END (error 1064) — bare or
+			// suffixed (`END CASE`); a fragment here is truncation residue.
+			p.raiseError("Unexpected END")
+			p.checkErrors()
+		}
 		isBareEnd := !p.next.IsValid() && p.curr.TokenType == tokens.END &&
 			(sepFirstStatement || p.dialect.Name != "postgres")
 		if isBareEnd && (len(expressions) > 0 || (!sepFirstStatement && p.dialect.Name == "mysql")) &&
@@ -497,9 +503,90 @@ func (p *Parser) parseCondition() exp.Expression {
 // beganAlready: the caller consumed the body's BEGIN itself (parseCreateFunction), so the
 // unterminated-block check applies even though this call won't match one.
 func (p *Parser) parseBlock(beganAlready bool) exp.Expression {
+	// Under mysql the body statements go through the compound-statement grammar
+	// (parser/mysql_compound.go): DECLARE/IF/CASE/LOOP/REPEAT/WHILE and labels parse
+	// structurally, and the block's own END is matched exactly. Other dialects keep the
+	// plain per-chunk statement path (PG BEGIN ATOMIC bodies are ordinary SQL).
+	if p.dialect.Name == "mysql" {
+		// A bare body (no BEGIN at the current position and none consumed by the caller)
+		// is exactly ONE compound statement (§13.1.17: routine_body is a single statement,
+		// possibly compound): parse it and stop — consuming further chunks would absorb
+		// the batch's following statements.
+		if !beganAlready && p.curr.TokenType != tokens.BEGIN {
+			stmt := p.parseCompoundStatement()
+			return p.expression(exp.Block(exp.Args{
+				"expressions": []exp.Expression{stmt},
+			}), nil, nil)
+		}
+		return p.parseMySQLBeginBlock(beganAlready, "")
+	}
 	return p.expression(exp.Block(exp.Args{
 		"expressions": p.parseBatchStatements(p.parseStatement, true, beganAlready),
 	}), nil, nil)
+}
+
+// parseMySQLBeginBlock parses `BEGIN <compound stmts> END` under the MySQL compound
+// grammar (mysql_compound.go): statements via parseCompoundStatement, terminated by a
+// chunk-leading bare END — a suffixed closer (`END IF` against this BEGIN) is a
+// mismatched terminator and errors, never an absorbed alias.
+func (p *Parser) parseMySQLBeginBlock(beganAlready bool, label string) exp.Expression {
+	if !beganAlready && !p.match(tokens.BEGIN) {
+		p.raiseError("Expected BEGIN")
+		p.checkErrors()
+		return nil
+	}
+	var body []exp.Expression
+	for {
+		if p.curr.TokenType == tokens.END {
+			p.advance()
+			// A construct-keyword suffix means this END closes something the grammar
+			// didn't open here — mismatched terminator.
+			if p.curr.TokenType == tokens.VAR {
+				switch stringsUpper(p.curr.Text) {
+				case "IF", "LOOP", "REPEAT", "WHILE":
+					p.raiseError("Mismatched END " + stringsUpper(p.curr.Text) + " closing a BEGIN block")
+					p.checkErrors()
+					return nil
+				}
+			}
+			if p.curr.TokenType == tokens.CASE {
+				p.raiseError("Mismatched END CASE closing a BEGIN block")
+				p.checkErrors()
+				return nil
+			}
+			// Optional end label: must equal the opening label (real MySQL 1310).
+			if p.curr.TokenType == tokens.VAR && !compoundWords[stringsUpper(p.curr.Text)] {
+				if p.curr.Text != label {
+					p.raiseError("End-label " + p.curr.Text + " without match")
+					p.checkErrors()
+					return nil
+				}
+				p.advance()
+			}
+			body = append(body, p.expression(exp.EndStatement(nil), nil, nil))
+			return p.expression(exp.Block(exp.Args{"expressions": body, "label": labelArg(label)}), nil, nil)
+		}
+		stmt := p.parseCompoundStatement()
+		if stmt != nil {
+			body = append(body, stmt)
+		}
+		// `BEGIN <stmt> END` with no `;` before END: the terminator is the same chunk's
+		// remaining token — loop back to the END branch without a chunk advance. The
+		// terminator may sit at curr (statement fully parsed) or be the chunk's LAST
+		// unconsumed token after an expression statement stopped before it.
+		if p.curr.TokenType == tokens.END {
+			continue
+		}
+		if p.index < p.tokensSize {
+			p.raiseError("Invalid expression / Unexpected token")
+			p.checkErrors()
+		}
+		if !p.nextBodyChunk() {
+			p.raiseError("Unterminated BEGIN block")
+			p.checkErrors()
+			return nil
+		}
+	}
 }
 
 // parseWhileBlock ports _parse_whileblock (parser.py:2278-2281). divergence (§1.18): a body
