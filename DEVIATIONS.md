@@ -151,7 +151,14 @@ as a dangling top-level `EndStatement` fragment (a truncated definition plus a b
   positive at batch end (unterminated body, or a bare identifier named `begin`/`case`
   inflating the count) is a parse error, and a residual bare top-level `END` chunk is a parse
   error under MySQL (real MySQL 8.0 rejects it) rather than upstream's `EndStatement`
-  fragment.
+  fragment. The same rule holds on the structured path: a `BEGIN` body that exhausts the
+  batch without its terminating `END` (`CREATE PROCEDURE p() BEGIN SELECT 1;`) is a parse
+  error in EVERY dialect (MySQL rejects it with 1064, PG's `BEGIN ATOMIC` likewise requires
+  `END`; upstream silently truncates) — a body without `BEGIN` (`CREATE PROCEDURE p()
+  SELECT 1`, a valid single-statement routine) is unaffected. A bare `END` as the whole
+  MySQL batch is a parse error too (real MySQL 1064; upstream mis-parses `Column(END)`). Under postgres a top-level bare `END` chunk
+  is COMMIT wherever it appears (`BEGIN; SELECT 1; END` → [Transaction, Select, Commit],
+  matching real PG 16; upstream leaves the mid-batch one an `EndStatement`).
 Tests `TestRoutineBodyOneStatement`, `TestDegradedCreateFailsClosed`,
 `TestQualifiedKeywordNotBlockToken`, `TestUnsupportedBodyStatementDegradesWhole`.
 
