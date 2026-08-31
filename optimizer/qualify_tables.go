@@ -213,7 +213,7 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 			}
 
 			setAlias(derivedTable, canonicalAliases, "", scope, false, nil)
-			if pivot, ok := seqGet(expressionsFor(derivedTable, "pivots"), 0); ok {
+			if pivot, ok := seqGet(expressionsFor(derivedTable, "pivots"), -1); ok {
 				setAlias(pivot, canonicalAliases, "", nil, false, nil)
 			}
 		}
@@ -224,7 +224,7 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 			source := scope.Sources[name]
 			if table, ok := source.(exp.Expression); ok && table != nil && table.Kind() == exp.KindTable {
 				isRealTableSource := name != ""
-				if pivot, ok := seqGet(expressionsFor(table, "pivots"), 0); ok && pivot != nil {
+				if pivot, ok := seqGet(expressionsFor(table, "pivots"), -1); ok && pivot != nil {
 					name = table.Name()
 				}
 
@@ -257,7 +257,7 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 					}
 				}
 
-				if pivot, ok := seqGet(expressionsFor(table, "pivots"), 0); ok && pivot != nil {
+				if pivot, ok := seqGet(expressionsFor(table, "pivots"), -1); ok && pivot != nil {
 					targetAlias := ""
 					if unpivot, _ := pivot.Arg("unpivot").(bool); unpivot {
 						targetAlias = table.Alias()

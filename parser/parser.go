@@ -3152,6 +3152,8 @@ func (p *Parser) parseWith(skipWithToken bool) exp.Expression {
 			break
 		}
 		p.match(tokens.WITH)
+		// v30.17.0 (parser.py:4193): RECURSIVE may appear before any CTE in the list.
+		recursive = p.match(tokens.RECURSIVE) || recursive
 		lastComments = p.prevComments
 	}
 	args := exp.Args{"expressions": expressions, "search": p.parseRecursiveWithSearch()}

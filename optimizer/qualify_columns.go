@@ -92,6 +92,9 @@ func qualifyColumns(expression exp.Expression, schemaArg schema.SchemaType, expa
 
 		convertColumnsToDots(scope, resolver)
 		qualifyColumnsInScope(scope, resolver, allowPartialQualification)
+		// v30.17.0 (qualify_columns.py:99-101): a column just qualified in place may have
+		// been cached as external — refresh the classification caches.
+		scope.clearCache()
 
 		if !s.Empty() && expandAliasRefs {
 			expandAliasRefsInScope(scope, resolver, d, false)
@@ -160,6 +163,23 @@ func popTableColumnAliases(derivedTables []exp.Expression) {
 	}
 }
 
+
+// orderedColumnNames returns the accumulated USING-candidate columns in first-seen source
+// order, mirroring upstream's dict insertion order for the NATURAL-join expansion.
+func orderedColumnNames(columns map[string]string, ordered []string, resolver *Resolver) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, sourceName := range ordered {
+		for _, columnName := range resolver.GetSourceColumns(sourceName) {
+			if columns[columnName] != "" && !seen[columnName] {
+				seen[columnName] = true
+				out = append(out, columnName)
+			}
+		}
+	}
+	return out
+}
+
 func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 	columns := map[string]string{}
 	updateSourceColumns := func(sourceName string) {
@@ -193,7 +213,7 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 	columnTables := map[string]*orderedNameSet{}
 	hasUsing := false
 	for _, join := range joins {
-		if len(expressionsFor(join, "using")) > 0 {
+		if len(expressionsFor(join, "using")) > 0 || join.Text("method") == "NATURAL" {
 			hasUsing = true
 			break
 		}
@@ -219,11 +239,30 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 		ordered = append(ordered, joinTable)
 
 		using := expressionsFor(join, "using")
+		joinColumns := resolver.GetSourceColumns(joinTable)
+
+		// v30.17.0 (qualify_columns.py:247-257): a NATURAL JOIN is a USING join over the
+		// columns common to both sides; when those can't be determined, NATURAL stays.
+		if len(using) == 0 && join.Text("method") == "NATURAL" {
+			leftColumns := make([]string, 0, len(columns))
+			for name := range columns {
+				leftColumns = append(leftColumns, name)
+			}
+			if len(columns) > 0 && columns["*"] == "" && len(joinColumns) > 0 && !containsString(joinColumns, "*") {
+				for _, columnName := range orderedColumnNames(columns, ordered, resolver) {
+					if containsString(joinColumns, columnName) {
+						using = append(using, exp.ToIdentifier(columnName))
+					}
+				}
+				if len(using) > 0 {
+					join.Set("method", nil)
+				}
+			}
+			_ = leftColumns
+		}
 		if len(using) == 0 {
 			continue
 		}
-
-		joinColumns := resolver.GetSourceColumns(joinTable)
 		var conditions []exp.Expression
 		usingIdentifierCount := len(using)
 		isSemiOrAntiJoin := isSemiOrAntiJoin(join)
@@ -345,7 +384,10 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 			aliasExpr := alias.expression
 
 			if hasAlias && aliasExpr != nil {
-				skipReplace = aliasExpr.Find(exp.TraitAggFunc) != nil && findAncestorTrait(column, exp.TraitAggFunc) != nil && !ancestorBeforeSelectIsWindow(column)
+				// v30.17.0 (qualify_columns.py:369-380): an aggregate alias must not expand
+				// into a GROUP BY, nor into another (non-window) aggregate.
+				skipReplace = aliasExpr.Find(exp.TraitAggFunc) != nil &&
+					(isGroupBy || (findAncestorTrait(column, exp.TraitAggFunc) != nil && !ancestorBeforeSelectIsWindow(column)))
 
 				if (isHaving || isQualify) && dialect.ProjectionAliasesShadowSourceNames {
 					for _, node := range aliasExpr.FindAll(exp.KindColumn) {
@@ -397,16 +439,20 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 	}
 
 	parentScope := scope
+	childScope := scope
 	onRightSubTree := false
 	for parentScope != nil && !parentScope.IsCTE() {
+		childScope = parentScope
 		parentScope = parentScope.Parent
 		if parentScope != nil && parentScope.Expression != nil && parentScope.Expression.Kind() == exp.KindUnion {
-			// Faithful to sqlglot v30.12.0 (qualify_columns.py:402): the union's right operand is
-			// compared against the union itself, which can never hold, so onRightSubTree is always
-			// false and the recursive-CTE column-pop below is dead in the pinned reference. Kept
-			// 1:1 for fidelity rather than "fixing" the upstream bug (would be an untracked divergence).
-			right := parentScope.Expression.Right()
-			onRightSubTree = right != nil && right == parentScope.Expression
+			// v30.17.0 (qualify_columns.py:431-436) fixed the dead comparison: the union's
+			// right ARG (unnested, to see through parenthesized operands) is compared against
+			// the CHILD scope's expression.
+			right := asExpression(parentScope.Expression.Arg("expression"))
+			if right != nil {
+				right = right.Unnest()
+			}
+			onRightSubTree = right != nil && childScope != nil && right == childScope.Expression
 		}
 	}
 
@@ -669,7 +715,7 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 
 		if columnTable == "" {
 			if len(scope.Pivots()) > 0 && column.FindAncestor(exp.KindPivot) == nil {
-				column.Set("table", exp.ToIdentifier(scope.Pivots()[0].Alias()))
+				column.Set("table", exp.ToIdentifier(scope.Pivots()[len(scope.Pivots())-1].Alias()))
 				continue
 			}
 

@@ -889,7 +889,7 @@ var argTypes = map[Kind][]argSpec{
 	KindCreate:             {{"with_", false}, {"this", true}, {"kind", true}, {"replace", false}, {"refresh", false}, {"unique", false}, {"expression", false}, {"exists", false}, {"properties", false}, {"indexes", false}, {"no_schema_binding", false}, {"begin", false}, {"clone", false}, {"concurrently", false}, {"clustered", false}},
 	KindSchema:             {{"this", false}, {"expressions", false}},
 	KindCommand:            {{"this", true}, {"expression", false}},
-	KindPivot:              {{"this", false}, {"alias", false}, {"expressions", false}, {"fields", false}, {"unpivot", false}, {"using", false}, {"group", false}, {"columns", false}, {"include_nulls", false}, {"default_on_null", false}, {"into", false}, {"with_", false}, {"identify_pivot_strings", false}, {"prefixed_pivot_columns", false}, {"pivot_column_naming", false}},
+	KindPivot:              {{"this", false}, {"alias", false}, {"expressions", false}, {"fields", false}, {"unpivot", false}, {"value_columns_first", false}, {"using", false}, {"group", false}, {"columns", false}, {"include_nulls", false}, {"default_on_null", false}, {"into", false}, {"with_", false}, {"identify_pivot_strings", false}, {"prefixed_pivot_columns", false}, {"pivot_column_naming", false}},
 	KindLateral:            {{"this", true}, {"view", false}, {"outer", false}, {"alias", false}, {"cross_apply", false}, {"ordinality", false}},
 	KindValues:             {{"expressions", true}, {"alias", false}, {"order", false}, {"limit", false}, {"offset", false}},
 	KindColumnDef:          {{"this", true}, {"kind", false}, {"constraints", false}, {"exists", false}, {"position", false}, {"default", false}, {"output", false}, {"ordinality", false}},

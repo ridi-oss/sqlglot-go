@@ -777,7 +777,7 @@ func bindDMLSources(scope *Scope, candidates []dmlSourceCandidate, queryScopes m
 				if cteSource, ok := scope.Sources[tableName]; ok {
 					pivots := expressionsFor(expression, "pivots")
 					if len(pivots) > 0 {
-						sourceName = pivots[0].Alias()
+						sourceName = pivots[len(pivots)-1].Alias()
 					} else {
 						source = cteSource
 					}
@@ -846,7 +846,7 @@ func _traverseTables(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 			if source, ok := scope.Sources[tableName]; ok && expression.SchemaName() == "" {
 				pivots := expressionsFor(expression, "pivots")
 				if len(pivots) > 0 {
-					key = pivots[0].Alias()
+					key = pivots[len(pivots)-1].Alias()
 					sources[key] = expression
 				} else {
 					key = sourceName

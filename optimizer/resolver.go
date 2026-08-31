@@ -136,8 +136,10 @@ func (r *Resolver) GetSourceColumnsFromSetOp(expression exp.Expression) []string
 	} else if expression.Text("side") != "" || expression.Text("kind") != "" {
 		side := expression.Text("side")
 		kind := expression.Text("kind")
-		left := r.GetSourceColumnsFromSetOp(expression.Left())
-		right := r.GetSourceColumnsFromSetOp(expression.Right())
+		// v30.17.0 (resolver.py:119-120): access args directly — set-op operands aren't
+		// guaranteed Query nodes (VALUES (1) UNION ALL SELECT 1), where .Left/.Right differ.
+		left := r.GetSourceColumnsFromSetOp(asExpression(expression.Arg("this")))
+		right := r.GetSourceColumnsFromSetOp(asExpression(expression.Arg("expression")))
 		switch side {
 		case "LEFT":
 			columns = left
