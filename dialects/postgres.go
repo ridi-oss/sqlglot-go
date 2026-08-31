@@ -43,6 +43,10 @@ func Postgres() *Dialect {
 	d.CopyHasIntoKeyword = false
 	// parsers/postgres.py:191 JSON_ARROWS_REQUIRE_JSON_TYPE = True.
 	d.JSONArrowsRequireJSONType = true
+	// parsers/postgres.py:192-219 (v30.17.0): JSON operators are binary-tier, not accessors.
+	d.JSONOperatorsAreBinary = true
+	// dialects/postgres.py:16 NORMALIZE_NOT_NULL = False: NOTNULL keeps Is(negate=True).
+	d.NormalizeNotNull = false
 	// generators/postgres.py:245 JSON_TYPE_REQUIRED_FOR_EXTRACTION = True.
 	d.JSONTypeRequiredForExtraction = true
 	// TODO(slice 5b): DEFAULT_FUNCTIONS_COLUMN_NAMES (needs KindExplodingGenerateSeries + FUNCTIONS override).

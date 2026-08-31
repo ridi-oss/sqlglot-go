@@ -16,6 +16,12 @@ import (
 func (g *Generator) globSQL(e expressions.Expression) string     { return g.binary(e, "GLOB") }
 func (g *Generator) overlapsSQL(e expressions.Expression) string { return g.binary(e, "OVERLAPS") }
 func (g *Generator) adjacentSQL(e expressions.Expression) string { return g.binary(e, "-|-") }
+func (g *Generator) extendsLeftSQL(e expressions.Expression) string {
+	return g.binary(e, "&<")
+}
+func (g *Generator) extendsRightSQL(e expressions.Expression) string {
+	return g.binary(e, "&>")
+}
 func (g *Generator) arrayContainsAllSQL(e expressions.Expression) string {
 	return g.binary(e, "@>")
 }
@@ -139,6 +145,8 @@ func init() {
 	dispatch[expressions.KindRegexpLike] = (*Generator).regexpLikeSQL
 	dispatch[expressions.KindRegexpILike] = (*Generator).regexpILikeSQL
 	dispatch[expressions.KindAdjacent] = (*Generator).adjacentSQL
+	dispatch[expressions.KindExtendsLeft] = (*Generator).extendsLeftSQL
+	dispatch[expressions.KindExtendsRight] = (*Generator).extendsRightSQL
 	dispatch[expressions.KindArrayContainsAll] = (*Generator).arrayContainsAllSQL
 	dispatch[expressions.KindArrayContainedBy] = (*Generator).arrayContainedBySQL
 	dispatch[expressions.KindArrayOverlaps] = (*Generator).arrayOverlapsSQL

@@ -87,8 +87,6 @@ func Hive() *Dialect {
 		"MINUS":           tokens.EXCEPT,
 		"MSCK REPAIR":     tokens.COMMAND,
 		"REFRESH":         tokens.REFRESH,
-		"TIMESTAMP AS OF": tokens.TIMESTAMP_SNAPSHOT,
-		"VERSION AS OF":   tokens.VERSION_SNAPSHOT,
 		"SERDEPROPERTIES": tokens.SERDE_PROPERTIES,
 	} {
 		cfg.Keywords[keyword] = tokenType

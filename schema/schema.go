@@ -532,6 +532,16 @@ func normalizeName(identifier any, d *dialects.Dialect, isTable bool, normalize 
 		id = exp.ParseIdentifier(v, d)
 	case exp.Expression:
 		id = v
+		if normalize {
+			// schema.py:699-700 (v30.17.0): copy so normalization never mutates the caller's
+			// node. The copy keeps the original's parent linkage (Go-only) because the MySQL
+			// lctn strategies are role-aware — they read the identifier's parent to decide
+			// whether it is relation-level (DEVIATIONS §1.2); a detached copy would fold it.
+			id = v.Copy()
+			if parent := v.Parent(); parent != nil {
+				id.SetParent(parent, v.ArgKey(), -1)
+			}
+		}
 	default:
 		return nil, fmt.Errorf("invalid identifier: %T", identifier)
 	}

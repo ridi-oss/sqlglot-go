@@ -92,7 +92,11 @@ func (g *Generator) dropSQL(e expressions.Expression) string {
 	if boolValue(e.Arg("sync")) {
 		sync = " SYNC"
 	}
-	return "DROP" + temporary + materialized + iceberg + " " + kind + concurrentlySQL + existsSQL + this + onCluster + exprs + cascade + restrict + constraints + purge + sync
+	force := ""
+	if boolValue(e.Arg("force")) {
+		force = " FORCE"
+	}
+	return "DROP" + temporary + materialized + iceberg + " " + kind + concurrentlySQL + existsSQL + this + onCluster + exprs + cascade + restrict + constraints + purge + sync + force
 }
 
 // alterColumnSQL ports altercolumn_sql (generator.py:4157-4191) and the MySQL override
@@ -102,9 +106,32 @@ func (g *Generator) alterColumnSQL(e expressions.Expression) string {
 	this := g.sqlKey(e, "this")
 	dtype := g.sqlKey(e, "dtype")
 
+	// v30.17.0 (generator.py:4221-4227): IF EXISTS renders only where supported.
+	exists := ""
+	if boolValue(e.Arg("exists")) {
+		if g.dialect.SupportsAlterColumnIfExists {
+			exists = " IF EXISTS"
+		} else {
+			g.unsupported("ALTER COLUMN IF EXISTS is not supported by this dialect")
+		}
+	}
+	// v30.17.0 (generator.py:4266-4275): nullability together with a type change.
+	nullConstraint := ""
+	if allowNull := e.Arg("allow_null"); dtype != "" && allowNull != nil {
+		if g.dialect.SupportsAlterColumnNullability {
+			if boolValue(allowNull) {
+				nullConstraint = " NULL"
+			} else {
+				nullConstraint = " NOT NULL"
+			}
+		} else {
+			g.unsupported("ALTER COLUMN cannot set nullability along with a type")
+		}
+	}
+
 	if dtype != "" {
 		if g.dialect.Name == "mysql" {
-			return "MODIFY COLUMN " + this + " " + dtype
+			return "MODIFY COLUMN " + this + " " + dtype + nullConstraint
 		}
 
 		collate := g.sqlKey(e, "collate")
@@ -119,19 +146,19 @@ func (g *Generator) alterColumnSQL(e expressions.Expression) string {
 		if g.dialect.AlterSetType != "" {
 			alterSetType = g.dialect.AlterSetType + " "
 		}
-		return "ALTER COLUMN " + this + " " + alterSetType + dtype + collate + using
+		return "ALTER COLUMN" + exists + " " + this + " " + alterSetType + dtype + collate + using + nullConstraint
 	}
 
 	if def := g.sqlKey(e, "default"); def != "" {
-		return "ALTER COLUMN " + this + " SET DEFAULT " + def
+		return "ALTER COLUMN" + exists + " " + this + " SET DEFAULT " + def
 	}
 
 	if comment := g.sqlKey(e, "comment"); comment != "" {
-		return "ALTER COLUMN " + this + " COMMENT " + comment
+		return "ALTER COLUMN" + exists + " " + this + " COMMENT " + comment
 	}
 
 	if visible := e.Arg("visible"); truthy(visible) {
-		return "ALTER COLUMN " + this + " SET " + stringValue(visible)
+		return "ALTER COLUMN" + exists + " " + this + " SET " + stringValue(visible)
 	}
 
 	allowNull := e.Arg("allow_null")
@@ -144,9 +171,9 @@ func (g *Generator) alterColumnSQL(e expressions.Expression) string {
 		if boolValue(drop) {
 			keyword = "DROP"
 		}
-		return "ALTER COLUMN " + this + " " + keyword + " NOT NULL"
+		return "ALTER COLUMN" + exists + " " + this + " " + keyword + " NOT NULL"
 	}
-	return "ALTER COLUMN " + this + " DROP DEFAULT"
+	return "ALTER COLUMN" + exists + " " + this + " DROP DEFAULT"
 }
 
 // modifyColumnSQL ports modifycolumn_sql (generator.py:4193-4202).

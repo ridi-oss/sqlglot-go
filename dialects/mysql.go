@@ -73,6 +73,8 @@ func parseMySQLVersion(value string) (int, error) {
 func MySQL() *Dialect {
 	d := Base()
 	d.Name = "mysql"
+	// generators/mysql.py:118 SUPPORTS_ALTER_COLUMN_NULLABILITY = True.
+	d.SupportsAlterColumnNullability = true
 	d.QuoteStart = "'"
 	d.QuoteEnd = "'"
 	d.IdentifierStart = "`"
@@ -141,6 +143,12 @@ func MySQL() *Dialect {
 		"SCHEMA":           exp.FromArgListFunc(exp.KindCurrentSchema),
 		"INSTR":            exp.FromArgListFunc(exp.KindStrPosition),
 		"TIME_STR_TO_UNIX": exp.FromArgListFunc(exp.KindTimeStrToUnix),
+		// parsers/mysql.py:108-110 (v30.17.0): MySQL DATEDIFF counts date-part boundaries.
+		"DATEDIFF": func(args []exp.Expression) exp.Expression {
+			return exp.New(exp.KindDateDiff, exp.Args{
+				"this": hiveSeqGet(args, 0), "expression": hiveSeqGet(args, 1), "date_part_boundary": true,
+			})
+		},
 	}
 
 	for _, unit := range []string{

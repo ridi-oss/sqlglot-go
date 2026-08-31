@@ -247,28 +247,35 @@ func (p *Parser) parseAlterTableAlter() exp.Expression {
 	// Many dialects support the ALTER [COLUMN] syntax, so if there is no keyword after
 	// ALTER we default to parsing this statement.
 	p.match(tokens.COLUMN)
+	exists := p.parseExists(false)
 	column := p.parseField(true, nil, false)
+	withExists := func(args exp.Args) exp.Expression {
+		if b, ok := exists.(bool); ok && b {
+			args["exists"] = true
+		}
+		return p.expression(exp.AlterColumn(args), nil, nil)
+	}
 
 	if p.matchPair(tokens.DROP, tokens.DEFAULT, true) {
-		return p.expression(exp.AlterColumn(exp.Args{"this": column, "drop": true}), nil, nil)
+		return withExists(exp.Args{"this": column, "drop": true})
 	}
 	if p.matchPair(tokens.SET, tokens.DEFAULT, true) {
-		return p.expression(exp.AlterColumn(exp.Args{"this": column, "default": p.parseDisjunction()}), nil, nil)
+		return withExists(exp.Args{"this": column, "default": p.parseDisjunction()})
 	}
 	if p.match(tokens.COMMENT) {
-		return p.expression(exp.AlterColumn(exp.Args{"this": column, "comment": p.parseString()}), nil, nil)
+		return withExists(exp.Args{"this": column, "comment": p.parseString()})
 	}
 	if p.matchTextSeq("DROP", "NOT", "NULL") {
-		return p.expression(exp.AlterColumn(exp.Args{"this": column, "drop": true, "allow_null": true}), nil, nil)
+		return withExists(exp.Args{"this": column, "drop": true, "allow_null": true})
 	}
 	if p.matchTextSeq("SET", "NOT", "NULL") {
-		return p.expression(exp.AlterColumn(exp.Args{"this": column, "allow_null": false}), nil, nil)
+		return withExists(exp.Args{"this": column, "allow_null": false})
 	}
 	if p.matchTextSeq("SET", "VISIBLE") {
-		return p.expression(exp.AlterColumn(exp.Args{"this": column, "visible": "VISIBLE"}), nil, nil)
+		return withExists(exp.Args{"this": column, "visible": "VISIBLE"})
 	}
 	if p.matchTextSeq("SET", "INVISIBLE") {
-		return p.expression(exp.AlterColumn(exp.Args{"this": column, "visible": "INVISIBLE"}), nil, nil)
+		return withExists(exp.Args{"this": column, "visible": "INVISIBLE"})
 	}
 
 	p.matchTextSeq("SET", "DATA")
@@ -284,12 +291,16 @@ func (p *Parser) parseAlterTableAlter() exp.Expression {
 	if p.match(tokens.USING) {
 		using = p.parseDisjunction()
 	}
-	return p.expression(exp.AlterColumn(exp.Args{
+	// AlterColumn.allow_null WITH a dtype is generator-only (a programmatic AST can set
+	// it; SUPPORTS_ALTER_COLUMN_NULLABILITY gates rendering): upstream v30.17.0 does not
+	// PARSE a trailing [NOT] NULL here — the statement falls back to Command — so neither
+	// does the port (consuming it would silently drop nullability on unsupporting dialects).
+	return withExists(exp.Args{
 		"this":    column,
 		"dtype":   dtype,
 		"collate": collate,
 		"using":   using,
-	}), nil, nil)
+	})
 }
 
 // parseAlterTableAlterIndex ports parsers/mysql.py:561-571

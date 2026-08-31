@@ -61,20 +61,30 @@ func (p *Parser) parseInsert() exp.Expression {
 			this = p.parseInsertTable()
 		}
 	}
+	// MySQL's INSERT ... SET is normalized into the INSERT ... (cols) VALUES (vals) variant
+	// (parser.py:3616-3647, v30.17.0 — matched before RETURNING, every dialect).
+	var setValues exp.Expression
+	if p.match(tokens.SET) {
+		this, setValues = p.parseInsertSetValues(this)
+	}
 	returning := p.parseReturning()
 	byName := p.matchTextSeq("BY", "NAME")
 	exists := p.parseExists(false)
+	// v30.17.0 (parser.py:3655-3661): REPLACE WHERE <cond> | REPLACE USING (cols); a bare
+	// REPLACE is consumed and the source parse continues (INSERT INTO t REPLACE SELECT 1
+	// canonicalizes to INSERT INTO t SELECT 1 upstream).
 	var where exp.Expression
-	if p.matchPair(tokens.REPLACE, tokens.WHERE, true) {
-		where = p.parseDisjunction()
+	var replaceUsing []exp.Expression
+	if p.match(tokens.REPLACE) {
+		if p.match(tokens.WHERE) {
+			where = p.parseDisjunction()
+		} else if p.match(tokens.USING) {
+			replaceUsing = p.parseUsingIdentifiers()
+		}
 	}
 	default_ := p.matchTextSeq("DEFAULT", "VALUES")
-	var expression exp.Expression
-	if p.dialect.Name == "mysql" && p.match(tokens.SET) {
-		// mysql-insert-set divergence from parser.py:3486-3542: the pinned INSERT grammar
-		// does not consume SET; desugar it into the ordinary Schema + one-row Values shape.
-		this, expression = p.parseMySQLInsertSet(this, p.parseCsv(p.parseEquality))
-	} else {
+	expression := setValues
+	if expression == nil {
 		// These firstExpression calls evaluate their alternatives eagerly (unlike a
 		// short-circuit `or`), which is safe here only because the alternatives sit at
 		// non-overlapping token positions: parseDerivedTableValues/parseReturning consume
@@ -96,6 +106,7 @@ func (p *Parser) parseInsert() exp.Expression {
 		"by_name":     byName,
 		"exists":      exists,
 		"where":       where,
+		"using":       replaceUsing,
 		"default":     default_,
 		"expression":  expression,
 		"conflict":    conflict,
@@ -241,7 +252,11 @@ func (p *Parser) parseExists(not_ bool) any {
 
 func (p *Parser) parseVarFromOptions(options optionsType, raiseUnmatched bool) exp.Expression {
 	start := p.curr
-	if !start.IsValid() {
+	if !start.IsValid() || textMatchExcludedTokens[start.TokenType] {
+		// A quoted identifier or string is never an option keyword (parser.py:9576-9578).
+		if raiseUnmatched && start.IsValid() {
+			p.raiseError("Unknown option " + start.Text)
+		}
 		return nil
 	}
 	option := stringsUpper(start.Text)

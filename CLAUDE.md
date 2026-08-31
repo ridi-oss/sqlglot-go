@@ -11,7 +11,7 @@ This project's agent instructions live in **[AGENTS.md](./AGENTS.md)** — read 
   must land `go test ./...` green before the next.
 - **Verify every review finding against `.reference/` before acting on it.** During this port,
   reviewers surfaced both real bugs (e.g. `Replace`/`Pop` no-op on single-value args) and phantom
-  ones (a "missing guard" that v30.12.0 doesn't actually have). Confirm against the pinned Python
+  ones (a "missing guard" that v30.17.0 doesn't actually have). Confirm against the pinned Python
   source, then fix or reject with a one-line rationale.
 - Run `scripts/fetch-reference.sh` once to get the pinned Python source (`.reference/`, gitignored).
 - After any probe-path change, re-run parity: `go test ./probe/` (hermetic golden) and, with Python

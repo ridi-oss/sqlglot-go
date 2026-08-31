@@ -67,6 +67,10 @@ const (
 	KindSubquery
 	KindHaving
 	KindQualify
+	// KindConnect/KindPrior (query.py:526-531): START WITH ... CONNECT BY hierarchical
+	// query clause and its PRIOR operand marker.
+	KindConnect
+	KindPrior
 	KindCube
 	KindRollup
 	KindGroupingSets
@@ -486,6 +490,9 @@ const (
 	// KindAdjacent (core.py:2234, `class Adjacent(Expression, Binary)`): postgres
 	// range `-|-` operator.
 	KindAdjacent
+	// KindExtendsLeft/KindExtendsRight (core.py:2126,2130): postgres range `&<` / `&>`.
+	KindExtendsLeft
+	KindExtendsRight
 	// KindArrayContainsAll/KindArrayContainedBy/KindArrayOverlaps (array.py:113,117,131,
 	// all `Expression, Binary, Func`): postgres `@>`/`<@`/`&&` array operators.
 	KindArrayContainsAll
@@ -784,7 +791,7 @@ var argTypes = map[Kind][]argSpec{
 	KindBitwiseXor: {{"this", true}, {"expression", true}, {"padside", false}},
 	KindDPipe:      {{"this", true}, {"expression", true}, {"safe", false}},
 	KindBetween:    {{"this", true}, {"low", true}, {"high", true}, {"symmetric", false}},
-	KindIs:         {{"this", true}, {"expression", true}},
+	KindIs:         {{"this", true}, {"expression", true}, {"negate", false}},
 	KindLike:       {{"this", true}, {"expression", true}, {"negate", false}},
 	KindILike:      {{"this", true}, {"expression", true}, {"negate", false}},
 	// SimilarTo/Escape mirror Binary's default arg_types (parser.py:1623-1624): no "negate"
@@ -825,6 +832,8 @@ var argTypes = map[Kind][]argSpec{
 	KindSubquery:            withQueryModifiers(argSpec{"this", true}, argSpec{"alias", false}, argSpec{"with_", false}),
 	KindHaving:              {{"this", true}},
 	KindQualify:             {{"this", true}},
+	KindConnect:             {{"start", false}, {"connect", true}, {"nocycle", false}},
+	KindPrior:               defaultArgTypes,
 	KindCube:                {{"expressions", false}},
 	KindRollup:              {{"expressions", false}},
 	KindGroupingSets:        {{"expressions", true}},
@@ -873,7 +882,7 @@ var argTypes = map[Kind][]argSpec{
 	// The pinned .reference/sqlglot-v30.12.0/sqlglot/expressions/dml.py:195-215
 	// Insert has no "replace" arg. The mysql-replace extension appends it so
 	// existing Insert arg ordering stays stable.
-	KindInsert:     {{"hint", false}, {"with_", false}, {"is_function", false}, {"this", false}, {"expression", false}, {"conflict", false}, {"returning", false}, {"overwrite", false}, {"exists", false}, {"alternative", false}, {"where", false}, {"ignore", false}, {"by_name", false}, {"stored", false}, {"partition", false}, {"settings", false}, {"source", false}, {"default", false}, {"replace", false}},
+	KindInsert:     {{"hint", false}, {"with_", false}, {"is_function", false}, {"this", false}, {"expression", false}, {"conflict", false}, {"returning", false}, {"overwrite", false}, {"exists", false}, {"alternative", false}, {"where", false}, {"using", false}, {"ignore", false}, {"by_name", false}, {"stored", false}, {"partition", false}, {"settings", false}, {"source", false}, {"default", false}, {"replace", false}},
 	KindUpdate:     {{"with_", false}, {"this", false}, {"expressions", false}, {"from_", false}, {"where", false}, {"returning", false}, {"order", false}, {"limit", false}, {"options", false}, {"hint", false}},
 	KindDelete:     {{"with_", false}, {"this", false}, {"using", false}, {"where", false}, {"returning", false}, {"order", false}, {"limit", false}, {"tables", false}, {"cluster", false}, {"hint", false}},
 	KindMerge:      {{"this", true}, {"using", true}, {"on", false}, {"using_cond", false}, {"whens", true}, {"with_", false}, {"returning", false}},
@@ -889,7 +898,7 @@ var argTypes = map[Kind][]argSpec{
 	KindCreate:             {{"with_", false}, {"this", true}, {"kind", true}, {"replace", false}, {"refresh", false}, {"unique", false}, {"expression", false}, {"exists", false}, {"properties", false}, {"indexes", false}, {"no_schema_binding", false}, {"begin", false}, {"clone", false}, {"concurrently", false}, {"clustered", false}},
 	KindSchema:             {{"this", false}, {"expressions", false}},
 	KindCommand:            {{"this", true}, {"expression", false}},
-	KindPivot:              {{"this", false}, {"alias", false}, {"expressions", false}, {"fields", false}, {"unpivot", false}, {"using", false}, {"group", false}, {"columns", false}, {"include_nulls", false}, {"default_on_null", false}, {"into", false}, {"with_", false}, {"identify_pivot_strings", false}, {"prefixed_pivot_columns", false}, {"pivot_column_naming", false}},
+	KindPivot:              {{"this", false}, {"alias", false}, {"expressions", false}, {"fields", false}, {"unpivot", false}, {"value_columns_first", false}, {"using", false}, {"group", false}, {"columns", false}, {"include_nulls", false}, {"default_on_null", false}, {"into", false}, {"with_", false}, {"identify_pivot_strings", false}, {"prefixed_pivot_columns", false}, {"pivot_column_naming", false}},
 	KindLateral:            {{"this", true}, {"view", false}, {"outer", false}, {"alias", false}, {"cross_apply", false}, {"ordinality", false}},
 	KindValues:             {{"expressions", true}, {"alias", false}, {"order", false}, {"limit", false}, {"offset", false}},
 	KindColumnDef:          {{"this", true}, {"kind", false}, {"constraints", false}, {"exists", false}, {"position", false}, {"default", false}, {"output", false}, {"ordinality", false}},
@@ -1039,8 +1048,8 @@ var argTypes = map[Kind][]argSpec{
 	// exists, actions, ...) — the order repr() reflects — rather than the class
 	// arg_types declaration order (ddl.py: this, kind, actions, exists, ...).
 	KindAlter:        {{"this", false}, {"kind", true}, {"exists", false}, {"actions", true}, {"only", false}, {"options", false}, {"cluster", false}, {"not_valid", false}, {"check", false}, {"cascade", false}, {"iceberg", false}},
-	KindDrop:         {{"this", false}, {"kind", false}, {"expressions", false}, {"exists", false}, {"temporary", false}, {"materialized", false}, {"cascade", false}, {"restrict", false}, {"constraints", false}, {"purge", false}, {"cluster", false}, {"concurrently", false}, {"sync", false}, {"iceberg", false}},
-	KindAlterColumn:  {{"this", true}, {"dtype", false}, {"collate", false}, {"using", false}, {"default", false}, {"drop", false}, {"comment", false}, {"allow_null", false}, {"visible", false}, {"rename_to", false}},
+	KindDrop:         {{"this", false}, {"kind", false}, {"expressions", false}, {"exists", false}, {"temporary", false}, {"materialized", false}, {"cascade", false}, {"restrict", false}, {"constraints", false}, {"purge", false}, {"cluster", false}, {"concurrently", false}, {"sync", false}, {"iceberg", false}, {"force", false}},
+	KindAlterColumn:  {{"this", true}, {"exists", false}, {"dtype", false}, {"collate", false}, {"using", false}, {"default", false}, {"drop", false}, {"comment", false}, {"allow_null", false}, {"visible", false}, {"rename_to", false}},
 	KindModifyColumn: {{"this", true}, {"rename_from", false}},
 	KindAlterIndex:   {{"this", true}, {"visible", true}},
 	KindRenameColumn: {{"this", true}, {"to", true}, {"exists", false}},
@@ -1158,6 +1167,8 @@ var argTypes = map[Kind][]argSpec{
 	KindOverlaps:                {{"this", true}, {"expression", true}},
 	KindRegexpILike:             {{"this", true}, {"expression", true}, {"flag", false}},
 	KindAdjacent:                {{"this", true}, {"expression", true}},
+	KindExtendsLeft:             {{"this", true}, {"expression", true}},
+	KindExtendsRight:            {{"this", true}, {"expression", true}},
 	KindArrayContainsAll:        {{"this", true}, {"expression", true}},
 	KindArrayContainedBy:        {{"this", true}, {"expression", true}},
 	KindArrayOverlaps:           {{"this", true}, {"expression", true}, {"null_safe", false}},
@@ -1394,10 +1405,10 @@ var traitsOf = map[Kind]Trait{
 	KindJSONObjectAgg:  TraitCondition | TraitFunc | TraitAggFunc,
 	KindArrayAgg:       TraitCondition | TraitFunc | TraitAggFunc,
 	KindArraySize:      TraitCondition | TraitFunc,
-	KindArrayContains:  TraitCondition | TraitBinary | TraitFunc,
+	KindArrayContains:  TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindInitcap:        TraitCondition | TraitFunc,
 	KindSplit:          TraitCondition | TraitFunc,
-	KindRegexpLike:     TraitCondition | TraitBinary | TraitFunc,
+	KindRegexpLike:     TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindRegexpSplit:    TraitCondition | TraitFunc,
 	KindStructExtract:  TraitCondition | TraitFunc,
 	KindStandardHash:   TraitCondition | TraitFunc,
@@ -1481,15 +1492,17 @@ var traitsOf = map[Kind]Trait{
 	// the exact upstream class each mirrors. KindJSON (query.py:1965, plain
 	// Expression) gets no row, matching e.g. KindTableAlias.
 	KindGlob:                    TraitCondition | TraitBinary | TraitPredicate,
-	KindOverlaps:                TraitCondition | TraitBinary,
-	KindRegexpILike:             TraitCondition | TraitBinary | TraitFunc,
-	KindAdjacent:                TraitCondition | TraitBinary,
-	KindArrayContainsAll:        TraitCondition | TraitBinary | TraitFunc,
-	KindArrayContainedBy:        TraitCondition | TraitBinary | TraitFunc,
-	KindArrayOverlaps:           TraitCondition | TraitBinary | TraitFunc,
-	KindJSONBContains:           TraitCondition | TraitBinary | TraitFunc,
-	KindJSONBContainsAllTopKeys: TraitCondition | TraitBinary | TraitFunc,
-	KindJSONBContainsAnyTopKeys: TraitCondition | TraitBinary | TraitFunc,
+	KindOverlaps:                TraitCondition | TraitBinary | TraitPredicate,
+	KindRegexpILike:             TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindAdjacent:                TraitCondition | TraitBinary | TraitPredicate,
+	KindExtendsLeft:             TraitCondition | TraitBinary | TraitPredicate,
+	KindExtendsRight:            TraitCondition | TraitBinary | TraitPredicate,
+	KindArrayContainsAll:        TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindArrayContainedBy:        TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindArrayOverlaps:           TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindJSONBContains:           TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindJSONBContainsAllTopKeys: TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindJSONBContainsAnyTopKeys: TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindJSONBDeleteAtPath:       TraitCondition | TraitBinary | TraitFunc,
 	KindJSONBPathExists:         TraitCondition | TraitBinary | TraitPredicate | TraitFunc,
 	KindOperator:                TraitCondition | TraitBinary,
@@ -1656,6 +1669,8 @@ var className = map[Kind]string{
 	KindSubquery:                            "Subquery",
 	KindHaving:                              "Having",
 	KindQualify:                             "Qualify",
+	KindConnect:                             "Connect",
+	KindPrior:                               "Prior",
 	KindCube:                                "Cube",
 	KindRollup:                              "Rollup",
 	KindGroupingSets:                        "GroupingSets",
@@ -1916,6 +1931,8 @@ var className = map[Kind]string{
 	KindOverlaps:                            "Overlaps",
 	KindRegexpILike:                         "RegexpILike",
 	KindAdjacent:                            "Adjacent",
+	KindExtendsLeft:                         "ExtendsLeft",
+	KindExtendsRight:                        "ExtendsRight",
 	KindArrayContainsAll:                    "ArrayContainsAll",
 	KindArrayContainedBy:                    "ArrayContainedBy",
 	KindArrayOverlaps:                       "ArrayOverlaps",

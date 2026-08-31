@@ -1,11 +1,11 @@
 # sqlglot-go — roadmap
 
-Goal: a faithful Go port of sqlglot v30.12.0's **parse → AST → generate** core (tokenizer, AST,
+Goal: a faithful Go port of sqlglot v30.17.0's **parse → AST → generate** core (tokenizer, AST,
 parser, generator, schema) plus the `qualify` + `scope` optimizer passes that column qualification and
 **lineage** build on, for **base + MySQL + Postgres**. This is deliberately **not** a full port of
 sqlglot: the rest of the optimizer (simplify/normalize/pushdown/eliminate/merge/unnest/`optimize()`),
 cross-dialect transpilation, and the other 30+ dialects are out of scope for now. Port 1:1 from
-.reference/sqlglot-v30.12.0/ file-by-file; port the matching upstream tests as the oracle.
+.reference/sqlglot-v30.17.0/ file-by-file; port the matching upstream tests as the oracle.
 
 Status: the parse → generate round-trip is at **100% parity on the ported upstream identity corpus** —
 1847/1847 cases (base 955/955, MySQL 424/424, Postgres 468/468), enforced by a monotonic corpus floor
@@ -120,6 +120,10 @@ differential-check against the pinned Python):
   parser `FUNCTIONS` ↔ generator `TRANSFORMS`/`TYPE_MAPPING` remaps (must land paired to avoid
   round-trip regressions), MySQL `||`/`&&`/`XOR` logical operators, MySQL `CAST(x AS TIMESTAMP/BLOB)`.
 - DIALECTS beyond base + MySQL + Postgres (upstream ships 30+).
+- TIME-TRAVEL clauses (`FOR SYSTEM_TIME AS OF`, hive `TIMESTAMP AS OF`): the v30.17.0 bump removed
+  the FOR VERSION/TIMESTAMP and hive AS OF compound keywords but did not port `VERSION_PHRASES` +
+  `_parse_version` (parser.py:1738-1745, 5120-5146); the constructs now fail closed (parse error)
+  instead of building `Table.version`. Port with a dialect that needs them.
 - PARSER coverage is bounded by the ported corpus: constructs upstream parses that are NOT exercised
   by the identity fixtures may still be gaps — e.g. any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or
   DDL detail not hit by a fixture. Treat a not-yet-parsed construct upstream parses as a gap to

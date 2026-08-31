@@ -10,7 +10,9 @@ import (
 // Command fallback starting at the last consumed token.
 func (p *Parser) parseRefresh() exp.Expression {
 	var kind string
-	if p.match(tokens.TABLE) {
+	if p.matchTextSeq("EXTERNAL", "TABLE") {
+		kind = "EXTERNAL TABLE"
+	} else if p.match(tokens.TABLE) {
 		kind = "TABLE"
 	} else if p.matchTextSeq("MATERIALIZED", "VIEW") {
 		kind = "MATERIALIZED VIEW"

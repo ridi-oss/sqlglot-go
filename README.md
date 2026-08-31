@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 A Go port of the **parse → AST → generate** core of
-[tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.12.0, plus the `qualify` and `scope`
+[tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.17.0, plus the `qualify` and `scope`
 optimizer passes that column **qualification and lineage** are built on. Ported file-by-file from the
 pinned Python source, as close to 1:1 as Go allows, so upstream tests port across directly. **Zero
 third-party dependencies** (Go stdlib only).
@@ -116,8 +116,8 @@ gofmt -l . && go vet ./...
 The upstream test suite is ported alongside the code (`*_test.go` + `testdata/*.sql` fixtures reused
 verbatim) and is the correctness oracle. A round-trip parity corpus and an AST-fidelity gate keep the
 port honest — both are monotonic (they can only tighten). For a live differential check against the
-pinned Python source, `scripts/fetch-reference.sh` fetches sqlglot 30.12.0 into `.reference/`, then e.g.
-`PYTHONPATH=.reference/sqlglot-v30.12.0 python3 -c "import sqlglot; print(sqlglot.parse_one('…','postgres').sql())"`.
+pinned Python source, `scripts/fetch-reference.sh` fetches sqlglot 30.17.0 into `.reference/`, then e.g.
+`PYTHONPATH=.reference/sqlglot-v30.17.0 python3 -c "import sqlglot; print(sqlglot.parse_one('…','postgres').sql())"`.
 
 ## Continuing the port
 

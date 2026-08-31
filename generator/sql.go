@@ -446,7 +446,15 @@ func (g *Generator) nullSafeEQSQL(e expressions.Expression) string {
 func (g *Generator) nullSafeNEQSQL(e expressions.Expression) string {
 	return g.binary(e, "IS DISTINCT FROM")
 }
-func (g *Generator) isSQL(e expressions.Expression) string    { return g.binary(e, "IS") }
+func (g *Generator) isSQL(e expressions.Expression) string {
+	// is_sql (generator.py:4514-4519, v30.17.0): Is(negate=True) renders `IS NOT`
+	// (postgres NOTNULL keeps this shape; NORMALIZE_NOT_NULL=False). The IS_BOOL_ALLOWED
+	// branch is presto-family-only and out of scope here.
+	if boolValue(e.Arg("negate")) {
+		return g.binary(e, "IS NOT")
+	}
+	return g.binary(e, "IS")
+}
 func (g *Generator) likeSQL(e expressions.Expression) string  { return g.likeSQLWithOp(e, "LIKE") }
 func (g *Generator) ilikeSQL(e expressions.Expression) string { return g.likeSQLWithOp(e, "ILIKE") }
 
@@ -656,6 +664,23 @@ func (g *Generator) whereSQL(e expressions.Expression) string {
 func (g *Generator) havingSQL(e expressions.Expression) string {
 	this := g.indent(g.sqlKey(e, "this"), 0, nil, false, false)
 	return g.seg("HAVING") + g.sep() + this
+}
+
+// connect_sql / prior_sql (generator.py:2830-2839).
+func (g *Generator) connectSQL(e expressions.Expression) string {
+	start := g.sqlKey(e, "start")
+	if start != "" {
+		start = g.seg("START WITH " + start)
+	}
+	nocycle := ""
+	if boolValue(e.Arg("nocycle")) {
+		nocycle = " NOCYCLE"
+	}
+	return start + g.seg("CONNECT BY"+nocycle+" "+g.sqlKey(e, "connect"))
+}
+
+func (g *Generator) priorSQL(e expressions.Expression) string {
+	return "PRIOR " + g.sqlKey(e, "this")
 }
 
 func (g *Generator) qualifySQL(e expressions.Expression) string {
@@ -1295,6 +1320,11 @@ func (g *Generator) insertSQL(e expressions.Expression) string {
 	if where != "" {
 		where = g.sep() + "REPLACE WHERE " + where
 	}
+	// v30.17.0 (generator.py:2309-2310): INSERT ... REPLACE USING (cols).
+	using := g.expressions(exprsOptions{expression: e, key: "using", flat: true})
+	if using != "" {
+		using = g.sep() + "REPLACE USING (" + using + ")"
+	}
 	expressionSQL := g.sep() + g.sqlKey(e, "expression")
 	onConflict := g.sqlKey(e, "conflict")
 	if onConflict != "" {
@@ -1322,7 +1352,7 @@ func (g *Generator) insertSQL(e expressions.Expression) string {
 	if source != "" {
 		source = "TABLE " + source
 	}
-	sql := keyword + hint + alternative + ignore + this + stored + byName + exists + partitionBy + settings + where + expressionSQL + source
+	sql := keyword + hint + alternative + ignore + this + stored + byName + exists + partitionBy + settings + where + using + expressionSQL + source
 	return g.prependCtes(e, sql)
 }
 

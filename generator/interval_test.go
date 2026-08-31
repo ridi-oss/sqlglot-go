@@ -41,27 +41,14 @@ func TestIntervalSQLPostgresSingleString(t *testing.T) {
 	}
 }
 
-// TestIntervalUnitCurrentDate covers the interval-scoped NO_PAREN_FUNCTIONS accommodation
-// in parser_interval.go (parseIntervalSpan): `INTERVAL '-1' CURRENT_DATE` parses the unit
-// position as a bare Var("CURRENT_DATE") rather than failing to consume the token (which
-// previously left it to be misparsed as a trailing column alias -> "INTERVAL '-1' AS
-// CURRENT_DATE"). Confirmed against the pinned oracle:
-//
-//	PYTHONPATH=.reference/sqlglot-v30.12.0 python3 -c \
-//	  "import sqlglot; print(repr(sqlglot.parse_one(\"INTERVAL '-1' CURRENT_DATE\")))"
-//	Interval(this=Literal(this='-1', is_string=True), unit=CurrentDate())
-//	>>> sqlglot.parse_one("INTERVAL '-1' CURRENT_DATE").sql()
-//	"INTERVAL '-1' CURRENT_DATE"
-//
-// Only CURRENT_DATE is covered: upstream's other NO_PAREN_FUNCTIONS units that this
-// tokenizer actually produces (CURRENT_TIME/CURRENT_TIMESTAMP/CURRENT_USER) render with a
-// trailing "()" (e.g. "INTERVAL '1' CURRENT_TIMESTAMP()"), which the bare-Var
-// accommodation here doesn't reproduce - see intervalUnitNoParenTokens in
-// parser/parser_interval.go.
+// TestIntervalUnitCurrentDate: since v30.17.0's is_unit gate, CURRENT_DATE after an
+// interval literal is an ALIAS, not a unit (parser.py:4054-4060) — matching pinned
+// upstream's identity fixture (`INTERVAL '-1' AS CURRENT_DATE`).
 func TestIntervalUnitCurrentDate(t *testing.T) {
 	sql := "INTERVAL '-1' CURRENT_DATE"
-	if got := roundTrip(t, "", sql); got != sql {
-		t.Errorf("%q ->\n  got  %q\n  want %q", sql, got, sql)
+	want := "INTERVAL '-1' AS CURRENT_DATE"
+	if got := roundTrip(t, "", sql); got != want {
+		t.Errorf("%q ->\n  got  %q\n  want %q", sql, got, want)
 	}
 }
 

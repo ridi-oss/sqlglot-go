@@ -777,6 +777,11 @@ func (p *Parser) parseColumnConstraint() exp.Expression {
 		}
 		return p.expression(exp.ColumnConstraint(exp.Args{"this": this, "kind": constraint}), nil, nil)
 	}
+	// "CHARACTER SET" is two tokens since v30.17 (parser.py:7723-7732).
+	if p.matchTextSeq("CHARACTER", "SET") {
+		kind := p.expression(exp.CharacterSetColumnConstraint(exp.Args{"this": p.parseVarOrString(false)}), nil, nil)
+		return p.expression(exp.ColumnConstraint(exp.Args{"this": this, "kind": kind}), nil, nil)
+	}
 	return this
 }
 
@@ -838,9 +843,6 @@ func init() {
 		},
 		"CALLED": func(p *Parser, _ bool) exp.Expression { return p.parseCalledOnNullInputProperty() },
 		"CHARSET": func(p *Parser, isDefault bool) exp.Expression {
-			return p.parseCharacterSet(isDefault)
-		},
-		"CHARACTER SET": func(p *Parser, isDefault bool) exp.Expression {
 			return p.parseCharacterSet(isDefault)
 		},
 		"COLLATE": func(p *Parser, isDefault bool) exp.Expression {

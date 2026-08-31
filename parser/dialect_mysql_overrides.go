@@ -10,47 +10,37 @@ import (
 // MySQL PropertyParsers), since registerDialectParserOverrides allows only one registration per
 // dialect.
 
-// parseMySQLInsertSet implements the mysql-insert-set extension absent from pinned
-// parser.py:3486-3542. It desugars assignments into the existing INSERT columns + VALUES
-// AST shape so the shared generator needs no SET-specific path.
-func (p *Parser) parseMySQLInsertSet(this exp.Expression, assignments []exp.Expression) (exp.Expression, exp.Expression) {
-	if this == nil || this.Kind() != exp.KindTable {
-		p.raiseError("MySQL INSERT SET requires a table target without an explicit column list")
-		return nil, nil
-	}
-	if len(assignments) == 0 {
-		p.raiseError("Expected at least one assignment after SET")
-		return nil, nil
-	}
-
-	columns := make([]exp.Expression, 0, len(assignments))
-	values := make([]exp.Expression, 0, len(assignments))
-	for _, assignment := range assignments {
-		if assignment == nil || assignment.Kind() != exp.KindEQ || assignment.Expr() == nil {
-			p.raiseError("MySQL INSERT SET requires column = value assignments")
-			return nil, nil
+// parseInsertSetValues ports the INSERT ... SET normalization (parser.py:3616-3647,
+// v30.17.0): each `col = value` assignment feeds the ordinary Schema + one-row Values
+// shape, so the generator needs no SET-specific path. A DEFAULT value becomes exp.Var
+// when the dialect supports it (SUPPORTS_VALUES_DEFAULT).
+func (p *Parser) parseInsertSetValues(this exp.Expression) (exp.Expression, exp.Expression) {
+	var columns []exp.Expression
+	var values []exp.Expression
+	p.parseCsv(func() exp.Expression {
+		target := p.parseColumn()
+		if target != nil && target.Kind() == exp.KindColumn && p.match(tokens.EQ) {
+			var value exp.Expression
+			if p.dialect.SupportsValuesDefault && p.match(tokens.DEFAULT) {
+				value = p.expression(exp.Var(exp.Args{"this": stringsUpper(p.prev.Text)}), nil, nil)
+			} else {
+				value = p.parseDisjunction()
+			}
+			if value != nil {
+				columns = append(columns, target.This())
+				values = append(values, value)
+				return value
+			}
 		}
-
-		column := assignment.This()
-		if column == nil || column.Kind() != exp.KindColumn || column.Arg("table") != nil ||
-			column.Arg("schema") != nil || column.Arg("catalog") != nil {
-			p.raiseError("MySQL INSERT SET assignment targets must be unqualified columns")
-			return nil, nil
-		}
-		identifier := column.This()
-		if identifier == nil || identifier.Kind() != exp.KindIdentifier {
-			p.raiseError("MySQL INSERT SET assignment targets must be identifiers")
-			return nil, nil
-		}
-
-		columns = append(columns, identifier)
-		values = append(values, assignment.Expr())
-	}
-
-	target := p.expression(exp.Schema(exp.Args{"this": this, "expressions": columns}), nil, nil)
-	tuple := p.expression(exp.Tuple(exp.Args{"expressions": values}), nil, nil)
-	source := p.expression(exp.Values(exp.Args{"expressions": []exp.Expression{tuple}}), nil, nil)
-	return target, source
+		p.raiseError("Expected column assignment in INSERT ... SET")
+		return nil
+	})
+	schema := p.expression(exp.Schema(exp.Args{"this": this, "expressions": columns}), nil, nil)
+	setValues := p.expression(exp.Values(exp.Args{
+		"expressions": []exp.Expression{p.expression(exp.Tuple(exp.Args{"expressions": values}), nil, nil)},
+		"alias":       p.parseTableAlias(nil),
+	}), nil, nil)
+	return schema, setValues
 }
 
 // parseMySQLReplace is the MySQL statement override for the mysql-replace extension. Pinned

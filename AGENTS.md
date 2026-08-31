@@ -1,6 +1,6 @@
 # sqlglot-go — agent guide
 
-A Go port of **[tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.12.0** (a pure-Python SQL
+A Go port of **[tobymao/sqlglot](https://github.com/tobymao/sqlglot) v30.17.0** (a pure-Python SQL
 parser, generator, and optimizer). It ports the **parse → AST → generate** core ~1:1 (tokenizer, AST,
 parser, generator, schema) plus the `qualify` and `scope` optimizer passes that column qualification
 and **lineage** build on. It is **not** a full port of sqlglot: the rest of the optimizer (simplify,
@@ -10,14 +10,14 @@ the SQL engine only; it has no application-specific code.
 
 ## Source of truth (READ THIS FIRST, always)
 
-- The pinned Python source is fetched to **`.reference/sqlglot-v30.12.0/`** (gitignored — run
+- The pinned Python source is fetched to **`.reference/sqlglot-v30.17.0/`** (gitignored — run
   `scripts/fetch-reference.sh` once). It is the **exact** upstream version being ported
-  (`sqlglot==30.12.0`, git SHA in `.reference/sqlglot-v30.12.0/GIT_SHA.txt`).
+  (`sqlglot==30.17.0`, git SHA in `.reference/sqlglot-v30.17.0/GIT_SHA.txt`).
 - Port from this reference, file by file, **as 1:1 as possible** — same file layout, same
   function/method names (Go-cased), same structure, same comments where they carry intent. When Go
   forces a divergence (static typing, no metaclasses, error/panic instead of exceptions), keep it
   minimal and note *why* in a comment that cites the reference line.
-- **Port the corresponding unit tests too**, 1:1, from `.reference/sqlglot-v30.12.0/tests/`. The
+- **Port the corresponding unit tests too**, 1:1, from `.reference/sqlglot-v30.17.0/tests/`. The
   upstream tests and `tests/fixtures/*.sql` are the correctness oracle — reuse the `.sql` fixtures
   verbatim (they live under each package's `testdata/`), reimplement the loader/assertions in Go.
 
@@ -64,7 +64,7 @@ change default same-dialect output) landed for the downstream lineage/gating con
 table qualification (`QualifyOpts.SearchPath`), top-level `UPDATE`/`DELETE`/`MERGE` analysis scopes
 (`TraverseScope`/`BuildScope`, fail-closed), a Qualify resolution report (`QualifyOpts.ResolutionReport`
 → per-source `SourceKind`), MySQL version/executable-comment activation (`mysql_version`), plus
-structural PG `EXPLAIN`, MySQL `INSERT … SET`/`REPLACE`, and the `FoldIdentifierName`/`IsReservedKeyword`
+structural PG `EXPLAIN`, MySQL `REPLACE`, and the `FoldIdentifierName`/`IsReservedKeyword`
 helpers. See **[CHANGELOG.md](./CHANGELOG.md)** for the per-version history.
 
 **Remaining work** (see `ROADMAP.md`): the rest of sqlglot's optimizer — `simplify` (full),
@@ -103,7 +103,7 @@ where Python renders `db=`, so apply `s/\bdb=/schema=/` (qualifier only) to any 
 3. Pick a slice, port from `.reference/` 1:1, port its tests, keep `go test ./...` green.
 4. Verify against upstream: port the matching upstream tests, and for parser/generator work do a
    differential check against the pinned Python, e.g.
-   `PYTHONPATH=.reference/sqlglot-v30.12.0 python3 -c "import sqlglot; print(repr(sqlglot.parse_one('…','postgres')))"`
+   `PYTHONPATH=.reference/sqlglot-v30.17.0 python3 -c "import sqlglot; print(repr(sqlglot.parse_one('…','postgres')))"`
    and compare the AST / `.sql()` round-trip to the Go output.
 
 This port was built with a multi-model review pipeline (plan → implement → integrate → adversarial

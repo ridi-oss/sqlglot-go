@@ -31,6 +31,19 @@ func normalizeRelationIdentifier(name exp.IdentifierName, argKey string, d *dial
 	return NormalizeIdentifiers(id, d)
 }
 
+// sameSource reports identity (`is` in Python) between two scope sources.
+func sameSource(a, b any) bool {
+	if ae, ok := a.(exp.Expression); ok {
+		be, ok2 := b.(exp.Expression)
+		return ok2 && ae == be
+	}
+	if as_, ok := a.(*Scope); ok {
+		bs, ok2 := b.(*Scope)
+		return ok2 && as_ == bs
+	}
+	return false
+}
+
 func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, catalog exp.IdentifierName, dialect dialects.DialectType, canonicalizeTableAliases bool, onQualify func(exp.Expression), searchPath []string, s schema.Schema) exp.Expression {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
@@ -213,7 +226,7 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 			}
 
 			setAlias(derivedTable, canonicalAliases, "", scope, false, nil)
-			if pivot, ok := seqGet(expressionsFor(derivedTable, "pivots"), 0); ok {
+			if pivot, ok := seqGet(expressionsFor(derivedTable, "pivots"), -1); ok {
 				setAlias(pivot, canonicalAliases, "", nil, false, nil)
 			}
 		}
@@ -222,9 +235,17 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 
 		for _, name := range scope.orderedSourceNames() {
 			source := scope.Sources[name]
+			// v30.17.0 (qualify_tables.py:154-158): a source reachable through many scopes
+			// (a UDTF lateral source, a CTE propagated inward) is processed once, in the
+			// outermost scope that contains it.
+			if scope.Parent != nil {
+				if parentSource, ok := scope.Parent.Sources[name]; ok && sameSource(parentSource, source) {
+					continue
+				}
+			}
 			if table, ok := source.(exp.Expression); ok && table != nil && table.Kind() == exp.KindTable {
 				isRealTableSource := name != ""
-				if pivot, ok := seqGet(expressionsFor(table, "pivots"), 0); ok && pivot != nil {
+				if pivot, ok := seqGet(expressionsFor(table, "pivots"), -1); ok && pivot != nil {
 					name = table.Name()
 				}
 
@@ -257,7 +278,7 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 					}
 				}
 
-				if pivot, ok := seqGet(expressionsFor(table, "pivots"), 0); ok && pivot != nil {
+				if pivot, ok := seqGet(expressionsFor(table, "pivots"), -1); ok && pivot != nil {
 					targetAlias := ""
 					if unpivot, _ := pivot.Arg("unpivot").(bool); unpivot {
 						targetAlias = table.Alias()

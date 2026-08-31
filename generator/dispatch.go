@@ -83,6 +83,8 @@ func init() {
 	dispatch[expressions.KindSubquery] = (*Generator).subquerySQL
 	dispatch[expressions.KindHaving] = (*Generator).havingSQL
 	dispatch[expressions.KindQualify] = (*Generator).qualifySQL
+	dispatch[expressions.KindConnect] = (*Generator).connectSQL
+	dispatch[expressions.KindPrior] = (*Generator).priorSQL
 	dispatch[expressions.KindCube] = (*Generator).cubeSQL
 	dispatch[expressions.KindRollup] = (*Generator).rollupSQL
 	dispatch[expressions.KindGroupingSets] = (*Generator).groupingSetsSQL

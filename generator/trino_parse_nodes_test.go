@@ -41,7 +41,7 @@ func TestJSONExtractExistingDialectRendering(t *testing.T) {
 		{"", "JSON_EXTRACT(content, json_path)", "JSON_EXTRACT(content, json_path)"},
 		{"", "JSON_EXTRACT(a, '$.b', '$.c')", "JSON_EXTRACT(a, '$.b', '$.c')"},
 		{"mysql", "JSON_EXTRACT(content, json_path)", "JSON_EXTRACT(content, json_path)"},
-		{"postgres", "JSON_EXTRACT(content, json_path)", "JSON_EXTRACT_PATH(content, json_path)"},
+		{"postgres", "JSON_EXTRACT(content, json_path)", "content -> json_path"},
 		{"postgres", "content -> 'x'", "content -> 'x'"},
 		{"trino", "JSON_EXTRACT(content, json_path)", "JSON_EXTRACT(content, json_path)"},
 	}

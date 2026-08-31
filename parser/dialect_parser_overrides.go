@@ -155,7 +155,8 @@ func (p *Parser) noParenFunctionParserFor(name string) parserOverrideFunc {
 	}
 
 	parser := noParenFunctionParsers[name]
-	if parser == nil || (name == "VARIADIC" && strings.ToLower(p.dialect.Name) != "postgres") {
+	if parser == nil || (name == "VARIADIC" && strings.ToLower(p.dialect.Name) != "postgres") ||
+		(name == "PRIOR" && p.connectPriorDepth == 0) {
 		return nil
 	}
 	return parser
