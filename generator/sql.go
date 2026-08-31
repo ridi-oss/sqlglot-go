@@ -1303,6 +1303,11 @@ func (g *Generator) insertSQL(e expressions.Expression) string {
 	if where != "" {
 		where = g.sep() + "REPLACE WHERE " + where
 	}
+	// v30.17.0 (generator.py:2309-2310): INSERT ... REPLACE USING (cols).
+	using := g.expressions(exprsOptions{expression: e, key: "using", flat: true})
+	if using != "" {
+		using = g.sep() + "REPLACE USING (" + using + ")"
+	}
 	expressionSQL := g.sep() + g.sqlKey(e, "expression")
 	onConflict := g.sqlKey(e, "conflict")
 	if onConflict != "" {
@@ -1330,7 +1335,7 @@ func (g *Generator) insertSQL(e expressions.Expression) string {
 	if source != "" {
 		source = "TABLE " + source
 	}
-	sql := keyword + hint + alternative + ignore + this + stored + byName + exists + partitionBy + settings + where + expressionSQL + source
+	sql := keyword + hint + alternative + ignore + this + stored + byName + exists + partitionBy + settings + where + using + expressionSQL + source
 	return g.prependCtes(e, sql)
 }
 

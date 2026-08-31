@@ -84,6 +84,7 @@ func (p *Parser) parseDrop() exp.Expression {
 		"cluster":      cluster,
 		"concurrently": concurrently,
 		"sync":         p.matchTextSeq("SYNC"),
+		"force":        p.matchTextSeq("FORCE"),
 		"iceberg":      iceberg,
 	}), nil, nil)
 }

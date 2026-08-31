@@ -873,7 +873,7 @@ var argTypes = map[Kind][]argSpec{
 	// The pinned .reference/sqlglot-v30.12.0/sqlglot/expressions/dml.py:195-215
 	// Insert has no "replace" arg. The mysql-replace extension appends it so
 	// existing Insert arg ordering stays stable.
-	KindInsert:     {{"hint", false}, {"with_", false}, {"is_function", false}, {"this", false}, {"expression", false}, {"conflict", false}, {"returning", false}, {"overwrite", false}, {"exists", false}, {"alternative", false}, {"where", false}, {"ignore", false}, {"by_name", false}, {"stored", false}, {"partition", false}, {"settings", false}, {"source", false}, {"default", false}, {"replace", false}},
+	KindInsert:     {{"hint", false}, {"with_", false}, {"is_function", false}, {"this", false}, {"expression", false}, {"conflict", false}, {"returning", false}, {"overwrite", false}, {"exists", false}, {"alternative", false}, {"where", false}, {"using", false}, {"ignore", false}, {"by_name", false}, {"stored", false}, {"partition", false}, {"settings", false}, {"source", false}, {"default", false}, {"replace", false}},
 	KindUpdate:     {{"with_", false}, {"this", false}, {"expressions", false}, {"from_", false}, {"where", false}, {"returning", false}, {"order", false}, {"limit", false}, {"options", false}, {"hint", false}},
 	KindDelete:     {{"with_", false}, {"this", false}, {"using", false}, {"where", false}, {"returning", false}, {"order", false}, {"limit", false}, {"tables", false}, {"cluster", false}, {"hint", false}},
 	KindMerge:      {{"this", true}, {"using", true}, {"on", false}, {"using_cond", false}, {"whens", true}, {"with_", false}, {"returning", false}},
@@ -1039,8 +1039,8 @@ var argTypes = map[Kind][]argSpec{
 	// exists, actions, ...) — the order repr() reflects — rather than the class
 	// arg_types declaration order (ddl.py: this, kind, actions, exists, ...).
 	KindAlter:        {{"this", false}, {"kind", true}, {"exists", false}, {"actions", true}, {"only", false}, {"options", false}, {"cluster", false}, {"not_valid", false}, {"check", false}, {"cascade", false}, {"iceberg", false}},
-	KindDrop:         {{"this", false}, {"kind", false}, {"expressions", false}, {"exists", false}, {"temporary", false}, {"materialized", false}, {"cascade", false}, {"restrict", false}, {"constraints", false}, {"purge", false}, {"cluster", false}, {"concurrently", false}, {"sync", false}, {"iceberg", false}},
-	KindAlterColumn:  {{"this", true}, {"dtype", false}, {"collate", false}, {"using", false}, {"default", false}, {"drop", false}, {"comment", false}, {"allow_null", false}, {"visible", false}, {"rename_to", false}},
+	KindDrop:         {{"this", false}, {"kind", false}, {"expressions", false}, {"exists", false}, {"temporary", false}, {"materialized", false}, {"cascade", false}, {"restrict", false}, {"constraints", false}, {"purge", false}, {"cluster", false}, {"concurrently", false}, {"sync", false}, {"iceberg", false}, {"force", false}},
+	KindAlterColumn:  {{"this", true}, {"exists", false}, {"dtype", false}, {"collate", false}, {"using", false}, {"default", false}, {"drop", false}, {"comment", false}, {"allow_null", false}, {"visible", false}, {"rename_to", false}},
 	KindModifyColumn: {{"this", true}, {"rename_from", false}},
 	KindAlterIndex:   {{"this", true}, {"visible", true}},
 	KindRenameColumn: {{"this", true}, {"to", true}, {"exists", false}},

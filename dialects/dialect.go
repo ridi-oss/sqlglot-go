@@ -242,6 +242,12 @@ type Dialect struct {
 	// overrides False): whether a postfix NOTNULL builds the normalized NOT(Is(x, NULL))
 	// (true) or Is(x, NULL, negate=True), rendering `x IS NOT NULL` (false, postgres).
 	NormalizeNotNull bool
+
+	// SUPPORTS_ALTER_COLUMN_NULLABILITY (generator.py:489, v30.17.0): ALTER COLUMN can set
+	// nullability together with its type (mysql true, generators/mysql.py:118).
+	SupportsAlterColumnNullability bool
+	// SUPPORTS_ALTER_COLUMN_IF_EXISTS (generator.py:492, v30.17.0).
+	SupportsAlterColumnIfExists bool
 	// JSONTypeRequiredForExtraction ports the generator flag JSON_TYPE_REQUIRED_FOR_EXTRACTION
 	// (generator.py:488); mysql (generators/mysql.py:142) and postgres (generators/postgres.py:
 	// 245) both override to True. Consumed by arrow_json_extract_sql (dialect.py:1210-1215):

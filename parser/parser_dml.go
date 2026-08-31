@@ -70,9 +70,17 @@ func (p *Parser) parseInsert() exp.Expression {
 	returning := p.parseReturning()
 	byName := p.matchTextSeq("BY", "NAME")
 	exists := p.parseExists(false)
+	// v30.17.0 (parser.py:3655-3661): REPLACE WHERE <cond> | REPLACE USING (cols).
 	var where exp.Expression
-	if p.matchPair(tokens.REPLACE, tokens.WHERE, true) {
-		where = p.parseDisjunction()
+	var replaceUsing []exp.Expression
+	if p.match(tokens.REPLACE) {
+		if p.match(tokens.WHERE) {
+			where = p.parseDisjunction()
+		} else if p.match(tokens.USING) {
+			replaceUsing = p.parseUsingIdentifiers()
+		} else {
+			p.retreat(p.index - 1)
+		}
 	}
 	default_ := p.matchTextSeq("DEFAULT", "VALUES")
 	expression := setValues
@@ -98,6 +106,7 @@ func (p *Parser) parseInsert() exp.Expression {
 		"by_name":     byName,
 		"exists":      exists,
 		"where":       where,
+		"using":       replaceUsing,
 		"default":     default_,
 		"expression":  expression,
 		"conflict":    conflict,

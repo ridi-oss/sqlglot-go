@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -13,13 +14,15 @@ import (
 // datetime.datetime.fromisoformat both to validate the literal (any ValueError -> 0) and to read
 // back parsed.microsecond; Go has no equivalent, so isoMicroseconds faithfully reproduces
 // fromisoformat's grammar plus range/calendar validation, and the bucketing mirrors
-// len(str(parsed.microsecond).rstrip("0")).
+// len(str(parsed.microsecond).zfill(6).rstrip("0")).
 func subsecondPrecision(literal string) int {
 	micro, ok := isoMicroseconds(literal)
 	if !ok {
 		return 0
 	}
-	digitCount := len(strings.TrimRight(strconv.Itoa(micro), "0"))
+	// v30.17.0 zero-pads to 6 before stripping (str(us).zfill(6).rstrip("0")), so
+	// e.g. 12:13:14.000123 (micro=123) counts its true precision.
+	digitCount := len(strings.TrimRight(fmt.Sprintf("%06d", micro), "0"))
 	switch {
 	case digitCount > 3:
 		return 6

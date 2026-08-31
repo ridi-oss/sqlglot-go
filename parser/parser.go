@@ -2581,7 +2581,14 @@ func (p *Parser) parseColumnOps(this exp.Expression) exp.Expression {
 			// Upstream _parse_column_ops takes the plain-DOT (op is None) branch here,
 			// which uses _parse_field(any_token=True, anonymous_func=True) so a following
 			// "(" lets the field parse as a function call (e.g. x.y.FOO()).
+			dot := p.isConnected() && p.prev.TokenType == tokens.DOT
 			field = p.parseField(true, nil, true)
+			// v30.17.0 (parser.py:7022-7028): in `t.true` / `t.null` the member is an
+			// Identifier, not a Boolean/Null literal.
+			if dot && field != nil && (field.Kind() == exp.KindNull || field.Kind() == exp.KindBoolean) {
+				ident := p.expression(exp.Identifier(exp.Args{"this": p.prev.Text}), nil, field.Comments())
+				field = ident
+			}
 		}
 
 		// Function calls can be qualified, e.g. x.y.FOO(). Convert the accumulated
@@ -2950,12 +2957,14 @@ func (p *Parser) parseStar() exp.Expression {
 }
 
 func (p *Parser) parseStarOps(starToken tokens.Token) exp.Expression {
+	// v30.17.0 (parser.py:9972-9977): only a string pattern makes ILIKE a star filter;
+	// `* ILIKE (foo)` retreats and leaves ILIKE to the expression grammar.
 	var ilike exp.Expression
 	if p.match(tokens.ILIKE) {
 		if p.match(tokens.STRING) {
 			ilike = p.expression(exp.LiteralString(p.prev.Text), &p.prev, nil)
 		} else {
-			ilike = p.parseIdVar(false, nil)
+			p.retreat(p.index - 1)
 		}
 	}
 	args := exp.Args{
