@@ -12,30 +12,6 @@ import (
 
 var intervalStringRE = regexp.MustCompile(`\s*(-?[0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)\s*`)
 
-// intervalUnitNoParenTokens lets a bare interval unit position accept the "current
-// date/time" pseudo-functions (e.g. `INTERVAL '-1' CURRENT_DATE`), matching upstream's
-// NO_PAREN_FUNCTIONS dispatch inside _parse_function_call (parser.py:6973-6978:
-// `token_type in self.NO_PAREN_FUNCTIONS` -> exp.CurrentDate()/CurrentTime()/...). That
-// token-type-keyed table isn't ported in general yet (parser.go:1953 TODO(1d); see also
-// parser_constraints.go's "ON UPDATE CURRENT_TIMESTAMP" comment for another call site
-// blocked on the same gap) - a full port needs new Kinds (CurrentDate/CurrentTime/...)
-// plus the shared parseFunctionCall change, both out of this file's scope. This is a
-// narrow, interval-scoped accommodation: it renders the unit as a bare Var (e.g.
-// Var("CURRENT_DATE")) rather than upstream's dedicated CurrentDate() node.
-//
-// Only tokens.CURRENT_DATE is listed: it's the only NO_PAREN_FUNCTIONS token that (a) this
-// port's tokenizer actually produces (CURRENT_ROLE/CURRENT_DATETIME have no tokenizer
-// keyword entry in tokens/tokenizer.go, so those TokenTypes are unreachable) and (b)
-// upstream renders bare, with no trailing "()" (CurrentDate has no ported
-// currentdate_sql/no_paren_current_date_sql override needed - it's the class default).
-// CURRENT_TIME/CURRENT_TIMESTAMP/CURRENT_USER *are* reachable but upstream renders those
-// with "()" (e.g. "INTERVAL '1' CURRENT_TIMESTAMP()" - confirmed against the pinned
-// oracle), which the bare-Var rendering here can't reproduce faithfully; omitted rather
-// than emit a subtly wrong round-trip (no corpus case exercises them as an interval unit).
-var intervalUnitNoParenTokens = map[tokens.TokenType]bool{
-	tokens.CURRENT_DATE: true,
-}
-
 // pyNumberString renders a Go number the way Python's str() would, so INTERVAL
 // literal canonicalization matches upstream (e.g. 1.0 -> "1.0", not "1").
 func pyNumberString(v any) string {
@@ -55,9 +31,18 @@ func pyNumberString(v any) string {
 }
 
 func (p *Parser) parseIntervalSpan(this exp.Expression) exp.Expression {
-	unit := p.parseFunction(nil, false, true, false)
-	if unit == nil && (p.curr.TokenType == tokens.VAR || p.dialect.ValidIntervalUnits[stringsUpper(p.curr.Text)] || intervalUnitNoParenTokens[p.curr.TokenType]) {
-		unit = p.parseVar(true, nil, true)
+	// is_unit gate (parser.py:4054-4060, v30.17.0): only attempt a unit when the current
+	// token can actually be one (VAR or a dialect-valid unit word), so keyword-token
+	// pseudo-functions no longer swallow the position — `INTERVAL '-1' CURRENT_DATE`
+	// parses as Alias(Interval, CURRENT_DATE) and `INTERVAL '1' CURRENT_TIMESTAMP()`
+	// errors, both matching pinned upstream.
+	isUnit := p.curr.IsValid() && (p.curr.TokenType == tokens.VAR || p.dialect.ValidIntervalUnits[stringsUpper(p.curr.Text)])
+	var unit exp.Expression
+	if isUnit {
+		unit = p.parseFunction(nil, false, true, false)
+		if unit == nil {
+			unit = p.parseVar(true, nil, true)
+		}
 	}
 
 	// Most dialects support, e.g., the form INTERVAL '5' day, thus we try to parse

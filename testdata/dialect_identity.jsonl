@@ -894,3 +894,6 @@
 {"dialect": "postgres", "sql": "x::regtype", "want": "CAST(x AS REGTYPE)", "pretty": false}
 {"dialect": "postgres", "sql": "|/ x", "want": "SQRT(x)", "pretty": false}
 {"dialect": "postgres", "sql": "||/ x", "want": "CBRT(x)", "pretty": false}
+{"dialect": "", "sql": "VALUES (1) UNION SELECT * FROM x", "want": "SELECT * FROM (VALUES (1)) AS _values UNION SELECT * FROM x", "pretty": false}
+{"dialect": "", "sql": "WITH RECURSIVE T(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE n < 100) SELECT SUM(n) FROM t", "want": "WITH RECURSIVE T(n) AS (SELECT * FROM (VALUES (1)) AS _values UNION ALL SELECT n + 1 FROM t WHERE n < 100) SELECT SUM(n) FROM t", "pretty": false}
+{"dialect": "", "sql": "WITH RECURSIVE T(n, m) AS (VALUES (1, 2) UNION ALL SELECT n + 1, n + 2 FROM t) SELECT SUM(n) FROM t", "want": "WITH RECURSIVE T(n, m) AS (SELECT * FROM (VALUES (1, 2)) AS _values UNION ALL SELECT n + 1, n + 2 FROM t) SELECT SUM(n) FROM t", "pretty": false}

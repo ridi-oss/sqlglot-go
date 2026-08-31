@@ -803,6 +803,14 @@ func (p *Parser) parseSetOperation(this exp.Expression, consumePipe bool) exp.Ex
 		byName = true
 	}
 	expression := p.parseSelect(true, false, true, false)
+	// Wrap VALUES operands in selects (parser.py:5941-5945, v30.17.0), for consistency with
+	// the CTE canonicalization and so alias pushdown reaches into set-operation branches.
+	if this != nil && this.Kind() == exp.KindValues {
+		this = p.valuesToSelect(this)
+	}
+	if expression != nil && expression.Kind() == exp.KindValues {
+		expression = p.valuesToSelect(expression)
+	}
 	return p.expression(constructor(exp.Args{
 		"this":       this,
 		"distinct":   distinct,
@@ -3102,11 +3110,31 @@ func (p *Parser) parseCTE() exp.Expression {
 	} else if p.matchTextSeq("MATERIALIZED") {
 		materialized = true
 	}
-	return p.expression(exp.CTE(exp.Args{
+	cte := p.expression(exp.CTE(exp.Args{
 		"this":         p.parseWrapped(func() exp.Expression { return p.parseStatement() }, false),
 		"alias":        alias,
 		"materialized": materialized,
 	}), nil, comments)
+	// CTE canonicalization (parser.py:4241-4243, v30.17.0): a bare VALUES body becomes
+	// SELECT * FROM (VALUES ...) AS _values.
+	if body := cte.This(); body != nil && body.Kind() == exp.KindValues {
+		cte.Set("this", p.valuesToSelect(body.Pop()))
+	}
+	return cte
+}
+
+// valuesToSelect ports _values_to_select (parser.py:4247-4250): wrap a bare Values in
+// `SELECT * FROM (VALUES ...) [AS _values]` (the alias is added only when the Values has none).
+func (p *Parser) valuesToSelect(values exp.Expression) exp.Expression {
+	if values.Arg("alias") == nil {
+		values.Set("alias", p.expression(exp.TableAlias(exp.Args{
+			"this": exp.Identifier(exp.Args{"this": "_values", "quoted": false}),
+		}), nil, nil))
+	}
+	return p.expression(exp.Select(exp.Args{
+		"expressions": []exp.Expression{exp.Star(nil)},
+		"from_":       p.expression(exp.From(exp.Args{"this": values}), nil, nil),
+	}), nil, nil)
 }
 
 func (p *Parser) parseRecursiveWithSearch() exp.Expression {
