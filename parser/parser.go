@@ -1845,14 +1845,19 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 		p.advance()
 		this = p.expression(exp.JSONArrayContains(exp.Args{"this": this, "expression": p.parseWrapped(p.parseExpression, false)}), nil, nil)
 	case tokens.SOUNDS_LIKE:
-		// mysql RANGE_PARSERS[TokenType.SOUNDS_LIKE] (parsers/mysql.py:91-96): `x SOUNDS
+		// mysql _parse_range override (parsers/mysql.py:303-318, v30.17.0): `x SOUNDS
 		// LIKE y` desugars to EQ(Soundex(x), Soundex(y)) (no dedicated exp.SoundsLike
-		// class upstream). SOUNDS_LIKE is mysql-only tokenized.
+		// class upstream; the RHS is a bitwise operand). MySQL evaluates = and IS left to
+		// right (same precedence), so a following IS wraps the EQ in parens.
+		// SOUNDS_LIKE is mysql-only tokenized.
 		p.advance()
 		this = p.expression(exp.EQ(exp.Args{
 			"this":       p.expression(exp.Soundex(exp.Args{"this": this}), nil, nil),
-			"expression": p.expression(exp.Soundex(exp.Args{"this": p.parseTerm()}), nil, nil),
+			"expression": p.expression(exp.Soundex(exp.Args{"this": p.parseBitwise()}), nil, nil),
 		}), nil, nil)
+		if p.curr.TokenType == tokens.IS {
+			this = p.expression(exp.Paren(exp.Args{"this": this}), nil, nil)
+		}
 	case tokens.IS:
 		// RANGE_PARSERS[TokenType.IS] = lambda self, this: self._parse_is(this)
 		// (parser.py:1192): matched here in addition to the unconditional `if

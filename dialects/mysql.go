@@ -141,6 +141,12 @@ func MySQL() *Dialect {
 		"SCHEMA":           exp.FromArgListFunc(exp.KindCurrentSchema),
 		"INSTR":            exp.FromArgListFunc(exp.KindStrPosition),
 		"TIME_STR_TO_UNIX": exp.FromArgListFunc(exp.KindTimeStrToUnix),
+		// parsers/mysql.py:108-110 (v30.17.0): MySQL DATEDIFF counts date-part boundaries.
+		"DATEDIFF": func(args []exp.Expression) exp.Expression {
+			return exp.New(exp.KindDateDiff, exp.Args{
+				"this": hiveSeqGet(args, 0), "expression": hiveSeqGet(args, 1), "date_part_boundary": true,
+			})
+		},
 	}
 
 	for _, unit := range []string{
