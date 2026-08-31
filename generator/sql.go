@@ -666,6 +666,23 @@ func (g *Generator) havingSQL(e expressions.Expression) string {
 	return g.seg("HAVING") + g.sep() + this
 }
 
+// connect_sql / prior_sql (generator.py:2830-2839).
+func (g *Generator) connectSQL(e expressions.Expression) string {
+	start := g.sqlKey(e, "start")
+	if start != "" {
+		start = g.seg("START WITH " + start)
+	}
+	nocycle := ""
+	if boolValue(e.Arg("nocycle")) {
+		nocycle = " NOCYCLE"
+	}
+	return start + g.seg("CONNECT BY"+nocycle+" "+g.sqlKey(e, "connect"))
+}
+
+func (g *Generator) priorSQL(e expressions.Expression) string {
+	return "PRIOR " + g.sqlKey(e, "this")
+}
+
 func (g *Generator) qualifySQL(e expressions.Expression) string {
 	this := g.indent(g.sqlKey(e, "this"), 0, nil, false, false)
 	return g.seg("QUALIFY") + g.sep() + this

@@ -67,6 +67,10 @@ const (
 	KindSubquery
 	KindHaving
 	KindQualify
+	// KindConnect/KindPrior (query.py:526-531): START WITH ... CONNECT BY hierarchical
+	// query clause and its PRIOR operand marker.
+	KindConnect
+	KindPrior
 	KindCube
 	KindRollup
 	KindGroupingSets
@@ -828,6 +832,8 @@ var argTypes = map[Kind][]argSpec{
 	KindSubquery:            withQueryModifiers(argSpec{"this", true}, argSpec{"alias", false}, argSpec{"with_", false}),
 	KindHaving:              {{"this", true}},
 	KindQualify:             {{"this", true}},
+	KindConnect:             {{"start", false}, {"connect", true}, {"nocycle", false}},
+	KindPrior:               defaultArgTypes,
 	KindCube:                {{"expressions", false}},
 	KindRollup:              {{"expressions", false}},
 	KindGroupingSets:        {{"expressions", true}},
@@ -1663,6 +1669,8 @@ var className = map[Kind]string{
 	KindSubquery:                            "Subquery",
 	KindHaving:                              "Having",
 	KindQualify:                             "Qualify",
+	KindConnect:                             "Connect",
+	KindPrior:                               "Prior",
 	KindCube:                                "Cube",
 	KindRollup:                              "Rollup",
 	KindGroupingSets:                        "GroupingSets",

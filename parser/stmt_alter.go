@@ -291,19 +291,15 @@ func (p *Parser) parseAlterTableAlter() exp.Expression {
 	if p.match(tokens.USING) {
 		using = p.parseDisjunction()
 	}
-	// v30.17.0 (parser.py:9106-9114): a trailing [NOT] NULL sets nullability with the type.
-	var allowNull any
-	if p.matchTextSeq("NOT", "NULL") {
-		allowNull = false
-	} else if p.match(tokens.NULL) {
-		allowNull = true
-	}
+	// AlterColumn.allow_null WITH a dtype is generator-only (a programmatic AST can set
+	// it; SUPPORTS_ALTER_COLUMN_NULLABILITY gates rendering): upstream v30.17.0 does not
+	// PARSE a trailing [NOT] NULL here — the statement falls back to Command — so neither
+	// does the port (consuming it would silently drop nullability on unsupporting dialects).
 	return withExists(exp.Args{
-		"this":       column,
-		"dtype":      dtype,
-		"collate":    collate,
-		"using":      using,
-		"allow_null": allowNull,
+		"this":    column,
+		"dtype":   dtype,
+		"collate": collate,
+		"using":   using,
 	})
 }
 

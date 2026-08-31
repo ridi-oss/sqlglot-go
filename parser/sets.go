@@ -3,6 +3,7 @@ package parser
 import "github.com/ridi-oss/sqlglot-go/tokens"
 
 var idVarTokens = map[tokens.TokenType]bool{
+	tokens.OUT:                     true,
 	tokens.SESSION:                 true,
 	tokens.SESSION_USER:            true,
 	tokens.IDENTIFIER:              true,
@@ -815,6 +816,7 @@ var queryModifierTokens = map[tokens.TokenType]bool{
 	tokens.DISTRIBUTE_BY: true,
 	tokens.SORT_BY:       true,
 	tokens.PREWHERE:      true,
+	tokens.CONNECT_BY:    true,
 }
 var windowAliasTokens = buildWindowAliasTokens()
 var fetchTokens = buildFetchTokens()

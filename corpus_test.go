@@ -250,7 +250,7 @@ func writeGaps(fails map[gapKey]string) error {
 // also (illegitimately) added to parity_gaps.txt. Values below are reconciled by a full
 // SQLGLOT_CORPUS_UPDATE=1 run on the merged tree.
 const (
-	minPassBase     = 955
+	minPassBase     = 980
 	minPassMySQL    = 428
 	minPassPostgres = 468
 )
@@ -264,7 +264,7 @@ const (
 // the subset check tolerates now-stale gap entries. Raise these when the corpus
 // legitimately grows; a count below any floor means the corpus shrank.
 const (
-	minTotalBase     = 955
+	minTotalBase     = 980
 	minTotalMySQL    = 428
 	minTotalPostgres = 468
 )

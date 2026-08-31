@@ -466,6 +466,7 @@ SELECT a.* EXCEPT (a, b), b.* REPLACE (a AS b, b AS C) FROM x
 SELECT A.* EXCEPT (A.COL_1) FROM TABLE_1 AS A
 SELECT zoo, animals FROM (VALUES ('oakland', ARRAY('a', 'b')), ('sf', ARRAY('b', 'c'))) AS t(zoo, animals)
 SELECT zoo, animals FROM UNNEST(ARRAY(STRUCT('oakland' AS zoo, ARRAY('a', 'b') AS animals), STRUCT('sf' AS zoo, ARRAY('b', 'c') AS animals))) AS t(zoo, animals)
+WITH out AS (SELECT 1 AS c) SELECT * FROM out
 WITH a AS (SELECT 1) SELECT 1 UNION ALL SELECT 2
 WITH a AS (SELECT 1) SELECT 1 UNION SELECT 2
 WITH a AS (SELECT 1) SELECT 1 INTERSECT SELECT 2
@@ -950,3 +951,27 @@ SELECT UNIFORM(1, 10)
 SELECT CURRENT_TIMEZONE()
 SELECT NUMRANGE(1.1, 2.2) -|- NUMRANGE(2.2, 3.3)
 CREATE TABLE t (a VARCHAR, check INT)
+CREATE TABLE "if" (x INT)
+DROP TABLE "if"
+SELECT TRIM("both") FROM t
+"while"
+DROP INDEX "concurrently"
+CREATE INDEX "concurrently" ON t(x)
+CREATE TABLE t AS "minvalue"
+CREATE TABLE t AS "increment"
+CREATE TABLE t AS "start"
+CREATE TABLE t AS "cache"
+CREATE TABLE t AS "sample"
+DESCRIBE "history"
+SELECT * FROM t CONNECT BY "nocycle" = 1
+SELECT a BETWEEN "symmetric" AND b FROM t
+SELECT JSON_OBJECT("key": 1)
+SELECT JSON_OBJECT('a': "value")
+CREATE INDEX i ON t(c "nulls")
+GRANT SELECT ON TABLE t TO "role"
+ANALYZE "verbose"
+ANALYZE "tables"
+ANALYZE "database"
+CREATE TABLE t (a INT, UNIQUE "key" (a))
+USE "role"
+SELECT MATCH("table") AGAINST('x') FROM t

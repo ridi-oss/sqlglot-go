@@ -31,6 +31,8 @@ func Intersect(args Args) Expression           { return newNode(KindIntersect, a
 func Subquery(args Args) Expression            { return newNode(KindSubquery, args) }
 func Having(args Args) Expression              { return newNode(KindHaving, args) }
 func Qualify(args Args) Expression             { return newNode(KindQualify, args) }
+func Connect(args Args) Expression             { return newNode(KindConnect, args) }
+func Prior(args Args) Expression               { return newNode(KindPrior, args) }
 func Cube(args Args) Expression                { return newNode(KindCube, args) }
 func Rollup(args Args) Expression              { return newNode(KindRollup, args) }
 func GroupingSets(args Args) Expression        { return newNode(KindGroupingSets, args) }

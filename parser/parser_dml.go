@@ -70,7 +70,9 @@ func (p *Parser) parseInsert() exp.Expression {
 	returning := p.parseReturning()
 	byName := p.matchTextSeq("BY", "NAME")
 	exists := p.parseExists(false)
-	// v30.17.0 (parser.py:3655-3661): REPLACE WHERE <cond> | REPLACE USING (cols).
+	// v30.17.0 (parser.py:3655-3661): REPLACE WHERE <cond> | REPLACE USING (cols); a bare
+	// REPLACE is consumed and the source parse continues (INSERT INTO t REPLACE SELECT 1
+	// canonicalizes to INSERT INTO t SELECT 1 upstream).
 	var where exp.Expression
 	var replaceUsing []exp.Expression
 	if p.match(tokens.REPLACE) {
@@ -78,8 +80,6 @@ func (p *Parser) parseInsert() exp.Expression {
 			where = p.parseDisjunction()
 		} else if p.match(tokens.USING) {
 			replaceUsing = p.parseUsingIdentifiers()
-		} else {
-			p.retreat(p.index - 1)
 		}
 	}
 	default_ := p.matchTextSeq("DEFAULT", "VALUES")
@@ -252,7 +252,11 @@ func (p *Parser) parseExists(not_ bool) any {
 
 func (p *Parser) parseVarFromOptions(options optionsType, raiseUnmatched bool) exp.Expression {
 	start := p.curr
-	if !start.IsValid() {
+	if !start.IsValid() || textMatchExcludedTokens[start.TokenType] {
+		// A quoted identifier or string is never an option keyword (parser.py:9576-9578).
+		if raiseUnmatched && start.IsValid() {
+			p.raiseError("Unknown option " + start.Text)
+		}
 		return nil
 	}
 	option := stringsUpper(start.Text)

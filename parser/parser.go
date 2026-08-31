@@ -10,6 +10,7 @@ import (
 )
 
 type Parser struct {
+	connectPriorDepth   int
 	errorLevel          sqlerrors.ErrorLevel
 	errorMessageContext int
 	maxErrors           int
@@ -952,6 +953,34 @@ func (p *Parser) parseSelect(opts ...bool) exp.Expression {
 	return this
 }
 
+// parseConnect ports _parse_connect (parser.py:5624-5639): [START WITH <cond>]
+// CONNECT BY [NOCYCLE] <cond> [START WITH <cond>]. skipStartToken: the caller already
+// consumed CONNECT BY (the query-modifier table dispatches on it).
+func (p *Parser) parseConnect(skipStartToken bool) exp.Expression {
+	var start exp.Expression
+	if !skipStartToken {
+		if !p.matchTextSeq("START", "WITH") {
+			return nil
+		}
+		start = p.parseDisjunction()
+		p.match(tokens.CONNECT_BY)
+	}
+	nocycle := p.matchTextSeq("NOCYCLE")
+	connect := p.parseConnectWithPrior()
+	if start == nil && p.matchTextSeq("START", "WITH") {
+		start = p.parseDisjunction()
+	}
+	return p.expression(exp.Connect(exp.Args{"start": start, "connect": connect, "nocycle": nocycle}), nil, nil)
+}
+
+// parseConnectWithPrior ports _parse_connect_with_prior (parser.py:5616-5622): PRIOR is a
+// no-paren prefix only inside the CONNECT BY condition.
+func (p *Parser) parseConnectWithPrior() exp.Expression {
+	p.connectPriorDepth++
+	defer func() { p.connectPriorDepth-- }()
+	return p.parseDisjunction()
+}
+
 func (p *Parser) parseQueryModifiers(this exp.Expression) exp.Expression {
 	if this != nil && (this.Is(exp.TraitQuery) || this.Kind() == exp.KindTable) {
 		for {
@@ -971,7 +1000,22 @@ func (p *Parser) parseQueryModifiers(this exp.Expression) exp.Expression {
 			}
 			this.Append("laterals", lateral)
 		}
-		for queryModifierTokens[p.curr.TokenType] {
+		for {
+			if !queryModifierTokens[p.curr.TokenType] {
+				// v30.17.0 (parser.py:4371-4382): a leading START (text) may begin a
+				// START WITH ... CONNECT BY clause.
+				if stringsUpper(p.curr.Text) == "START" && !textMatchExcludedTokens[p.curr.TokenType] {
+					modTok := p.curr
+					if connect := p.parseConnect(false); connect != nil {
+						if this.Arg("connect") != nil {
+							p.raiseError("Found multiple 'START WITH' clauses", modTok)
+						}
+						this.Set("connect", connect)
+						continue
+					}
+				}
+				break
+			}
 			parse := queryModifierParsers[p.curr.TokenType]
 			modTok := p.curr
 			key, expression := parse(p)
@@ -1873,10 +1917,7 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 			// _parse_operator (parser.py:10122-10139): postgres `x OPERATOR(schema.op) y`,
 			// chainable (`x OPERATOR(op1) y OPERATOR(op2) z`).
 			p.advance()
-			for {
-				if !p.match(tokens.L_PAREN) {
-					break
-				}
+			for p.match(tokens.L_PAREN) {
 				op := ""
 				for p.curr.IsValid() && !p.match(tokens.R_PAREN) {
 					op += p.curr.Text
@@ -1936,7 +1977,7 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 		}
 		if negate {
 			this = p.negateRange(this)
-			if p.curr.IsValid() && (p.curr.TokenType == tokens.NOT || rangeChainTokens[p.curr.TokenType]) {
+			if p.curr.IsValid() && (p.curr.TokenType == tokens.NOT || p.isRangeChainToken(p.curr.TokenType)) {
 				this = p.expression(exp.Paren(exp.Args{"this": this}), nil, nil)
 			}
 		}
@@ -1953,7 +1994,22 @@ var rangeChainTokens = map[tokens.TokenType]bool{
 	tokens.QMARK_AMP: true, tokens.QMARK_PIPE: true, tokens.HASH_DASH: true,
 	tokens.AT_QMARK: true, tokens.ADJACENT: true, tokens.OPERATOR: true,
 	tokens.AMP_LT: true, tokens.AMP_GT: true,
-	tokens.DAMP: true, tokens.DAT: true, tokens.MEMBER_OF: true,
+}
+
+// dialectRangeChainTokens are range tokens only in one dialect's RANGE_PARSERS: postgres
+// `&&`/`@@`, mysql MEMBER OF. Elsewhere they are not range operators (mysql `&&` is a
+// conjunction), so the chain-parenthesization check must ignore them.
+func (p *Parser) isRangeChainToken(tt tokens.TokenType) bool {
+	if rangeChainTokens[tt] {
+		return true
+	}
+	switch tt {
+	case tokens.DAMP, tokens.DAT:
+		return p.dialect.Name == "postgres"
+	case tokens.MEMBER_OF:
+		return p.dialect.Name == "mysql"
+	}
+	return false
 }
 
 // negateRange ports _negate_range (parser.py:6019-6029): LIKE/ILIKE absorb the NOT as
@@ -4016,7 +4072,13 @@ func init() {
 			return p.expression(exp.Any(exp.Args{"this": p.parseBitwise()}), nil, nil)
 		},
 		"CASE": func(p *Parser) exp.Expression { return p.parseCase() },
-		"IF":   func(p *Parser) exp.Expression { return p.parseIf() },
+		// PRIOR is a no-paren prefix ONLY inside a CONNECT BY condition
+		// (_parse_connect_with_prior, parser.py:5616-5622); the lookup gate lives in
+		// noParenFunctionParserFor so `PRIOR` stays an ordinary identifier elsewhere.
+		"PRIOR": func(p *Parser) exp.Expression {
+			return p.expression(exp.Prior(exp.Args{"this": p.parseBitwise()}), nil, nil)
+		},
+		"IF": func(p *Parser) exp.Expression { return p.parseIf() },
 	}
 	functionParsers = map[string]func(*Parser) exp.Expression{
 		"CAST":        func(p *Parser) exp.Expression { return p.parseCast(p.strictCast, nil) },
@@ -4062,6 +4124,10 @@ func init() {
 		tokens.GROUP_BY: func(p *Parser) (string, any) { return "group", p.parseGroup(false) },
 		tokens.HAVING:   func(p *Parser) (string, any) { return "having", p.parseHaving(false) },
 		tokens.QUALIFY:  func(p *Parser) (string, any) { return "qualify", p.parseQualify() },
+		tokens.CONNECT_BY: func(p *Parser) (string, any) {
+			p.match(tokens.CONNECT_BY)
+			return "connect", p.parseConnect(true)
+		},
 		tokens.WINDOW:   func(p *Parser) (string, any) { return "windows", p.parseWindowClause() },
 		tokens.ORDER_BY: func(p *Parser) (string, any) { return "order", p.parseOrder(nil, false) },
 		tokens.LIMIT:    func(p *Parser) (string, any) { return "limit", p.parseLimit(nil, false, false) },
