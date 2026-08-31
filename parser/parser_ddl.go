@@ -387,7 +387,7 @@ func (p *Parser) parseCreateFunction(ctt tokens.TokenType) (this, expression exp
 		expression = p.parseStatement()
 	} else {
 		// exp.Block: the PROCEDURE (and BEGIN-bodied FUNCTION) body fallback (parser.py:2463).
-		expression = p.parseBlock()
+		expression = p.parseBlock(begin == true)
 	}
 	if returnMatched {
 		expression = p.expression(exp.Return(exp.Args{"this": expression}), nil, nil)

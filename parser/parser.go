@@ -395,14 +395,15 @@ func (p *Parser) expression(instance exp.Expression, token *tokens.Token, commen
 // additionally stamped with its source span + verbatim text (parseSpanned, Go-only §6.2), so a
 // batch consumer can recover the exact submitted bytes per statement; a statement whose body
 // consumed several chunks (a procedure BEGIN...END) spans them all, inner semicolons included.
-func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirstStatement bool) []exp.Expression {
+func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirstStatement bool, beganAlready ...bool) []exp.Expression {
 	parseStamped := func() exp.Expression {
 		startTok := p.curr
 		return p.statementSpanned(parseMethod(), startTok, p.prev)
 	}
 	expressions := []exp.Expression{}
+	beginMatched := len(beganAlready) > 0 && beganAlready[0]
 	if sepFirstStatement {
-		p.match(tokens.BEGIN)
+		beginMatched = p.match(tokens.BEGIN) || beginMatched
 		// Empty block (`BEGIN END`, valid MySQL): the block's own END is the chunk's last
 		// token — terminate here instead of mis-parsing END as a column (DEVIATIONS §1.18).
 		if p.curr.TokenType == tokens.END && !p.next.IsValid() && p.match(tokens.END) {
@@ -433,12 +434,20 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 			}
 			return expressions
 		}
-		if len(expressions) > 0 && !p.next.IsValid() && p.match(tokens.END) {
+		// divergence: at top level under postgres, a bare END chunk falls through to the
+		// statement parser (parseEndTransaction -> Commit) instead of this EndStatement fast
+		// path: real PG 16 executes `BEGIN; SELECT 1; END` with END as COMMIT; upstream
+		// returns [Transaction, Select, EndStatement]. See DEVIATIONS §1.18.
+		isBareEnd := !p.next.IsValid() && p.curr.TokenType == tokens.END &&
+			(sepFirstStatement || p.dialect.Name != "postgres")
+		if isBareEnd && (len(expressions) > 0 || (!sepFirstStatement && p.dialect.Name == "mysql")) &&
+			p.match(tokens.END) {
 			// divergence: a bare top-level END chunk is a parse error under MySQL — real
-			// MySQL 8.0 rejects it (error 1064), and a top-level EndStatement fragment is
-			// exactly the truncation residue a per-statement consumer must not receive.
-			// base keeps upstream's EndStatement; Postgres never reaches here for a leading
-			// END (parseEndTransaction -> COMMIT). See DEVIATIONS §1.18.
+			// MySQL 8.0 rejects it (error 1064; a batch-LEADING `END` included), and a
+			// top-level EndStatement fragment is exactly the truncation residue a
+			// per-statement consumer must not receive. base keeps upstream's EndStatement;
+			// Postgres never reaches here for a leading END (parseEndTransaction -> COMMIT).
+			// See DEVIATIONS §1.18.
 			if !sepFirstStatement && p.dialect.Name == "mysql" {
 				p.raiseError("Unexpected END")
 				p.checkErrors()
@@ -464,6 +473,16 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 		}
 		p.checkErrors()
 	}
+	// divergence: a block that opened with BEGIN and exhausted the batch without its
+	// terminating END is an unterminated body — real MySQL 8.0 rejects
+	// `CREATE PROCEDURE p() BEGIN SELECT 1;` (error 1064; PG's BEGIN ATOMIC likewise
+	// requires END); upstream silently truncates. Fail closed, every dialect. A body
+	// WITHOUT BEGIN (`CREATE PROCEDURE p() SELECT 1`, valid single-statement routine)
+	// has no END to miss. See DEVIATIONS §1.18.
+	if beginMatched {
+		p.raiseError("Unterminated BEGIN block")
+		p.checkErrors()
+	}
 	return expressions
 }
 
@@ -475,9 +494,11 @@ func (p *Parser) parseCondition() exp.Expression {
 // parseBlock ports _parse_block (parser.py:2269-2276): the `BEGIN stmt; ...; END` body of a
 // procedure/function or WHILE statement, consuming semicolon chunks up to and including the
 // block's terminating END chunk (divergence from upstream's consume-all; DEVIATIONS §1.18).
-func (p *Parser) parseBlock() exp.Expression {
+// beganAlready: the caller consumed the body's BEGIN itself (parseCreateFunction), so the
+// unterminated-block check applies even though this call won't match one.
+func (p *Parser) parseBlock(beganAlready bool) exp.Expression {
 	return p.expression(exp.Block(exp.Args{
-		"expressions": p.parseBatchStatements(p.parseStatement, true),
+		"expressions": p.parseBatchStatements(p.parseStatement, true, beganAlready),
 	}), nil, nil)
 }
 
@@ -489,7 +510,7 @@ func (p *Parser) parseWhileBlock() exp.Expression {
 	condition := p.parseCondition()
 	var body exp.Expression
 	if p.curr.TokenType == tokens.BEGIN {
-		body = p.parseBlock()
+		body = p.parseBlock(false)
 	} else {
 		body = p.expression(exp.Block(exp.Args{
 			"expressions": []exp.Expression{p.parseStatement()},

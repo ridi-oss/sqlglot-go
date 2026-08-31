@@ -27,9 +27,6 @@ func TestCreateProcedureBody(t *testing.T) {
 		// The already-consumed AS spelling round-trips identically.
 		{"CREATE PROCEDURE p() AS BEGIN SELECT 1; END", []string{"mysql"},
 			exp.KindCreate, "CREATE PROCEDURE p() AS BEGIN SELECT 1; END"},
-		// Unterminated block: the trailing END is simply absent from the Block.
-		{"CREATE PROCEDURE p() BEGIN SELECT 1", []string{"mysql"},
-			exp.KindCreate, "CREATE PROCEDURE p() AS BEGIN SELECT 1"},
 		// divergence (§1.18): a BEGIN-bodied FUNCTION takes the block path like PROCEDURE —
 		// upstream's single-statement body path leaves the END as a dangling top-level
 		// EndStatement fragment.
@@ -186,9 +183,57 @@ func TestDegradedCreateFailsClosed(t *testing.T) {
 		// Empty trailing chunk while unbalanced: an error, not a slice-bounds panic.
 		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a=1;;",
 		"SELECT 1; END",
+		// Unterminated structured body (real MySQL error 1064): an error, not a silently
+		// truncated Create ending at the last inner statement.
+		"CREATE PROCEDURE p() BEGIN SELECT 1",
+		"CREATE PROCEDURE p() BEGIN SELECT 1;",
+		// Bare END as the whole batch (real MySQL error 1064): an error, not Column(END).
+		"END",
 	} {
 		if _, err := sqlglot.Parse(sql, "mysql"); err == nil {
 			t.Errorf("%q parsed; want error", sql)
+		}
+	}
+}
+
+// A routine body WITHOUT BEGIN (a valid single-statement routine) must not trip the
+// unterminated-block error; and bare `END` stays dialect-correct: mysql errors (real MySQL
+// 1064), postgres is COMMIT, base keeps upstream's Column.
+func TestNoBeginBodyAndBareEndDialects(t *testing.T) {
+	for _, dialect := range []string{"base", "mysql", "postgres"} {
+		e, err := sqlglot.ParseOne("CREATE PROCEDURE p() SELECT 1", dialect)
+		if err != nil {
+			t.Errorf("[%s] no-BEGIN body: %v", dialect, err)
+		} else if e.Kind() != exp.KindCreate {
+			t.Errorf("[%s] no-BEGIN body: Kind=%s, want Create", dialect, exp.ClassName(e.Kind()))
+		}
+	}
+	if e, err := sqlglot.ParseOne("END", "postgres"); err != nil || e.Kind() != exp.KindCommit {
+		t.Errorf("[postgres] END: got %v/%v, want Commit", e, err)
+	}
+	if e, err := sqlglot.ParseOne("END", "base"); err != nil || e.Kind() != exp.KindColumn {
+		t.Errorf("[base] END: got %v/%v, want Column", e, err)
+	}
+	if _, err := sqlglot.ParseOne("SELECT end", "mysql"); err != nil {
+		t.Errorf("[mysql] SELECT end: %v", err)
+	}
+}
+
+// Under postgres a bare END chunk is COMMIT wherever it appears in the batch — real PG 16
+// executes `BEGIN; SELECT 1; END` with END closing the transaction; upstream returns a
+// dangling EndStatement for the mid-batch position (DEVIATIONS §1.18).
+func TestPostgresMidBatchEndIsCommit(t *testing.T) {
+	statements, err := sqlglot.Parse("BEGIN; SELECT 1; END", "postgres")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := []exp.Kind{exp.KindTransaction, exp.KindSelect, exp.KindCommit}
+	if len(statements) != len(want) {
+		t.Fatalf("got %d statements, want %d", len(statements), len(want))
+	}
+	for i, k := range want {
+		if statements[i].Kind() != k {
+			t.Errorf("stmt %d: Kind=%s, want %s", i, exp.ClassName(statements[i].Kind()), exp.ClassName(k))
 		}
 	}
 }
