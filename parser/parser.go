@@ -409,6 +409,15 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 			return []exp.Expression{p.spanned(exp.EndStatement(nil), p.prev, p.prev)}
 		}
 		expressions = append(expressions, parseStamped())
+		// divergence: unlike upstream, the block's FIRST statement gets the same trailing-
+		// token check as later chunks. A body statement the parser can't fully consume
+		// (PG `BEGIN ATOMIC SELECT 1`, MySQL `DECLARE x INT DEFAULT 1`) must fail here — so
+		// the enclosing CREATE degrades to a Command through the body's END — instead of
+		// silently truncating to a mangled structured AST (DEVIATIONS §1.18).
+		if p.index < p.tokensSize {
+			p.raiseError("Invalid expression / Unexpected token")
+		}
+		p.checkErrors()
 	}
 	chunksLength := len(p.chunks)
 	for p.chunkIndex < chunksLength {
@@ -425,6 +434,15 @@ func (p *Parser) parseBatchStatements(parseMethod func() exp.Expression, sepFirs
 			return expressions
 		}
 		if len(expressions) > 0 && !p.next.IsValid() && p.match(tokens.END) {
+			// divergence: a bare top-level END chunk is a parse error under MySQL — real
+			// MySQL 8.0 rejects it (error 1064), and a top-level EndStatement fragment is
+			// exactly the truncation residue a per-statement consumer must not receive.
+			// base keeps upstream's EndStatement; Postgres never reaches here for a leading
+			// END (parseEndTransaction -> COMMIT). See DEVIATIONS §1.18.
+			if !sepFirstStatement && p.dialect.Name == "mysql" {
+				p.raiseError("Unexpected END")
+				p.checkErrors()
+			}
 			expressions = append(expressions, p.spanned(exp.EndStatement(nil), p.prev, p.prev))
 			// divergence: inside a block (sepFirstStatement), END terminates the block; the
 			// remaining chunks belong to the outer batch. Upstream's _parse_block keeps

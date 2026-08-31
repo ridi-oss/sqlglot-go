@@ -135,6 +135,26 @@ body without its own `BEGIN` is the single following statement (T-SQL's actual b
 cannot steal the enclosing routine's `END`. `parser.go` `parseBatchStatements`/`parseWhileBlock`;
 test `TestBlockEndTerminates`.
 
+The same rule covers every routine form, not just PROCEDURE — upstream leaves the others' `END`
+as a dangling top-level `EndStatement` fragment (a truncated definition plus a bare `END`, each
+"authorized/executed" as a statement the user never wrote):
+- MySQL `CREATE FUNCTION … BEGIN … END` takes the block path when a `BEGIN` body is present
+  (upstream: single-statement body, dangling `END`).
+- A CREATE the structured parse degrades (MySQL TRIGGER/DECLARE bodies, PG `BEGIN ATOMIC` —
+  the block's first statement now gets the trailing-token check, so an unconsumable body
+  statement degrades the whole definition instead of a mangled structured AST) becomes a
+  `Command` extended through the block's balancing `END` chunk (`parseCreateAsCommand` +
+  `blockDepthDelta`, which nets out unquoted `END IF|WHILE|LOOP|REPEAT` and CASE pairs and
+  skips dot-qualified keywords). PG 16 executes `BEGIN ATOMIC … END; SELECT 2` as exactly
+  [definition, SELECT].
+- The depth count is token-level, so ambiguity FAILS CLOSED, never merges: depth still
+  positive at batch end (unterminated body, or a bare identifier named `begin`/`case`
+  inflating the count) is a parse error, and a residual bare top-level `END` chunk is a parse
+  error under MySQL (real MySQL 8.0 rejects it) rather than upstream's `EndStatement`
+  fragment.
+Tests `TestRoutineBodyOneStatement`, `TestDegradedCreateFailsClosed`,
+`TestQualifiedKeywordNotBlockToken`, `TestUnsupportedBodyStatementDegradesWhole`.
+
 ---
 
 ## Opt-in behavioral extensions beyond upstream
