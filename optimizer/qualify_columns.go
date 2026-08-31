@@ -104,7 +104,7 @@ func qualifyColumns(expression exp.Expression, schemaArg schema.SchemaType, expa
 			if expandStars {
 				expandStarsInScope(scope, resolver, usingColumnTables, pseudocolumns, annotator)
 			}
-			QualifyOutputs(scope)
+			QualifyOutputs(scope, d)
 		}
 
 		expandGroupBy(scope, d)
@@ -380,7 +380,7 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 			if hasAlias && aliasExpr != nil {
 				// v30.17.0 (qualify_columns.py:369-380): an aggregate alias must not expand
 				// into a GROUP BY, nor into another (non-window) aggregate.
-				skipReplace = aliasExpr.Find(exp.TraitAggFunc) != nil &&
+				skipReplace = findInScope(aliasExpr, exp.TraitAggFunc) != nil &&
 					(isGroupBy || (findAncestorTrait(column, exp.TraitAggFunc) != nil && !ancestorBeforeSelectIsWindow(column)))
 
 				if (isHaving || isQualify) && dialect.ProjectionAliasesShadowSourceNames {
@@ -738,6 +738,18 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 	}
 }
 
+// hasDuplicateName reports whether a source column list exposes the same name twice.
+func hasDuplicateName(columns []string) bool {
+	seen := make(map[string]bool, len(columns))
+	for _, name := range columns {
+		if seen[name] {
+			return true
+		}
+		seen[name] = true
+	}
+	return false
+}
+
 func expandStarsInScope(scope *Scope, resolver *Resolver, usingColumnTables map[string][]string, pseudocolumns map[string]bool, annotator *TypeAnnotator) {
 	var newSelections []exp.Expression
 	coalescedColumns := map[string]bool{}
@@ -830,7 +842,10 @@ func expandStarsInScope(scope *Scope, resolver *Resolver, usingColumnTables map[
 				columns = filtered
 			}
 
-			if len(columns) == 0 || containsString(columns, "*") {
+			// v30.17.0 (qualify_columns.py:946-950): a source exposing duplicate output
+			// names (a derived table re-exposing colliding star-expanded columns) would
+			// expand into ambiguous projections — leave the star unexpanded.
+			if len(columns) == 0 || containsString(columns, "*") || hasDuplicateName(columns) {
 				return
 			}
 
@@ -946,7 +961,15 @@ func addReplaceColumns(expression exp.Expression, keys []string, replaceColumns 
 	}
 }
 
-func QualifyOutputs(scopeOrExpression any) {
+func QualifyOutputs(scopeOrExpression any, dialectArg ...dialects.DialectType) {
+	var dialectValue dialects.DialectType
+	if len(dialectArg) > 0 {
+		dialectValue = dialectArg[0]
+	}
+	dialect, err := dialects.GetOrRaise(dialectValue)
+	if err != nil {
+		panic(err)
+	}
 	var scope *Scope
 	if expression, ok := scopeOrExpression.(exp.Expression); ok {
 		scope = buildScope(expression)
@@ -991,7 +1014,28 @@ func QualifyOutputs(scopeOrExpression any) {
 			if aliasName == "" {
 				aliasName = fmt.Sprintf("_col_%d", i)
 			}
+			// v30.17.0 (qualify_columns.py:1147-1163): the alias copies an existing source
+			// identifier's exact spelling — a quoted column keeps its alias quoted, and only
+			// a synthetic alias is dialect-normalized.
+			unwrapped := selection.Unnest()
+			var sourceIdentifier exp.Expression
+			if unwrapped != nil {
+				switch unwrapped.Kind() {
+				case exp.KindColumn:
+					sourceIdentifier = unwrapped.This()
+				case exp.KindDot:
+					sourceIdentifier = unwrapped.Expr()
+				}
+			}
 			selection = exp.AliasExpr(selection, aliasName, false)
+			aliasChild := asExpression(selection.Arg("alias"))
+			if sourceIdentifier != nil && sourceIdentifier.Kind() == exp.KindIdentifier {
+				if quoted, _ := sourceIdentifier.Arg("quoted").(bool); quoted && aliasChild != nil {
+					aliasChild.Set("quoted", true)
+				}
+			} else if aliasChild != nil {
+				dialect.NormalizeIdentifier(aliasChild)
+			}
 		}
 		if i < len(scope.OuterColumns) && scope.OuterColumns[i] != "" {
 			selection.Set("alias", exp.ToIdentifier(scope.OuterColumns[i]))

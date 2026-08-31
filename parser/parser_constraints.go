@@ -222,21 +222,21 @@ func (p *Parser) parseAutoIncrement() exp.Expression {
 		args := p.parseWrappedCsv(p.parseBitwise)
 		start = seqGet(args, 0)
 		increment = seqGet(args, 1)
-	} else {
-		// v30.17.0 (parser.py:7590-7603): START/INCREMENT/ORDER form an unordered bag; any
-		// may be omitted (the engine falls back to its default), so parse independently.
-		for {
-			if p.matchTextSeq("START") {
-				start = p.parseBitwise()
-			} else if p.matchTextSeq("INCREMENT") {
-				increment = p.parseBitwise()
-			} else if p.matchTextSeq("ORDER") {
-				order = true
-			} else if p.matchTextSeq("NOORDER") {
-				order = false
-			} else {
-				break
-			}
+	}
+	// v30.17.0 (parser.py:7590-7603): START/INCREMENT/ORDER form an unordered bag; any
+	// may be omitted (the engine falls back to its default), so parse independently —
+	// also after the parenthesized positional form (`AUTOINCREMENT(0, 1) ORDER`).
+	for {
+		if p.matchTextSeq("START") {
+			start = p.parseBitwise()
+		} else if p.matchTextSeq("INCREMENT") {
+			increment = p.parseBitwise()
+		} else if p.matchTextSeq("ORDER") {
+			order = true
+		} else if p.matchTextSeq("NOORDER") {
+			order = false
+		} else {
+			break
 		}
 	}
 	// v30.17.0 (parser.py:7605): any of start/increment/order alone builds the identity.

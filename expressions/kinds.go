@@ -1493,7 +1493,7 @@ var traitsOf = map[Kind]Trait{
 	KindExtendsRight:            TraitCondition | TraitBinary | TraitPredicate,
 	KindArrayContainsAll:        TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindArrayContainedBy:        TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
-	KindArrayOverlaps:           TraitCondition | TraitBinary | TraitFunc,
+	KindArrayOverlaps:           TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindJSONBContains:           TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindJSONBContainsAllTopKeys: TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindJSONBContainsAnyTopKeys: TraitCondition | TraitBinary | TraitFunc | TraitPredicate,

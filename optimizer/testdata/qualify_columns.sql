@@ -5,7 +5,7 @@ SELECT a FROM x;
 SELECT x.a AS a FROM x AS x;
 
 SELECT "a" FROM x;
-SELECT x."a" AS a FROM x AS x;
+SELECT x."a" AS "a" FROM x AS x;
 
 # execute: false
 SELECT a FROM zz GROUP BY a ORDER BY a;
@@ -110,7 +110,7 @@ SELECT T."col" AS "col" FROM TBL T;
 # execute: false
 # dialect: oracle
 WITH base AS (SELECT x.dummy AS COL_1 FROM dual x) SELECT b."COL_1" FROM base b;
-WITH BASE AS (SELECT X.DUMMY AS COL_1 FROM DUAL X) SELECT B."COL_1" AS COL_1 FROM BASE B;
+WITH BASE AS (SELECT X.DUMMY AS COL_1 FROM DUAL X) SELECT B."COL_1" AS "COL_1" FROM BASE B;
 
 # execute: false
 -- this query seems to be invalid in postgres and duckdb but valid in bigquery
@@ -140,6 +140,28 @@ SELECT SUM(x.a) AS c FROM x AS x JOIN y AS y ON x.b = y.b GROUP BY y.c;
 
 SELECT COALESCE(x.a) AS d FROM x JOIN y ON x.b = y.b GROUP BY d;
 SELECT COALESCE(x.a) AS d FROM x AS x JOIN y AS y ON x.b = y.b GROUP BY COALESCE(x.a);
+
+# title: Aggregate alias must not be expanded into a GROUP BY (would nest the aggregate)
+# execute: false
+# validate_qualify_columns: false
+SELECT SUM(x.a) AS d FROM x JOIN y ON x.b = y.b GROUP BY UPPER(d);
+SELECT SUM(x.a) AS d FROM x AS x JOIN y AS y ON x.b = y.b GROUP BY UPPER(d);
+
+# title: Standalone aggregate alias reference in GROUP BY must not be expanded
+# execute: false
+# validate_qualify_columns: false
+SELECT SUM(x.a) AS d FROM x JOIN y ON x.b = y.b GROUP BY d;
+SELECT SUM(x.a) AS d FROM x AS x JOIN y AS y ON x.b = y.b GROUP BY d;
+
+# title: Aggregate alias colliding with a base column resolves the GROUP BY ref to the column
+# execute: false
+SELECT SUM(x.a) AS c FROM x JOIN y ON x.b = y.b GROUP BY UPPER(c);
+SELECT SUM(x.a) AS c FROM x AS x JOIN y AS y ON x.b = y.b GROUP BY UPPER(y.c);
+
+# title: Aggregate in a subquery scope does not block expanding an alias into GROUP BY
+# dialect: duckdb
+WITH x AS (SELECT * FROM (VALUES (1, 10), (2, 10), (3, 20)) AS v(a, b)) SELECT (SELECT MAX(t.a) FROM x AS t) + x.b AS f FROM x GROUP BY f ORDER BY f;
+WITH x AS (SELECT v.a AS a, v.b AS b FROM (VALUES (1, 10), (2, 10), (3, 20)) AS v(a, b)) SELECT (SELECT MAX(t.a) AS _col_0 FROM x AS t) + x.b AS f FROM x AS x GROUP BY (SELECT MAX(t.a) AS _col_0 FROM x AS t) + x.b ORDER BY f;
 
 SELECT a + 1 AS d FROM x WHERE d > 1;
 SELECT x.a + 1 AS d FROM x AS x WHERE (x.a + 1) > 1;
@@ -383,6 +405,14 @@ SELECT * FROM (SELECT 1 AS foo, 2 AS bar FULL UNION ALL CORRESPONDING BY (foo, b
 SELECT _0.foo AS foo, _0.bar AS bar FROM (SELECT 1 AS foo, 2 AS bar FULL UNION ALL BY NAME ON (foo, bar) SELECT 3 AS bar, 4 AS baz) AS _0;
 
 
+# dialect: duckdb
+SELECT * FROM (SELECT 1 AS foo, 2 AS bar UNION ALL BY NAME SELECT 3 AS bar, 4 AS baz) ORDER BY bar;
+SELECT _0.foo AS foo, _0.bar AS bar, _0.baz AS baz FROM (SELECT 1 AS foo, 2 AS bar UNION ALL BY NAME SELECT 3 AS bar, 4 AS baz) AS _0 ORDER BY _0.bar;
+
+# dialect: duckdb
+SELECT baz FROM (SELECT 1 AS foo, 2 AS bar UNION BY NAME SELECT 3 AS bar, 4 AS baz) AS t ORDER BY baz;
+SELECT t.baz AS baz FROM (SELECT 1 AS foo, 2 AS bar UNION BY NAME SELECT 3 AS bar, 4 AS baz) AS t ORDER BY baz;
+
 # dialect: bigquery
 # execute: false
 SELECT * FROM (SELECT 1 AS foo, 2 AS bar FULL UNION ALL BY NAME ON (foo, bar) SELECT 3 AS bar, 4 AS baz);
@@ -470,6 +500,21 @@ SELECT i.a AS a FROM x AS i WHERE i.b IN (SELECT j.b AS b FROM y AS j WHERE j.b 
 # execute: false
 SELECT (SELECT n.a FROM n WHERE n.id = m.id) FROM m AS m;
 SELECT (SELECT n.a AS a FROM n AS n WHERE n.id = m.id) AS _col_0 FROM m AS m;
+
+# title: correlated aggregate resolves to local source without schema
+# execute: false
+SELECT id FROM t WHERE id > (SELECT AVG(id) FROM u WHERE u.name = t.name);
+SELECT t.id AS id FROM t AS t WHERE t.id > (SELECT AVG(u.id) AS _col_0 FROM u AS u WHERE u.name = t.name);
+
+# title: correlated aggregate with self-correlation via alias
+# execute: false
+SELECT id FROM t WHERE id > (SELECT AVG(id) FROM t AS t2 WHERE t2.k = t.k);
+SELECT t.id AS id FROM t AS t WHERE t.id > (SELECT AVG(t2.id) AS _col_0 FROM t AS t2 WHERE t2.k = t.k);
+
+# title: correlated aggregate where inner column name matches outer table
+# execute: false
+SELECT id FROM t WHERE id > (SELECT AVG(u) FROM u WHERE u.k = t.k);
+SELECT t.id AS id FROM t AS t WHERE t.id > (SELECT AVG(u.u) AS _col_0 FROM u AS u WHERE u.k = t.k);
 
 --------------------------------------
 -- Expand *
@@ -793,6 +838,41 @@ WITH t1 AS (SELECT 1 AS id), t2 AS (SELECT 2 AS id) SELECT STRUCT(id AS col) AS 
 WITH t1 AS (SELECT 1 AS id), t2 AS (SELECT 2 AS id) SELECT STRUCT(COALESCE(t1.id, t2.id) AS col) AS my_field FROM t1 AS t1 JOIN t2 AS t2 ON t1.id = t2.id;
 
 --------------------------------------
+-- Natural join
+--------------------------------------
+-- A NATURAL JOIN is expanded to a USING join over the common columns.
+SELECT b FROM x NATURAL JOIN y;
+SELECT COALESCE(x.b, y.b) AS b FROM x AS x JOIN y AS y ON x.b = y.b;
+
+SELECT * FROM x NATURAL JOIN y;
+SELECT x.a AS a, COALESCE(x.b, y.b) AS b, y.c AS c FROM x AS x JOIN y AS y ON x.b = y.b;
+
+SELECT a FROM x NATURAL JOIN z;
+SELECT x.a AS a FROM x AS x JOIN z AS z ON x.b = z.b;
+
+-- Chained NATURAL JOINs intersect against all columns accumulated so far, so the
+-- second join's common columns include those contributed by y.
+SELECT b FROM x NATURAL JOIN y NATURAL JOIN z;
+SELECT COALESCE(x.b, y.b, z.b) AS b FROM x AS x JOIN y AS y ON x.b = y.b JOIN z AS z ON COALESCE(x.b, y.b) = z.b AND y.c = z.c;
+
+-- No common columns: there is no USING list to expand into, so NATURAL is left
+-- in place for the engine to reject or cross join as it sees fit.
+# execute: false
+SELECT a, d FROM x NATURAL LEFT JOIN w;
+SELECT x.a AS a, w.d AS d FROM x AS x NATURAL LEFT JOIN w AS w;
+
+-- An unknown schema on either side makes the common columns unknowable.
+# execute: false
+# validate_qualify_columns: false
+SELECT * FROM x NATURAL JOIN unknown_table;
+SELECT * FROM x AS x NATURAL JOIN unknown_table AS unknown_table;
+
+# execute: false
+# validate_qualify_columns: false
+SELECT * FROM unknown_table NATURAL JOIN x;
+SELECT * FROM unknown_table AS unknown_table NATURAL JOIN x AS x;
+
+--------------------------------------
 -- Hint with table reference
 --------------------------------------
 # dialect: spark
@@ -1019,6 +1099,30 @@ SELECT x.a AS a, y.b AS b, z.c AS c FROM x AS x LEFT JOIN (y AS y INNER JOIN z A
 SELECT * FROM ((SELECT * FROM x) INNER JOIN (SELECT * FROM y) ON a = c);
 SELECT _0.a AS a, _0.b AS b, _1.b AS b, _1.c AS c FROM ((SELECT x.a AS a, x.b AS b FROM x AS x) AS _0 INNER JOIN (SELECT y.b AS b, y.c AS c FROM y AS y) AS _1 ON _0.a = _1.c);
 
+# title: outer star over derived table with duplicate output names is left unexpanded
+SELECT * FROM (SELECT * FROM x CROSS JOIN y) AS s;
+SELECT * FROM (SELECT x.a AS a, x.b AS b, y.b AS b, y.c AS c FROM x AS x CROSS JOIN y AS y) AS s;
+
+# title: qualified outer star over derived table with duplicate output names is left unexpanded
+SELECT s.* FROM (SELECT * FROM x CROSS JOIN y) AS s;
+SELECT s.* FROM (SELECT x.a AS a, x.b AS b, y.b AS b, y.c AS c FROM x AS x CROSS JOIN y AS y) AS s;
+
+# title: outer star over derived table with distinct output names is expanded normally
+SELECT * FROM (SELECT a, c FROM x CROSS JOIN y) AS s;
+SELECT s.a AS a, s.c AS c FROM (SELECT x.a AS a, y.c AS c FROM x AS x CROSS JOIN y AS y) AS s;
+
+# title: nested outer stars over duplicate output names are left unexpanded at each level
+SELECT * FROM (SELECT * FROM (SELECT * FROM x CROSS JOIN y) AS s) AS t;
+SELECT * FROM (SELECT * FROM (SELECT x.a AS a, x.b AS b, y.b AS b, y.c AS c FROM x AS x CROSS JOIN y AS y) AS s) AS t;
+
+# title: user-authored duplicate aliases in a derived table are preserved, not clobbered
+SELECT * FROM (SELECT a AS k, a AS k FROM x) AS s;
+SELECT * FROM (SELECT x.a AS k, x.a AS k FROM x AS x) AS s;
+
+# title: mixed star and explicit projection in a derived table with duplicate output names is preserved
+SELECT * FROM (SELECT *, a AS extra FROM x CROSS JOIN y) AS s;
+SELECT * FROM (SELECT x.a AS a, x.b AS b, y.b AS b, y.c AS c, x.a AS extra FROM x AS x CROSS JOIN y AS y) AS s;
+
 SELECT b FROM ((SELECT a FROM x) INNER JOIN y ON a = b);
 SELECT y.b AS b FROM ((SELECT x.a AS a FROM x AS x) AS _0 INNER JOIN y AS y ON _0.a = y.b);
 
@@ -1075,3 +1179,64 @@ SELECT x.a AS a, COALESCE(x.b, y_2.b) AS b, y_2.c AS c FROM x AS x SEMI JOIN y A
 # title: ANTI + normal joins reinclude the table on scope
 SELECT * FROM x ANTI JOIN y USING (b) JOIN y USING (b);
 SELECT x.a AS a, COALESCE(x.b, y_2.b) AS b, y_2.c AS c FROM x AS x ANTI JOIN y AS y ON x.b = y.b JOIN y AS y_2 ON x.b = y_2.b;
+
+# title: chained UNPIVOT, source is a CTE
+# dialect: duckdb
+WITH t AS (SELECT 1 AS id, 100 AS jan, 200 AS feb, 7 AS north, 8 AS south) SELECT * FROM t UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south));
+WITH t AS (SELECT 1 AS id, 100 AS jan, 200 AS feb, 7 AS north, 8 AS south) SELECT t.id AS id, t.month AS month, t.revenue AS revenue, t.region AS region, t.headcount AS headcount FROM t AS t UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south)) AS t;
+
+# title: chained UNPIVOT, source columns come from the schema
+# dialect: duckdb
+SELECT * FROM unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south));
+SELECT unpivotable.id AS id, unpivotable.month AS month, unpivotable.revenue AS revenue, unpivotable.region AS region, unpivotable.headcount AS headcount FROM unpivotable AS unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south)) AS unpivotable;
+
+# title: chained UNPIVOT, explicit columns under the chain's alias
+# dialect: duckdb
+WITH t AS (SELECT 1 AS id, 100 AS jan, 200 AS feb, 7 AS north, 8 AS south) SELECT u.month, u.headcount FROM t UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south)) AS u;
+WITH t AS (SELECT 1 AS id, 100 AS jan, 200 AS feb, 7 AS north, 8 AS south) SELECT u.month AS month, u.headcount AS headcount FROM t AS t UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south)) AS u;
+
+# title: chained PIVOT, the second groups by what the first produced
+# dialect: duckdb
+SELECT * FROM pivotable PIVOT(SUM(val) FOR cat IN ('a' AS a, 'b' AS b)) PIVOT(SUM(amt) FOR kind IN ('x' AS x, 'y' AS y));
+SELECT _0.id AS id, _0.a AS a, _0.b AS b, _0.x AS x, _0.y AS y FROM pivotable AS pivotable PIVOT(SUM(val) FOR cat IN ('a' AS a, 'b' AS b)) PIVOT(SUM(amt) FOR kind IN ('x' AS x, 'y' AS y)) AS _0;
+
+# title: PIVOT then UNPIVOT of the columns it produced
+# dialect: duckdb
+SELECT * FROM pivotable PIVOT(SUM(val) FOR cat IN ('a' AS a, 'b' AS b)) UNPIVOT(v FOR c IN (a, b));
+SELECT pivotable.id AS id, pivotable.kind AS kind, pivotable.amt AS amt, pivotable.c AS c, pivotable.v AS v FROM pivotable AS pivotable PIVOT(SUM(val) FOR cat IN ('a' AS a, 'b' AS b)) UNPIVOT(v FOR c IN (a, b)) AS pivotable;
+
+# title: a source joined next to a pivoted one is not expanded through its operators
+# dialect: duckdb
+SELECT * FROM x JOIN unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) AS u ON x.a = u.id;
+SELECT x.a AS a, x.b AS b, u.id AS id, u.north AS north, u.south AS south, u.month AS month, u.revenue AS revenue FROM x AS x JOIN unpivotable AS unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) AS u ON x.a = u.id;
+
+# title: chained UNPIVOT keeps quoted identifiers case-sensitive, unlike the names it produces
+# execute: false
+# dialect: snowflake
+WITH t AS (SELECT 1 AS "Id", 2 AS "Jan", 3 AS "Feb", 4 AS "Nor", 5 AS "Sou") SELECT * FROM t UNPIVOT(v1 FOR n1 IN ("Jan", "Feb")) UNPIVOT(v2 FOR n2 IN ("Nor", "Sou"));
+WITH T AS (SELECT 1 AS "Id", 2 AS "Jan", 3 AS "Feb", 4 AS "Nor", 5 AS "Sou") SELECT T."Id" AS "Id", T.N1 AS N1, T.V1 AS V1, T.N2 AS N2, T.V2 AS V2 FROM T AS T UNPIVOT(V1 FOR N1 IN ("Jan", "Feb")) UNPIVOT(V2 FOR N2 IN ("Nor", "Sou")) AS T;
+
+# title: qualified star over the pivot alias of a pivoted table
+# dialect: duckdb
+SELECT u.* FROM unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) AS u;
+SELECT u.id AS id, u.north AS north, u.south AS south, u.month AS month, u.revenue AS revenue FROM unpivotable AS unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) AS u;
+
+# title: qualified star over the pivot alias, next to a joined plain source
+# dialect: duckdb
+SELECT x.b, u.* FROM x JOIN unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) AS u ON x.a = u.id;
+SELECT x.b AS b, u.id AS id, u.north AS north, u.south AS south, u.month AS month, u.revenue AS revenue FROM x AS x JOIN unpivotable AS unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) AS u ON x.a = u.id;
+
+# title: qualified star over the pivot alias of a pivoted CTE
+# dialect: duckdb
+WITH c AS (SELECT id, jan, feb FROM unpivotable) SELECT piv.* FROM c UNPIVOT(revenue FOR month IN (jan, feb)) AS piv;
+WITH c AS (SELECT unpivotable.id AS id, unpivotable.jan AS jan, unpivotable.feb AS feb FROM unpivotable AS unpivotable) SELECT piv.id AS id, piv.month AS month, piv.revenue AS revenue FROM c AS c UNPIVOT(revenue FOR month IN (jan, feb)) AS piv;
+
+# title: qualified star over the pivot alias of a pivoted subquery
+# dialect: duckdb
+SELECT piv.* FROM (SELECT id, jan, feb FROM unpivotable) UNPIVOT(revenue FOR month IN (jan, feb)) AS piv;
+SELECT piv.id AS id, piv.month AS month, piv.revenue AS revenue FROM (SELECT unpivotable.id AS id, unpivotable.jan AS jan, unpivotable.feb AS feb FROM unpivotable AS unpivotable) AS _0 UNPIVOT(revenue FOR month IN (jan, feb)) AS piv;
+
+# title: qualified star over the alias of a chain of operators
+# dialect: duckdb
+SELECT u.* FROM unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south)) AS u;
+SELECT u.id AS id, u.month AS month, u.revenue AS revenue, u.region AS region, u.headcount AS headcount FROM unpivotable AS unpivotable UNPIVOT(revenue FOR month IN (jan, feb)) UNPIVOT(headcount FOR region IN (north, south)) AS u;
