@@ -232,6 +232,12 @@ type Dialect struct {
 	// 2092-2124), which the generator uses to choose operator-form (`->`/`->>`) over
 	// function-form (JSON_EXTRACT_PATH/JSON_EXTRACT_PATH_TEXT) rendering.
 	JSONArrowsRequireJSONType bool
+	// JSONOperatorsAreBinary ports the v30.17.0 COLUMN_OPERATORS/JSON_OPERATORS split
+	// (parsers/postgres.py:192-219, parser.py:6312-6313): when set, the JSON operators
+	// (`->` `->>` `#>` `#>>` `?`) leave the accessor tier and bind at the bitwise tier with
+	// a term RHS — `1 + j -> 'a'` parses as JSONExtract(Add(1, j), 'a'), matching real PG
+	// operator precedence. base/mysql keep the accessor-tier behavior.
+	JSONOperatorsAreBinary bool
 	// JSONTypeRequiredForExtraction ports the generator flag JSON_TYPE_REQUIRED_FOR_EXTRACTION
 	// (generator.py:488); mysql (generators/mysql.py:142) and postgres (generators/postgres.py:
 	// 245) both override to True. Consumed by arrow_json_extract_sql (dialect.py:1210-1215):

@@ -2004,6 +2004,11 @@ func (p *Parser) parseBitwise() exp.Expression {
 			this = p.expression(exp.BitwiseLeftShift(exp.Args{"this": this, "expression": p.parseTerm()}), nil, nil)
 		} else if p.matchPair(tokens.GT, tokens.GT, true) {
 			this = p.expression(exp.BitwiseRightShift(exp.Args{"this": this, "expression": p.parseTerm()}), nil, nil)
+		} else if p.dialect.JSONOperatorsAreBinary && jsonOperatorTokens[p.curr.TokenType] {
+			// JSON_OPERATORS at the bitwise tier (parser.py:6312-6313, v30.17.0).
+			op := columnOperators[p.curr.TokenType]
+			p.advance()
+			this = op(p, this, p.parseTerm())
 		} else {
 			break
 		}
@@ -2464,6 +2469,15 @@ var columnOperators = map[tokens.TokenType]columnOpFunc{
 
 var castColumnOperators = map[tokens.TokenType]bool{tokens.DCOLON: true, tokens.DOTCOLON: true}
 
+// jsonOperatorTokens mirrors the JSON_OPERATORS key set (parsers/postgres.py:205-219,
+// v30.17.0). Under JSONOperatorsAreBinary these leave the accessor tier (parseColumnOps)
+// and bind in parseBitwise with a term RHS (parser.py:6312-6313); the builders in
+// columnOperators are shared between both tiers.
+var jsonOperatorTokens = map[tokens.TokenType]bool{
+	tokens.ARROW: true, tokens.DARROW: true, tokens.HASH_ARROW: true,
+	tokens.DHASH_ARROW: true, tokens.PLACEHOLDER: true,
+}
+
 func (p *Parser) parseColumnOps(this exp.Expression) exp.Expression {
 	for bracketsTokens[p.curr.TokenType] {
 		this = p.parseBracket(this)
@@ -2471,7 +2485,7 @@ func (p *Parser) parseColumnOps(this exp.Expression) exp.Expression {
 	for p.curr.IsValid() {
 		opToken := p.curr.TokenType
 		op, ok := columnOperators[opToken]
-		if !ok {
+		if !ok || (p.dialect.JSONOperatorsAreBinary && jsonOperatorTokens[opToken]) {
 			break
 		}
 		p.advance()
