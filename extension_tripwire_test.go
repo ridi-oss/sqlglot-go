@@ -110,8 +110,12 @@ out = []
 for row in json.load(sys.stdin):
     d = None if row["dialect"] == "" else row["dialect"]
     try:
-        e = sqlglot.parse_one(row["sql"], read=d)
-        behavior = "command" if isinstance(e, exp.Command) else ("structured:" + type(e).__name__)
+        es = sqlglot.parse(row["sql"], read=d)
+        if len(es) == 1:
+            e = es[0]
+            behavior = "command" if isinstance(e, exp.Command) else ("structured:" + type(e).__name__)
+        else:
+            behavior = "split:" + ",".join(type(e).__name__ for e in es)
     except Exception:
         behavior = "parse_error"
     out.append({"behavior": behavior})
