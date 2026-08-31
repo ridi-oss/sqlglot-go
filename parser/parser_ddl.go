@@ -21,7 +21,83 @@ func (p *Parser) parseCreate() exp.Expression {
 	if kind := p.mysqlAccountObjectKind(true, true); kind != "" {
 		return p.parseAccountObjectStatement(start, exp.KindCreate, kind)
 	}
-	return p.parseAsCommand(start)
+	return p.parseCreateAsCommand(start)
+}
+
+// parseCreateAsCommand is parseAsCommand for a degraded CREATE, extended through a routine
+// body's terminating END: when the degraded chunk left a BEGIN block unterminated (a MySQL
+// TRIGGER body, a PG BEGIN ATOMIC function — forms the structured parse doesn't model), the
+// Command consumes following chunks until the block depth balances, so the definition is ONE
+// statement through its END instead of upstream's dangling top-level EndStatement fragment
+// (DEVIATIONS §1.18; a truncated `CREATE TRIGGER … SET @a = 1` plus a bare `END` would each
+// be authorized/executed as a statement the user never wrote).
+func (p *Parser) parseCreateAsCommand(start tokens.Token) exp.Expression {
+	for p.curr.IsValid() {
+		p.advance()
+	}
+	last := p.prev
+	depth := blockDepthDelta(p.tokens)
+	for depth > 0 && p.chunkIndex < len(p.chunks) {
+		depth += blockDepthDelta(p.chunks[p.chunkIndex])
+		p.advanceChunk()
+		for p.curr.IsValid() {
+			p.advance()
+		}
+		if p.prev.IsValid() {
+			last = p.prev
+		}
+	}
+	// Unbalanced at exhaustion — an unterminated body, or a depth miscount (the counting is
+	// token-level; an unquoted identifier named `begin`/`case` inflates it). Either way the
+	// extent is unknowable: FAIL CLOSED with a parse error rather than silently merging the
+	// rest of the batch into one Command (fail-open for a per-statement consumer).
+	if depth > 0 {
+		p.raiseError("Unterminated BEGIN block in unsupported CREATE statement", start)
+		p.checkErrors()
+	}
+	text := p.findSQL(start, last)
+	runes := []rune(text)
+	size := len([]rune(start.Text))
+	return p.expression(exp.Command(exp.Args{"this": string(runes[:size]), "expression": string(runes[size:])}), nil, nil)
+}
+
+// blockDepthDelta is the net BEGIN-block depth change across one chunk's tokens. Openers:
+// `BEGIN` (by text, so START TRANSACTION's BEGIN-typed START doesn't count) and expression
+// `CASE` (always END-paired). `END IF|WHILE|LOOP|REPEAT|CASE` closes an uncounted opener, so
+// both tokens net zero; a plain END decrements. Heuristic by design — it only steers how far
+// a degraded Command extends, never a structured parse.
+func blockDepthDelta(toks []tokens.Token) int {
+	depth := 0
+	for i, tok := range toks {
+		// A keyword adjacent to a `.` is a qualified identifier part (`NEW.begin`,
+		// `end.col`), never a block token.
+		if (i > 0 && toks[i-1].TokenType == tokens.DOT) || (i+1 < len(toks) && toks[i+1].TokenType == tokens.DOT) {
+			continue
+		}
+		switch tok.TokenType {
+		case tokens.BEGIN:
+			if stringsUpper(tok.Text) == "BEGIN" {
+				depth++
+			}
+		case tokens.CASE:
+			if i == 0 || toks[i-1].TokenType != tokens.END {
+				depth++
+			}
+		case tokens.END:
+			// `END IF|WHILE|LOOP|REPEAT` close openers this count ignores — net zero.
+			// `END CASE` and plain `END` decrement (their CASE/BEGIN openers counted).
+			// The suffix must be an unquoted keyword: `END` + a QUOTED alias `IF` is a
+			// closing END (miscounting it high fails closed via the depth>0 check).
+			if i+1 < len(toks) && toks[i+1].TokenType != tokens.IDENTIFIER && toks[i+1].TokenType != tokens.STRING {
+				switch stringsUpper(toks[i+1].Text) {
+				case "IF", "WHILE", "LOOP", "REPEAT":
+					continue
+				}
+			}
+			depth--
+		}
+	}
+	return depth
 }
 
 // parseCreateStructured ports the base/mysql/postgres-relevant control flow of _parse_create
@@ -303,12 +379,14 @@ func (p *Parser) parseCreateFunction(ctt tokens.TokenType) (this, expression exp
 		// exp.Properties.Location.POST_SCHEMA (parser.py:2458): generic properties parsed
 		// after a string-literal body.
 		extendProperties(p.parseProperties())
-	} else if ctt == tokens.FUNCTION {
+	} else if ctt == tokens.FUNCTION && begin != true {
 		// _parse_user_defined_function_expression (parser.py:7108-7109) is just
-		// self._parse_statement().
+		// self._parse_statement(). divergence: with a BEGIN body a FUNCTION takes the block
+		// path below like PROCEDURE — upstream's single-statement path leaves the body's END
+		// as a dangling top-level EndStatement fragment (DEVIATIONS §1.18).
 		expression = p.parseStatement()
 	} else {
-		// exp.Block: the PROCEDURE body fallback (parser.py:2463).
+		// exp.Block: the PROCEDURE (and BEGIN-bodied FUNCTION) body fallback (parser.py:2463).
 		expression = p.parseBlock()
 	}
 	if returnMatched {

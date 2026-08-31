@@ -30,10 +30,11 @@ func TestCreateProcedureBody(t *testing.T) {
 		// Unterminated block: the trailing END is simply absent from the Block.
 		{"CREATE PROCEDURE p() BEGIN SELECT 1", []string{"mysql"},
 			exp.KindCreate, "CREATE PROCEDURE p() AS BEGIN SELECT 1"},
-		// FUNCTION keeps the single-statement body path; the top-level trailing END chunk
-		// becomes a sibling EndStatement, so ParseOne wraps the pair in a Block root.
+		// divergence (§1.18): a BEGIN-bodied FUNCTION takes the block path like PROCEDURE —
+		// upstream's single-statement body path leaves the END as a dangling top-level
+		// EndStatement fragment.
 		{"CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END", []string{"mysql"},
-			exp.KindBlock, "CREATE FUNCTION f() RETURNS INT AS BEGIN RETURN 1; END"},
+			exp.KindCreate, "CREATE FUNCTION f() RETURNS INT AS BEGIN RETURN 1; END"},
 		// Postgres dollar-quoted bodies -> exp.Heredoc. divergence: a named tag is preserved
 		// (pinned upstream drops it and always emits `$$`, which real PostgreSQL rejects when
 		// the body itself contains `$$`); see DEVIATIONS §1 and TestHeredocTagPreserved.
@@ -120,6 +121,103 @@ func TestBlockEndTerminates(t *testing.T) {
 		if len(inner) == 0 || inner[len(inner)-1].Kind() != exp.KindEndStatement {
 			t.Errorf("%q: Block does not end with EndStatement: %s", tc.sql, block.ToS())
 		}
+	}
+}
+
+// divergence (§1.18): every routine form is ONE statement through its body's END — never a
+// truncated definition plus a dangling top-level EndStatement fragment (upstream's shape for
+// TRIGGER, BEGIN-bodied FUNCTION, and PG BEGIN ATOMIC). Trailing statements stay separate.
+func TestRoutineBodyOneStatement(t *testing.T) {
+	cases := []struct {
+		sql     string
+		dialect string
+		spans   []string
+	}{
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; END", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; END"}},
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; END; SELECT 2", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; END", "SELECT 2"}},
+		// Body with a control-flow END pair: END IF must not close the BEGIN block early.
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN IF @a THEN SET @b = 1; END IF; SET @c = 2; END; SELECT 3", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN IF @a THEN SET @b = 1; END IF; SET @c = 2; END", "SELECT 3"}},
+		{"CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END", "mysql",
+			[]string{"CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END"}},
+		{"CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END; SELECT 2", "mysql",
+			[]string{"CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END", "SELECT 2"}},
+		{"CREATE FUNCTION f() RETURNS int LANGUAGE SQL BEGIN ATOMIC SELECT 1; END; SELECT 2", "postgres",
+			[]string{"CREATE FUNCTION f() RETURNS int LANGUAGE SQL BEGIN ATOMIC SELECT 1; END", "SELECT 2"}},
+	}
+	for _, tc := range cases {
+		statements, err := sqlglot.Parse(tc.sql, tc.dialect)
+		if err != nil {
+			t.Errorf("%q [%s]: parse: %v", tc.sql, tc.dialect, err)
+			continue
+		}
+		if len(statements) != len(tc.spans) {
+			t.Errorf("%q [%s]: got %d statements, want %d", tc.sql, tc.dialect, len(statements), len(tc.spans))
+			continue
+		}
+		for i, want := range tc.spans {
+			if statements[i].Kind() == exp.KindEndStatement {
+				t.Errorf("%q [%s] stmt %d: dangling top-level EndStatement", tc.sql, tc.dialect, i)
+				continue
+			}
+			if text, ok := statements[i].SpanText(); !ok || text != want {
+				t.Errorf("%q [%s] stmt %d: SpanText()=%q,%v, want %q", tc.sql, tc.dialect, i, text, ok, want)
+			}
+		}
+	}
+}
+
+// The degraded-CREATE extent machinery must FAIL CLOSED on every ambiguity: an input where
+// the block-depth count cannot establish the body's END (unterminated body, `begin`/`end`
+// used as bare identifiers inflating/deflating the count) is a parse error — never a merge
+// of later statements into the Command (fail-open for a per-statement consumer) and never
+// truncated fragments. Bare top-level END is likewise an error under MySQL (real MySQL 8.0
+// rejects it; error 1064).
+func TestDegradedCreateFailsClosed(t *testing.T) {
+	for _, sql := range []string{
+		// Unterminated body: without the depth>0 check this merged the DROP into the Command.
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; DROP TABLE users",
+		// `begin` as a bare identifier inflates the count -> unknowable extent -> error.
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT begin FROM t; END; DROP TABLE users; SELECT 2",
+		// `end` as a bare value deflates it -> the residual top-level END chunk errors.
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = end; END; SELECT 2",
+		// Empty trailing chunk while unbalanced: an error, not a slice-bounds panic.
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a=1;;",
+		"SELECT 1; END",
+	} {
+		if _, err := sqlglot.Parse(sql, "mysql"); err == nil {
+			t.Errorf("%q parsed; want error", sql)
+		}
+	}
+}
+
+// Keywords in qualified identifiers (`NEW.begin`) are not block tokens: the batch still
+// splits at the real statement boundary.
+func TestQualifiedKeywordNotBlockToken(t *testing.T) {
+	statements, err := sqlglot.Parse("CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET NEW.begin = 1; DROP TABLE secret", "mysql")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(statements) != 2 || statements[1].Kind() != exp.KindDrop {
+		t.Fatalf("got %d statements (last %s), want [Command, Drop]", len(statements), exp.ClassName(statements[len(statements)-1].Kind()))
+	}
+}
+
+// A body statement the parser can't fully consume (MySQL DECLARE) degrades the whole
+// definition to ONE verbatim Command — never a silently mangled structured AST.
+func TestUnsupportedBodyStatementDegradesWhole(t *testing.T) {
+	sql := "CREATE FUNCTION f() RETURNS INT BEGIN DECLARE x INT DEFAULT 1; RETURN x; END"
+	e, err := sqlglot.ParseOne(sql, "mysql")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if e.Kind() != exp.KindCommand {
+		t.Fatalf("root Kind=%s, want Command", exp.ClassName(e.Kind()))
+	}
+	if got, _ := e.SpanText(); got != sql {
+		t.Errorf("SpanText()=%q, want the whole definition", got)
 	}
 }
 
