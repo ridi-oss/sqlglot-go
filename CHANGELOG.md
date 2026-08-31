@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.29.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.28.3...v0.29.0) (2026-08-31)
+
+
+### Features
+
+* **parser:** parse MySQL compound-statement grammar; routine bodies structural ([#84](https://github.com/ridi-oss/sqlglot-go/issues/84)) ([8d4debe](https://github.com/ridi-oss/sqlglot-go/commit/8d4debe5cade185cc037011d6390179d5faf4909))
+
 ## [0.28.3](https://github.com/ridi-oss/sqlglot-go/compare/v0.28.2...v0.28.3) (2026-08-31)
 
 
