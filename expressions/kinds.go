@@ -904,7 +904,7 @@ var argTypes = map[Kind][]argSpec{
 	KindTrim:               {{"this", true}, {"expression", false}, {"position", false}, {"collation", false}},
 	KindCeil:               {{"this", true}, {"decimals", false}, {"to", false}},
 	KindFloor:              {{"this", true}, {"decimals", false}, {"to", false}},
-	KindGroupConcat:        {{"this", true}, {"separator", false}, {"on_overflow", false}},
+	KindGroupConcat:        {{"this", true}, {"separator", false}, {"on_overflow", false}, {"within_group", false}},
 	KindUnnest:             {{"expressions", true}, {"alias", false}, {"offset", false}, {"explode_array", false}},
 	KindArray:              {{"expressions", false}, {"bracket_notation", false}, {"struct_name_inheritance", false}},
 	KindBracket:            {{"this", true}, {"expressions", true}, {"offset", false}, {"safe", false}, {"returns_list_for_maps", false}, {"json_access", false}},

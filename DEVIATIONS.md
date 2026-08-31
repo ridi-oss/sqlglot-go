@@ -159,6 +159,23 @@ Additive analysis features; default behavior and fixture output unchanged.
 - **Qualify resolution report** (`QualifyOpts.ResolutionReport` → `SourceKind` per source): exposes
   the source classification the qualify scope pass already computes. `Unresolved` is the zero value.
   DML roots populate from the §6.1 analysis traversal.
+- **Opaque function calls** (`opaque_functions` dialect setting, resolve-time like
+  `mysql_ansi_quotes`): name-lookup builtin calls (FunctionByName + dialect overlays + convenience
+  functionParsers + `IF(`) parse as `Anonymous` with the name as written; the generator renders
+  Anonymous names verbatim (no upcasing) so parse∘generate is idempotent. The call *form* decides,
+  not the name: keyword-grammar forms (CAST, `EXTRACT(f FROM x)`, `TRIM(BOTH … FROM …)`,
+  `SUBSTRING(x FROM … FOR …)`, `POSITION(a IN b)`, `CHAR(… USING cs)`, `CEIL(x TO u)`) keep their
+  structured nodes and render form-faithfully (never the STR_POSITION/CHR/comma↔FROM-FOR
+  canonicalizations); comma forms of the same names go opaque. Bare no-paren niladics
+  (`CURRENT_DATE`, …) stay structured. Tests `opaque_functions_test.go`.
+- **Engine identity resolution** (`QualifyOpts.EngineCatalog` + `CallReport`/`RelationReport`):
+  classifies each `Anonymous` call as Builtin|UDF|Unknown and each table as
+  SystemRelation|UserRelation|Unknown with a canonical `schema.name` identity, per the verified
+  engine algorithms (MySQL native-priority + current-database scoping; PG search_path with
+  pg_catalog implicitly first unless explicitly listed; ambiguity fails closed to Unknown). The
+  catalog is a pure consumer input introspected from the live target — no name sets ship with
+  sqlglot-go — and resolution is report-only: the AST is never rewritten. Tests
+  `optimizer/engine_catalog_test.go`.
 
 Neither is a grammar construct — no ledger row.
 

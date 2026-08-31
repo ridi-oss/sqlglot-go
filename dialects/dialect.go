@@ -54,7 +54,13 @@ type Dialect struct {
 	// behavior (`"` is a string). Set via the `mysql_ansi_quotes` dialect setting; applied by
 	// applyMySQLAnsiQuotes (dialects/mysql.go) at settings-resolution time. Mutable per statement on
 	// the real server, so a consumer re-resolves the dialect when the backend's live sql_mode changes.
-	MySQLAnsiQuotes          *bool
+	MySQLAnsiQuotes *bool
+	// OpaqueFunctions is NON-UPSTREAM, opt-in (DEVIATIONS): when true, name-lookup builtin calls
+	// parse as exp.Anonymous with the name as written and generate back verbatim; keyword-grammar
+	// forms (CAST, EXTRACT ... FROM, TRIM ... FROM, SUBSTRING ... FROM/FOR, POSITION ... IN,
+	// CHAR ... USING, CEIL ... TO) keep their structured nodes and render form-faithfully.
+	// Set via the `opaque_functions` dialect setting at GetOrRaise resolve time.
+	OpaqueFunctions          bool
 	NormalizationStrategy    NormalizationStrategy
 	DPipeIsStringConcat      bool
 	StrictStringConcat       bool
@@ -674,10 +680,14 @@ func (d *Dialect) SettingsString() string {
 	if d == nil {
 		return ""
 	}
+	out := d.Name
 	if token, ok := normalizationStrategyToken(d.NormalizationStrategy); ok {
-		return d.Name + ", normalization_strategy=" + token
+		out += ", normalization_strategy=" + token
 	}
-	return d.Name
+	if d.OpaqueFunctions {
+		out += ", opaque_functions=true"
+	}
+	return out
 }
 
 // DialectType is the polymorphic dialect argument accepted throughout the public API,
@@ -786,8 +796,17 @@ func getOrRaiseString(name string) (*Dialect, error) {
 				return nil, err
 			}
 			d.MySQLAnsiQuotes = &on
+		case "opaque_functions":
+			if !hasVal {
+				return nil, fmt.Errorf("dialect setting %q requires a value", key)
+			}
+			on, err := parseSettingBool(key, val)
+			if err != nil {
+				return nil, err
+			}
+			d.OpaqueFunctions = on
 		default:
-			return nil, fmt.Errorf("unsupported dialect setting %q (supported: normalization_strategy, mysql_version, mysql_ansi_quotes)", key)
+			return nil, fmt.Errorf("unsupported dialect setting %q (supported: normalization_strategy, mysql_version, mysql_ansi_quotes, opaque_functions)", key)
 		}
 	}
 	// Apply the ANSI_QUOTES tokenizer change once, from the FINAL flag value — a duplicated setting

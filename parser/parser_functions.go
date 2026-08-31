@@ -14,6 +14,25 @@ func seqGet[T any](s []T, i int) T {
 	return s[i]
 }
 
+// opaqueDroppedFunctionParsers: pure name-lookup conveniences whose functionParsers entry is
+// bypassed entirely under dialect.OpaqueFunctions (no keyword grammar to preserve) — the call
+// falls through to the Anonymous branch in parseFunctionCall.
+var opaqueDroppedFunctionParsers = map[string]bool{
+	"CONCAT":    true,
+	"DATE_PART": true,
+}
+
+// captureOpaqueName snapshots the current call's as-written name at form-split parser ENTRY,
+// before any argument parsing — a nested call re-enters parseFunctionCall and overwrites
+// p.opaqueFuncName, so reading the field later would name the inner call.
+func (p *Parser) captureOpaqueName() string { return p.opaqueFuncName }
+
+// opaqueAnonymous builds the Anonymous node a form-split parser returns for a comma-form call
+// under dialect.OpaqueFunctions, with the call name exactly as written.
+func (p *Parser) opaqueAnonymous(name string, args []exp.Expression) exp.Expression {
+	return p.expression(exp.Anonymous(exp.Args{"this": name, "expressions": args}), nil, nil)
+}
+
 // mergedDialectFunctions is the parseFunctionCall functions==nil default: exp.FunctionByName
 // overlaid with the current dialect's own Functions additions/overrides (dialects.Dialect.
 // Functions, e.g. mysql's CURDATE/DAY_OF_MONTH/LCASE/... cluster in dialects/mysql.go, or
@@ -57,10 +76,13 @@ func (p *Parser) parseConvert(strict bool, safe any) exp.Expression {
 
 // parseChar ports _parse_char (parser.py:7836-7842): CHR/CHAR(<expr>, ... [USING <charset>]).
 func (p *Parser) parseChar() exp.Expression {
+	opaqueName := p.captureOpaqueName()
 	expressions := p.parseCsv(p.parseAssignment)
 	var charset exp.Expression
 	if p.match(tokens.USING) {
 		charset = p.parseCharsetName()
+	} else if p.dialect.OpaqueFunctions {
+		return p.opaqueAnonymous(opaqueName, expressions)
 	}
 	return p.expression(exp.Chr(exp.Args{"expressions": expressions, "charset": charset}), nil, nil)
 }
@@ -87,17 +109,21 @@ func (p *Parser) parseCharsetName() exp.Expression {
 }
 
 func (p *Parser) parseCeilFloor(kind exp.Kind) exp.Expression {
+	opaqueName := p.captureOpaqueName()
 	args := p.parseCsv(func() exp.Expression { return p.parseLambda(false) })
 	this := seqGet(args, 0)
 	decimals := seqGet(args, 1)
 	var to exp.Expression
 	if p.matchTextSeq("TO") {
 		to = p.parseVar(false, nil, false)
+	} else if p.dialect.OpaqueFunctions {
+		return p.opaqueAnonymous(opaqueName, args)
 	}
 	return p.expression(exp.New(kind, exp.Args{"this": this, "decimals": decimals, "to": to}), nil, nil)
 }
 
 func (p *Parser) parseExtract() exp.Expression {
+	opaqueName := p.captureOpaqueName()
 	// Mirror upstream `self._parse_function() or self._parse_var_or_string(...)`:
 	// short-circuit so the second alternative never runs (and never advances past
 	// FROM via parseVar's advanceAny) once the first succeeds.
@@ -110,6 +136,9 @@ func (p *Parser) parseExtract() exp.Expression {
 	}
 	if !p.match(tokens.COMMA) {
 		p.raiseError("Expected FROM or comma after EXTRACT", p.prev)
+	}
+	if p.dialect.OpaqueFunctions {
+		return p.opaqueAnonymous(opaqueName, []exp.Expression{this, p.parseBitwise()})
 	}
 	return p.expression(exp.Extract(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil)
 }
@@ -130,9 +159,13 @@ func (p *Parser) parseDatePart() exp.Expression {
 }
 
 func (p *Parser) parsePosition() exp.Expression {
+	opaqueName := p.captureOpaqueName()
 	args := p.parseCsv(p.parseBitwise)
 	if p.match(tokens.IN) {
 		return p.expression(exp.StrPosition(exp.Args{"this": p.parseBitwise(), "substr": seqGet(args, 0)}), nil, nil)
+	}
+	if p.dialect.OpaqueFunctions {
+		return p.opaqueAnonymous(opaqueName, args)
 	}
 	return p.expression(exp.StrPosition(exp.Args{"this": seqGet(args, 1), "substr": seqGet(args, 0), "position": seqGet(args, 2)}), nil, nil)
 }
@@ -157,7 +190,11 @@ func (p *Parser) parseOverlay() exp.Expression {
 }
 
 func (p *Parser) parseSubstring() exp.Expression {
+	opaqueName := p.captureOpaqueName()
 	args := p.parseCsv(p.parseBitwise)
+	if p.dialect.OpaqueFunctions && p.curr.TokenType != tokens.FROM && p.curr.TokenType != tokens.FOR {
+		return p.opaqueAnonymous(opaqueName, args)
+	}
 	var start exp.Expression
 	var length exp.Expression
 	for p.curr.IsValid() {
@@ -204,19 +241,31 @@ func (p *Parser) parseConcat() exp.Expression {
 }
 
 func (p *Parser) parseTrim() exp.Expression {
+	opaqueName := p.captureOpaqueName()
 	var position any
 	var collation exp.Expression
 	var expression exp.Expression
+	keywordForm := false
 	if p.matchTexts(trimTypes) {
 		position = stringsUpper(p.prev.Text)
+		keywordForm = true
 	}
 	this := p.parseBitwise()
+	commaArgs := []exp.Expression{this}
 	if p.matchSet(map[tokens.TokenType]bool{tokens.FROM: true, tokens.COMMA: true}) {
 		invert := p.prev.TokenType == tokens.FROM
+		keywordForm = keywordForm || invert
 		expression = p.parseBitwise()
+		commaArgs = append(commaArgs, expression)
 		if invert {
 			this, expression = expression, this
 		}
+	}
+	if p.dialect.OpaqueFunctions && !keywordForm {
+		// Comma form: opaque. A COLLATE inside an argument was already consumed by parseBitwise;
+		// a stray top-level COLLATE (never produced by comma-form grammar) fails the closing-paren
+		// match — a parse error, fail-closed.
+		return p.opaqueAnonymous(opaqueName, commaArgs)
 	}
 	if p.match(tokens.COLLATE) {
 		collation = p.parseBitwise()
@@ -225,6 +274,7 @@ func (p *Parser) parseTrim() exp.Expression {
 }
 
 func (p *Parser) parseStringAgg() exp.Expression {
+	opaqueName := p.captureOpaqueName()
 	var args []exp.Expression
 	if p.match(tokens.DISTINCT) {
 		args = []exp.Expression{p.expression(exp.Distinct(exp.Args{"expressions": []exp.Expression{p.parseDisjunction()}}), nil, nil)}
@@ -236,16 +286,35 @@ func (p *Parser) parseStringAgg() exp.Expression {
 	}
 	index := p.index
 	if !p.match(tokens.R_PAREN) && len(args) > 0 {
+		if p.dialect.OpaqueFunctions {
+			// In-paren ORDER BY is generic argument grammar, not keyword grammar — opaque, like
+			// array_agg(x ORDER BY y). It follows the LAST argument textually, so attach it
+			// there to keep the round-trip verbatim.
+			last := len(args) - 1
+			args[last] = p.parseLimit(p.parseOrder(args[last], false), false, false)
+			return p.opaqueAnonymous(opaqueName, args)
+		}
 		ordered := p.parseOrder(seqGet(args, 0), false)
 		args[0] = p.parseLimit(ordered, false, false)
 		return p.expression(exp.GroupConcat(exp.Args{"this": args[0], "separator": seqGet(args, 1)}), nil, nil)
 	}
 	if !p.matchTextSeq("WITHIN", "GROUP") {
 		p.retreat(index)
+		if p.dialect.OpaqueFunctions {
+			// Plain comma form: an ordinary name-lookup call (PG resolves a UDF string_agg
+			// through search_path) — opaque. WITHIN GROUP below is keyword grammar and stays.
+			return p.opaqueAnonymous(opaqueName, args)
+		}
 		return p.validateExpression(exp.FromArgList(exp.KindGroupConcat, args), exprArgs(args))
 	}
 	p.matchLParen(nil)
-	return p.expression(exp.GroupConcat(exp.Args{"this": p.parseOrder(seqGet(args, 0), false), "separator": seqGet(args, 1)}), nil, nil)
+	withinArgs := exp.Args{"this": p.parseOrder(seqGet(args, 0), false), "separator": seqGet(args, 1)}
+	if p.dialect.OpaqueFunctions {
+		// Record the source form so the WITHIN GROUP keyword grammar regenerates verbatim
+		// instead of the in-paren ORDER BY canonicalization.
+		withinArgs["within_group"] = true
+	}
+	return p.expression(exp.GroupConcat(withinArgs), nil, nil)
 }
 
 // parseFormatJson ports _parse_format_json (parser.py:8054-8058): wraps `this` in

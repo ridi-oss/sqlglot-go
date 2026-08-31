@@ -2039,6 +2039,9 @@ func (g *Generator) extractSQL(e expressions.Expression) string {
 // mysql and postgres both override exp.Trim to trimSQLStandard instead (dialect.py:1782-1797,
 // wired at generators/mysql.py:221 and generators/postgres.py:376).
 func (g *Generator) trimSQL(e expressions.Expression) string {
+	if g.dialect.OpaqueFunctions {
+		return g.trimSQLStandard(e)
+	}
 	if g.dialect.Name == "mysql" || g.dialect.Name == "postgres" {
 		return g.trimSQLStandard(e)
 	}
@@ -2075,6 +2078,20 @@ func (g *Generator) trimSQLBase(e expressions.Expression) string {
 func (g *Generator) trimSQLStandard(e expressions.Expression) string {
 	removeChars := g.sqlKey(e, "expression")
 	if removeChars == "" {
+		if g.dialect.OpaqueFunctions {
+			// opaque_functions: a Trim node only exists for keyword forms — TRIM(BOTH FROM s) /
+			// TRIM(LEADING FROM s) must keep their grammar, never the TRIM(s)/LTRIM(s) call form
+			// (which would reparse opaque).
+			trimType := g.sqlKey(e, "position")
+			if trimType != "" {
+				trimType += " "
+			}
+			collation := g.sqlKey(e, "collation")
+			if collation != "" {
+				collation = " COLLATE " + collation
+			}
+			return "TRIM(" + trimType + "FROM " + g.sqlKey(e, "this") + collation + ")"
+		}
 		return g.trimSQLBase(e)
 	}
 
@@ -2107,7 +2124,9 @@ func (g *Generator) ceilFloorSQL(e expressions.Expression) string {
 func (g *Generator) anonymousSQL(e expressions.Expression) string {
 	parent := e.Parent()
 	isQualified := parent != nil && parent.Kind() == expressions.KindDot && asExpression(parent.Arg("expression")) == e
-	return g.funcCall(g.sqlKey(e, "this"), listFromValue(e.Arg("expressions")), "(", ")", !isQualified)
+	// opaque_functions: the stored name is the source spelling and renders verbatim.
+	normalize := !isQualified && !g.dialect.OpaqueFunctions
+	return g.funcCall(g.sqlKey(e, "this"), listFromValue(e.Arg("expressions")), "(", ")", normalize)
 }
 
 func (g *Generator) hexSQL(e expressions.Expression) string {

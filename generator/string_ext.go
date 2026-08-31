@@ -8,7 +8,9 @@ import "github.com/ridi-oss/sqlglot-go/expressions"
 // separate dialect-flag/override table).
 func (g *Generator) chrSQL(e expressions.Expression) string {
 	name := "CHR"
-	if g.dialect.Name == "mysql" {
+	if g.dialect.Name == "mysql" || g.dialect.OpaqueFunctions {
+		// opaque_functions: a Chr node only exists for the CHAR(... USING cs) keyword form —
+		// render the CHAR spelling form-faithfully, never the CHR canonicalization.
 		name = "CHAR"
 	}
 	this := g.expressions(exprsOptions{expression: e})
