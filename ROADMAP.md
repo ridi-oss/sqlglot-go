@@ -120,6 +120,10 @@ differential-check against the pinned Python):
   parser `FUNCTIONS` ↔ generator `TRANSFORMS`/`TYPE_MAPPING` remaps (must land paired to avoid
   round-trip regressions), MySQL `||`/`&&`/`XOR` logical operators, MySQL `CAST(x AS TIMESTAMP/BLOB)`.
 - DIALECTS beyond base + MySQL + Postgres (upstream ships 30+).
+- TIME-TRAVEL clauses (`FOR SYSTEM_TIME AS OF`, hive `TIMESTAMP AS OF`): the v30.17.0 bump removed
+  the FOR VERSION/TIMESTAMP and hive AS OF compound keywords but did not port `VERSION_PHRASES` +
+  `_parse_version` (parser.py:1738-1745, 5120-5146); the constructs now fail closed (parse error)
+  instead of building `Table.version`. Port with a dialect that needs them.
 - PARSER coverage is bounded by the ported corpus: constructs upstream parses that are NOT exercised
   by the identity fixtures may still be gaps — e.g. any long `FUNCTIONS`/`FUNCTION_PARSERS` tail or
   DDL detail not hit by a fixture. Treat a not-yet-parsed construct upstream parses as a gap to

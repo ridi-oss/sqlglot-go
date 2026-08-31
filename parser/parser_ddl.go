@@ -845,9 +845,6 @@ func init() {
 		"CHARSET": func(p *Parser, isDefault bool) exp.Expression {
 			return p.parseCharacterSet(isDefault)
 		},
-		"CHARACTER SET": func(p *Parser, isDefault bool) exp.Expression {
-			return p.parseCharacterSet(isDefault)
-		},
 		"COLLATE": func(p *Parser, isDefault bool) exp.Expression {
 			return p.parsePropertyAssignment(func(this exp.Expression) exp.Expression {
 				// Upstream builds CollateProperty via _parse_property_assignment(**kwargs);

@@ -214,3 +214,36 @@ func TestRangeOpsMysqlMemberOfAndSoundsLike(t *testing.T) {
 		t.Fatalf("EQ.this kind = %v, want Soundex:\n%s", eq.ToS(), eq.ToS())
 	}
 }
+
+// TestRangeOpsChainRegressions covers the v30.17.0 chaining-loop edge cases from the
+// adversarial review: a failed IS arm must terminate (not hang), START WITH is never a
+// table alias, SOUNDS LIKE cannot chain, star ops reject quoted keywords, and star-ILIKE
+// accepts every string kind.
+func TestRangeOpsChainRegressions(t *testing.T) {
+	// A range arm whose sub-parse fails exits with the pre-arm value (upstream
+	// `if not expression: return this`); before the fix this spun forever.
+	roundTripRangeOps(t, `SELECT x IS`, "", `SELECT x AS IS`)
+	roundTripRangeOps(t, `SELECT x IS TRUE IS`, "", `SELECT x IS TRUE AS IS`)
+
+	// Chain parenthesization: each negated link parenthesizes before the next operator.
+	roundTripRangeOps(t, `SELECT a NOT LIKE 'x' LIKE 'y'`, "mysql", `SELECT (a NOT LIKE 'x') LIKE 'y'`)
+
+	for _, tc := range []struct{ sql, dialect string }{
+		// START WITH never becomes an implicit table alias (parser.py:4261-4264).
+		{`SELECT * FROM t START WITH ORDINALITY`, ""},
+		// SOUNDS LIKE runs once before the range loop; it cannot chain.
+		{`SELECT 'foo' LIKE 'bar' SOUNDS LIKE 'baz'`, "mysql"},
+		// A quoted keyword is never a star-op introducer.
+		{`SELECT * "EXCEPT" (a) FROM t`, ""},
+	} {
+		if _, err := sqlglot.ParseOne(tc.sql, tc.dialect); err == nil {
+			t.Fatalf("%q [%s] parsed; want error", tc.sql, tc.dialect)
+		}
+	}
+
+	// Star-ILIKE accepts every string kind (upstream _parse_string), not just STRING.
+	star := parseOneDialect(t, `SELECT * ILIKE n'a%' FROM t`, "").Expressions()[0]
+	if star.Kind() != exp.KindStar || star.Arg("ilike") == nil {
+		t.Fatalf("kind = %v ilike=%v, want Star with ilike:\n%s", star.Kind(), star.Arg("ilike"), star.ToS())
+	}
+}

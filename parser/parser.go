@@ -1431,6 +1431,11 @@ func (p *Parser) parseTableAlias(aliasTokensArg map[tokens.TokenType]bool) exp.E
 		return nil
 	}
 	anyToken := p.match(tokens.ALIAS)
+	// v30.17.0 (parser.py:4261-4264): START is never an implicit alias when followed by
+	// WITH — it would swallow the beginning of a START WITH ... CONNECT BY clause.
+	if !anyToken && stringsUpper(p.curr.Text) == "START" && stringsUpper(p.next.Text) == "WITH" {
+		return nil
+	}
 	toks := aliasTokensArg
 	if toks == nil {
 		toks = tableAliasTokens
@@ -1742,12 +1747,30 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 	if this == nil {
 		this = p.parseBitwise()
 	}
+	// mysql _parse_range override (parsers/mysql.py:303-318): `x SOUNDS LIKE y` desugars
+	// to EQ(Soundex(x), Soundex(y)) ONCE, before the base range loop — it is not a
+	// RANGE_PARSERS entry, so it cannot chain (`a LIKE b SOUNDS LIKE c` errors upstream).
+	// SOUNDS_LIKE is mysql-only tokenized. NOT SOUNDS LIKE falls through and errors, as
+	// does real MySQL 8.0 (1064).
+	if p.curr.TokenType == tokens.SOUNDS_LIKE {
+		p.advance()
+		this = p.expression(exp.EQ(exp.Args{
+			"this":       p.expression(exp.Soundex(exp.Args{"this": this}), nil, nil),
+			"expression": p.expression(exp.Soundex(exp.Args{"this": p.parseBitwise()}), nil, nil),
+		}), nil, nil)
+		// MySQL evaluates = and IS left to right (same precedence): parenthesize before IS.
+		if p.curr.TokenType == tokens.IS {
+			this = p.expression(exp.Paren(exp.Args{"this": this}), nil, nil)
+		}
+	}
+
 	// v30.17.0 (parser.py:6052-6082): range operators chain in a loop, each NOT bound to
 	// the operator that follows it; a negated link gets parenthesized when another range
 	// operator (or NOT) follows so precedence survives regeneration.
 	for {
 		negate := p.match(tokens.NOT)
 		matched := true
+		before := this
 		switch p.curr.TokenType {
 		case tokens.BETWEEN:
 			p.advance()
@@ -1872,25 +1895,6 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 			// elsewhere.
 			p.advance()
 			this = p.expression(exp.JSONArrayContains(exp.Args{"this": this, "expression": p.parseWrapped(p.parseExpression, false)}), nil, nil)
-		case tokens.SOUNDS_LIKE:
-			// mysql _parse_range override (parsers/mysql.py:303-318, v30.17.0): `x SOUNDS
-			// LIKE y` desugars to EQ(Soundex(x), Soundex(y)) (no dedicated exp.SoundsLike
-			// class upstream; the RHS is a bitwise operand). MySQL evaluates = and IS left to
-			// right (same precedence), so a following IS wraps the EQ in parens.
-			// SOUNDS_LIKE is mysql-only tokenized. Upstream matches it BEFORE the NOT
-			// consumption (the override runs ahead of super()._parse_range), so
-			// `NOT SOUNDS LIKE` falls through and errors — as does real MySQL 8.0 (1064).
-			if negate {
-				p.raiseError("SOUNDS LIKE cannot be negated with NOT")
-			}
-			p.advance()
-			this = p.expression(exp.EQ(exp.Args{
-				"this":       p.expression(exp.Soundex(exp.Args{"this": this}), nil, nil),
-				"expression": p.expression(exp.Soundex(exp.Args{"this": p.parseBitwise()}), nil, nil),
-			}), nil, nil)
-			if p.curr.TokenType == tokens.IS {
-				this = p.expression(exp.Paren(exp.Args{"this": this}), nil, nil)
-			}
 		case tokens.IS:
 			// RANGE_PARSERS[TokenType.IS] = lambda self, this: self._parse_is(this)
 			// (parser.py:1192): matched here in addition to the unconditional `if
@@ -1900,7 +1904,7 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 			p.advance()
 			this = p.parseIs(this)
 		default:
-			if p.curr.TokenType == tokens.ISNULL || (negate && p.curr.TokenType == tokens.NULL) {
+			if negate && p.curr.TokenType == tokens.NULL {
 				p.advance()
 				this = p.expression(exp.Is(exp.Args{"this": this, "expression": exp.Null()}), nil, nil)
 			} else if p.curr.TokenType == tokens.NOTNULL {
@@ -1924,6 +1928,12 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 			}
 			break
 		}
+		// A matched arm whose sub-parse failed (parseIs on a bare `x IS`) returns nil;
+		// upstream's `if not expression: return this` exits with the pre-arm value —
+		// looping again would spin forever on the unconsumed token.
+		if this == nil {
+			return before
+		}
 		if negate {
 			this = p.negateRange(this)
 			if p.curr.IsValid() && (p.curr.TokenType == tokens.NOT || rangeChainTokens[p.curr.TokenType]) {
@@ -1943,7 +1953,7 @@ var rangeChainTokens = map[tokens.TokenType]bool{
 	tokens.QMARK_AMP: true, tokens.QMARK_PIPE: true, tokens.HASH_DASH: true,
 	tokens.AT_QMARK: true, tokens.ADJACENT: true, tokens.OPERATOR: true,
 	tokens.AMP_LT: true, tokens.AMP_GT: true,
-	tokens.DAMP: true, tokens.DAT: true, tokens.MEMBER_OF: true, tokens.SOUNDS_LIKE: true,
+	tokens.DAMP: true, tokens.DAT: true, tokens.MEMBER_OF: true,
 }
 
 // negateRange ports _negate_range (parser.py:6019-6029): LIKE/ILIKE absorb the NOT as
@@ -2970,10 +2980,11 @@ func (p *Parser) parseStarOps(starToken tokens.Token) exp.Expression {
 	// `* ILIKE (foo)` retreats and leaves ILIKE to the expression grammar.
 	var ilike exp.Expression
 	if p.match(tokens.ILIKE) {
-		if p.match(tokens.STRING) {
-			ilike = p.expression(exp.LiteralString(p.prev.Text), &p.prev, nil)
-		} else {
-			p.retreat(p.index - 1)
+		index := p.index - 1
+		ilike = p.parseString()
+		if ilike == nil || ilike.Kind() == exp.KindPlaceholder {
+			ilike = nil
+			p.retreat(index)
 		}
 	}
 	args := exp.Args{
@@ -2988,7 +2999,7 @@ func (p *Parser) parseStarOps(starToken tokens.Token) exp.Expression {
 func (p *Parser) parseStarOp(keywords ...string) []exp.Expression {
 	matched := false
 	for _, keyword := range keywords {
-		if p.curr.TokenType != tokens.STRING && stringsUpper(p.curr.Text) == keyword {
+		if !textMatchExcludedTokens[p.curr.TokenType] && stringsUpper(p.curr.Text) == keyword {
 			p.advance()
 			matched = true
 			break

@@ -243,10 +243,6 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 		// v30.17.0 (qualify_columns.py:247-257): a NATURAL JOIN is a USING join over the
 		// columns common to both sides; when those can't be determined, NATURAL stays.
 		if len(using) == 0 && join.Text("method") == "NATURAL" {
-			leftColumns := make([]string, 0, len(columns))
-			for name := range columns {
-				leftColumns = append(leftColumns, name)
-			}
 			if len(columns) > 0 && columns["*"] == "" && len(joinColumns) > 0 && !containsString(joinColumns, "*") {
 				for _, columnName := range orderedColumnNames(columns, ordered, resolver) {
 					if containsString(joinColumns, columnName) {
@@ -257,7 +253,6 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 					join.Set("method", nil)
 				}
 			}
-			_ = leftColumns
 		}
 		if len(using) == 0 {
 			continue
