@@ -1,4 +1,4 @@
-# Grammar extensions beyond upstream (sqlglot v30.12.0) — the Class-A divergence ledger.
+# Grammar extensions beyond upstream (sqlglot v30.17.0) — the Class-A divergence ledger.
 # One JSON object per line. Each row is a construct sqlglot-go parses STRUCTURALLY that pinned
 # upstream does NOT (it falls back to exp.Command or raises). See DEVIATIONS.md "Grammar
 # extensions beyond upstream" and AGENTS.md "How deviations are tracked".
@@ -14,7 +14,6 @@
 # Enforced by extension_tripwire_test.go: TestUpstreamExtensionsGoSide (we parse it -> go_kind)
 # and TestUpstreamExtensionsTripwire (pinned upstream still does `upstream`; fires at bump time).
 {"id":"pg-explain","dialect":"postgres","sql":"EXPLAIN (ANALYZE, FORMAT JSON) SELECT a FROM t","upstream":"command","go_kind":"Describe","reconcile":"If upstream adds structural Postgres EXPLAIN, adopt its node shape (it will likely reuse exp.Describe) and delete this row + the Postgres EXPLAIN->DESCRIBE tokenizer alias / explain parser."}
-{"id":"mysql-insert-set","dialect":"mysql","sql":"INSERT INTO t SET a = 1, b = 2","upstream":"parse_error","go_kind":"Insert","reconcile":"If a future pin adds structural MySQL INSERT ... SET support, adopt upstream's node/arg shape and parser/generator behavior, decide explicitly whether the canonical Schema + one-row Values desugaring remains intentional, remove the local INSERT SET extension path, and delete this row."}
 {"id":"mysql-replace","dialect":"mysql","sql":"REPLACE INTO t VALUES (1)","upstream":"command","go_kind":"Insert","reconcile":"If a future pin adds structural MySQL REPLACE support, adopt upstream's node/arg shape and parser/generator behavior, remove the local REPLACE tokenizer/parser marker/generator extension path, and delete this row."}
 {"id":"pg-unicode-identifier","dialect":"postgres","sql":"SELECT count(*) FROM U&\"inf\\006Frmation_schema\".tables","upstream":"parse_error","go_kind":"Select","reconcile":"If a future pin adds Postgres U&\"...\" unicode-identifier support, adopt its decoding/node shape (decide whether decoding into a plain quoted Identifier, vs upstream's raw UnicodeString for U&'...' strings, stays intentional), and delete this row. See DEVIATIONS §1.7."}
 {"id":"mysql-describe-column","dialect":"mysql","sql":"DESCRIBE t c","upstream":"parse_error","go_kind":"Describe","reconcile":"If a future pin adds structural MySQL DESCRIBE tbl [col|wild], adopt upstream's node/arg shape, remove the local column-consume in parseDescribeStructured + the generator branch, and delete this row. See DEVIATIONS 'Grammar extensions beyond upstream'."}

@@ -299,7 +299,7 @@ for row in json.load(sys.stdin):
 json.dump(out, sys.stdout, ensure_ascii=False, separators=(",", ":"))
 `
 	cmd := exec.Command("python3", "-c", python)
-	cmd.Env = append(os.Environ(), "PYTHONPATH=.reference/sqlglot-v30.12.0")
+	cmd.Env = append(os.Environ(), "PYTHONPATH=.reference/sqlglot-v30.17.0")
 	cmd.Stdin = bytes.NewReader(inputJSON)
 	cmd.Stderr = os.Stderr
 	output, err := cmd.Output()

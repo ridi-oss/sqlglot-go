@@ -5,6 +5,7 @@ import (
 
 	sqlglot "github.com/ridi-oss/sqlglot-go"
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/generator"
 )
 
 func assertMySQLSetInsertShape(t *testing.T, insert exp.Expression, columns []string, values []string) {
@@ -195,13 +196,33 @@ func TestMySQLInsertReplaceGuardrails(t *testing.T) {
 		})
 	}
 
+	// INSERT ... SET normalizes in EVERY dialect since upstream v30.17.0
+	// (parser.py:3616-3647); statement-leading REPLACE stays MySQL-only.
+	for _, tc := range []struct {
+		name    string
+		sql     string
+		dialect string
+		want    string
+	}{
+		{name: "insert set base", sql: "INSERT INTO t SET a = 1, b = 2", dialect: "", want: "INSERT INTO t (a, b) VALUES (1, 2)"},
+		{name: "insert set postgres", sql: "INSERT INTO t SET a = 1, b = 2", dialect: "postgres", want: "INSERT INTO t (a, b) VALUES (1, 2)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expression, err := sqlglot.ParseOne(tc.sql, tc.dialect)
+			if err != nil {
+				t.Fatalf("ParseOne(%q, %q): %v", tc.sql, tc.dialect, err)
+			}
+			got, err := sqlglot.Generate(expression, tc.dialect, generator.Options{})
+			if err != nil || got != tc.want {
+				t.Fatalf("Generate = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
 	for _, tc := range []struct {
 		name    string
 		sql     string
 		dialect string
 	}{
-		{name: "insert set base", sql: "INSERT INTO t SET a = 1, b = 2", dialect: ""},
-		{name: "insert set postgres", sql: "INSERT INTO t SET a = 1, b = 2", dialect: "postgres"},
 		{name: "replace base", sql: "REPLACE INTO t VALUES (1)", dialect: ""},
 		{name: "replace postgres", sql: "REPLACE INTO t VALUES (1)", dialect: "postgres"},
 	} {

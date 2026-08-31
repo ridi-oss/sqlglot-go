@@ -13,7 +13,7 @@ import (
 )
 
 // extensionEntry is one row of testdata/upstream_extensions.jsonl: a construct sqlglot-go
-// parses STRUCTURALLY that pinned upstream (sqlglot v30.12.0) does NOT — a deliberate
+// parses STRUCTURALLY that pinned upstream (sqlglot v30.17.0) does NOT — a deliberate
 // grammar extension beyond upstream (see DEVIATIONS.md "Grammar extensions beyond upstream"
 // and AGENTS.md "How deviations are tracked"). Each row is a live spec:
 //
@@ -81,7 +81,7 @@ func TestUpstreamExtensionsTripwire(t *testing.T) {
 	if len(entries) == 0 {
 		t.Skip("no upstream extensions ledgered yet")
 	}
-	if _, err := os.Stat(".reference/sqlglot-v30.12.0/sqlglot"); err != nil {
+	if _, err := os.Stat(".reference/sqlglot-v30.17.0/sqlglot"); err != nil {
 		t.Skip("pinned reference absent (run scripts/fetch-reference.sh) — tripwire only runs at bump time")
 	}
 	python, err := exec.LookPath("python3")
@@ -118,7 +118,7 @@ for row in json.load(sys.stdin):
 json.dump(out, sys.stdout, separators=(",", ":"))
 `
 	cmd := exec.Command(python, "-c", script)
-	cmd.Env = append(os.Environ(), "PYTHONPATH=.reference/sqlglot-v30.12.0")
+	cmd.Env = append(os.Environ(), "PYTHONPATH=.reference/sqlglot-v30.17.0")
 	cmd.Stdin = bytes.NewReader(inputJSON)
 	cmd.Stderr = os.Stderr
 	output, err := cmd.Output()

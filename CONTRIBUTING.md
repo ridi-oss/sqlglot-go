@@ -1,7 +1,7 @@
 # Contributing to sqlglot-go
 
 Thanks for your interest! sqlglot-go is a faithful Go port of
-[tobymao/sqlglot](https://github.com/tobymao/sqlglot) **v30.12.0**. Please read
+[tobymao/sqlglot](https://github.com/tobymao/sqlglot) **v30.17.0**. Please read
 **[AGENTS.md](./AGENTS.md)** first — it is the canonical guide to how the port is built and what is in
 scope. This file is the quick contributor checklist.
 
@@ -30,7 +30,7 @@ checks across Go 1.23 and latest stable.
 
 ## The source-of-truth rule
 
-Port **from the pinned Python** at `.reference/sqlglot-v30.12.0/` (run `make reference` once to fetch
+Port **from the pinned Python** at `.reference/sqlglot-v30.17.0/` (run `make reference` once to fetch
 it — it is gitignored), **file-by-file, as close to 1:1 as Go allows**. Port the matching upstream tests
 and reuse the `.sql` fixtures verbatim. When Go forces a divergence, keep it minimal and cite the
 reference line in a comment.

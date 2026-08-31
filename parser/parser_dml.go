@@ -61,6 +61,12 @@ func (p *Parser) parseInsert() exp.Expression {
 			this = p.parseInsertTable()
 		}
 	}
+	// MySQL's INSERT ... SET is normalized into the INSERT ... (cols) VALUES (vals) variant
+	// (parser.py:3616-3647, v30.17.0 — matched before RETURNING, every dialect).
+	var setValues exp.Expression
+	if p.match(tokens.SET) {
+		this, setValues = p.parseInsertSetValues(this)
+	}
 	returning := p.parseReturning()
 	byName := p.matchTextSeq("BY", "NAME")
 	exists := p.parseExists(false)
@@ -69,12 +75,8 @@ func (p *Parser) parseInsert() exp.Expression {
 		where = p.parseDisjunction()
 	}
 	default_ := p.matchTextSeq("DEFAULT", "VALUES")
-	var expression exp.Expression
-	if p.dialect.Name == "mysql" && p.match(tokens.SET) {
-		// mysql-insert-set divergence from parser.py:3486-3542: the pinned INSERT grammar
-		// does not consume SET; desugar it into the ordinary Schema + one-row Values shape.
-		this, expression = p.parseMySQLInsertSet(this, p.parseCsv(p.parseEquality))
-	} else {
+	expression := setValues
+	if expression == nil {
 		// These firstExpression calls evaluate their alternatives eagerly (unlike a
 		// short-circuit `or`), which is safe here only because the alternatives sit at
 		// non-overlapping token positions: parseDerivedTableValues/parseReturning consume

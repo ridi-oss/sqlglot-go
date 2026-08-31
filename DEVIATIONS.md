@@ -1,6 +1,6 @@
 # Deviations from upstream sqlglot
 
-Ledger of every place sqlglot-go *intentionally* differs from pinned upstream (v30.12.0), so an
+Ledger of every place sqlglot-go *intentionally* differs from pinned upstream (v30.17.0), so an
 upstream bump or differential check can tell an intended divergence from a regression. One entry per
 deviation: upstream's behavior → ours → the guarding test. Reasoning lives in the code comments
 (grep `divergence` / `Unlike upstream`), commit history, and `ROADMAP.md`'s resolved-findings ledger.
@@ -190,7 +190,6 @@ reconciliation note); malformed/engine-invalid forms fail closed to `Command` or
 | ledger id | construct → node |
 |---|---|
 | `pg-explain` | Postgres `EXPLAIN` → `Describe{kind:"EXPLAIN"}` with structured options + parsed inner statement |
-| `mysql-insert-set` | `INSERT INTO t SET a=1` → normalized `Insert` + one-row `Values` (renders as `INSERT … VALUES`) |
 | `mysql-replace` | `REPLACE INTO …` → `Insert{replace:true}` (MySQL generator renders `REPLACE`) |
 | `mysql-describe-column` | `DESCRIBE tbl col\|'wild'` → `Describe{this:Table, column}` (single identifier/wild only) |
 | `pg-set-role`, `pg-set-session-authorization`, `pg-set-time-zone`, `pg-set-names`, `pg-set-constraints`, `pg-set-session-characteristics` | Postgres SET special forms → `Set{SetItem{kind:…}}` |
