@@ -1849,7 +1849,12 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 		// LIKE y` desugars to EQ(Soundex(x), Soundex(y)) (no dedicated exp.SoundsLike
 		// class upstream; the RHS is a bitwise operand). MySQL evaluates = and IS left to
 		// right (same precedence), so a following IS wraps the EQ in parens.
-		// SOUNDS_LIKE is mysql-only tokenized.
+		// SOUNDS_LIKE is mysql-only tokenized. Upstream matches it BEFORE the NOT
+		// consumption (the override runs ahead of super()._parse_range), so
+		// `NOT SOUNDS LIKE` falls through and errors — as does real MySQL 8.0 (1064).
+		if negate {
+			p.raiseError("SOUNDS LIKE cannot be negated with NOT")
+		}
 		p.advance()
 		this = p.expression(exp.EQ(exp.Args{
 			"this":       p.expression(exp.Soundex(exp.Args{"this": this}), nil, nil),
@@ -1871,11 +1876,17 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 		this = p.expression(exp.Is(exp.Args{"this": this, "expression": exp.Null()}), nil, nil)
 		negate = false
 	}
-	// Postgres ISNULL/NOTNULL postfix predicates ("Postgres supports ISNULL and NOTNULL
-	// for conditions", parser.py comment above _parse_range's NOTNULL check).
+	// Postgres ISNULL/NOTNULL postfix predicates. v30.17.0 gates the build on
+	// NORMALIZE_NOT_NULL (dialect.py:757, postgres.py:16 overrides False): postgres keeps
+	// Is(negate=True) so `deleted NOTNULL` renders `deleted IS NOT NULL`; other dialects
+	// keep the normalized NOT(Is(...)) shape.
 	if p.match(tokens.NOTNULL) {
-		this = p.expression(exp.Is(exp.Args{"this": this, "expression": exp.Null()}), nil, nil)
-		this = p.expression(exp.Not(exp.Args{"this": this}), nil, nil)
+		if p.dialect.NormalizeNotNull {
+			this = p.expression(exp.Is(exp.Args{"this": this, "expression": exp.Null()}), nil, nil)
+			this = p.expression(exp.Not(exp.Args{"this": this}), nil, nil)
+		} else {
+			this = p.expression(exp.Is(exp.Args{"this": this, "expression": exp.Null(), "negate": true}), nil, nil)
+		}
 	}
 	if p.match(tokens.IS) {
 		this = p.parseIs(this)

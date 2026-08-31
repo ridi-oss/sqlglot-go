@@ -192,7 +192,6 @@
 {"dialect": "mysql", "sql": "REVOKE SELECT ON world.* FROM 'role3'", "want": "REVOKE SELECT ON world.* FROM 'role3'", "pretty": false}
 {"dialect": "mysql", "sql": "REVOKE SELECT, INSERT, UPDATE ON *.* FROM u2", "want": "REVOKE SELECT, INSERT, UPDATE ON *.* FROM u2", "pretty": false}
 {"dialect": "mysql", "sql": "SELECT 'ab' MEMBER OF('[23, \"abc\", 17, \"ab\", 10]')", "want": "SELECT 'ab' MEMBER OF('[23, \"abc\", 17, \"ab\", 10]')", "pretty": false}
-{"dialect": "mysql", "sql": "SELECT 'foo' NOT SOUNDS LIKE 'bar'", "want": "SELECT NOT SOUNDEX('foo') = SOUNDEX('bar')", "pretty": false}
 {"dialect": "mysql", "sql": "SELECT 'foo' SOUNDS LIKE 'bar'", "want": "SELECT SOUNDEX('foo') = SOUNDEX('bar')", "pretty": false}
 {"dialect": "mysql", "sql": "SELECT * FROM foo WHERE 'ab' MEMBER OF(content)", "want": "SELECT * FROM foo WHERE 'ab' MEMBER OF(content)", "pretty": false}
 {"dialect": "mysql", "sql": "SELECT * FROM foo WHERE 3 MEMBER OF(JSON_EXTRACT(info, '$.value'))", "want": "SELECT * FROM foo WHERE 3 MEMBER OF(JSON_EXTRACT(info, '$.value'))", "pretty": false}
@@ -822,7 +821,7 @@
 {"dialect": "postgres", "sql": "SELECT e'foo \\' bar'", "want": "SELECT e'foo '' bar'", "pretty": false}
 {"dialect": "postgres", "sql": "SELECT e'update table_name set a = \\'foo\\' where 1 = 0' AS x FROM tab", "want": "SELECT e'update table_name set a = ''foo'' where 1 = 0' AS x FROM tab", "pretty": false}
 {"dialect": "postgres", "sql": "SELECT id, email, CAST(deleted AS TEXT) FROM users WHERE NOT deleted ISNULL", "want": "SELECT id, email, CAST(deleted AS TEXT) FROM users WHERE NOT deleted IS NULL", "pretty": false}
-{"dialect": "postgres", "sql": "SELECT id, email, CAST(deleted AS TEXT) FROM users WHERE deleted NOTNULL", "want": "SELECT id, email, CAST(deleted AS TEXT) FROM users WHERE NOT deleted IS NULL", "pretty": false}
+{"dialect": "postgres", "sql": "SELECT id, email, CAST(deleted AS TEXT) FROM users WHERE deleted NOTNULL", "want": "SELECT id, email, CAST(deleted AS TEXT) FROM users WHERE deleted IS NOT NULL", "pretty": false}
 {"dialect": "postgres", "sql": "SELECT id, name FROM xml_data AS t, XMLTABLE('/root/user' PASSING t.xml COLUMNS id INT PATH '@id', name TEXT PATH 'name/text()') AS x", "want": "SELECT id, name FROM xml_data AS t, XMLTABLE('/root/user' PASSING t.xml COLUMNS id INT PATH '@id', name TEXT PATH 'name/text()') AS x", "pretty": false}
 {"dialect": "postgres", "sql": "SELECT id, value FROM xml_content AS t, XMLTABLE(XMLNAMESPACES('http://example.com/ns1' AS ns1, 'http://example.com/ns2' AS ns2), '/root/data' PASSING t.xml COLUMNS id INT PATH '@ns1:id', value TEXT PATH 'ns2:value/text()') AS x", "want": "SELECT id, value FROM xml_content AS t, XMLTABLE(XMLNAMESPACES('http://example.com/ns1' AS ns1, 'http://example.com/ns2' AS ns2), '/root/data' PASSING t.xml COLUMNS id INT PATH '@ns1:id', value TEXT PATH 'ns2:value/text()') AS x", "pretty": false}
 {"dialect": "postgres", "sql": "SELECT js, js IS JSON ARRAY WITH UNIQUE KEYS AS \"array w. UK?\", js IS JSON ARRAY WITHOUT UNIQUE KEYS AS \"array w/o UK?\", js IS JSON ARRAY UNIQUE KEYS AS \"array w UK 2?\" FROM t", "want": "SELECT js, js IS JSON ARRAY WITH UNIQUE KEYS AS \"array w. UK?\", js IS JSON ARRAY WITHOUT UNIQUE KEYS AS \"array w/o UK?\", js IS JSON ARRAY UNIQUE KEYS AS \"array w UK 2?\" FROM t", "pretty": false}

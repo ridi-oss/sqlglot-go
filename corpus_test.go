@@ -251,7 +251,7 @@ func writeGaps(fails map[gapKey]string) error {
 // SQLGLOT_CORPUS_UPDATE=1 run on the merged tree.
 const (
 	minPassBase     = 955
-	minPassMySQL    = 429
+	minPassMySQL    = 428
 	minPassPostgres = 468
 )
 
@@ -265,7 +265,7 @@ const (
 // legitimately grows; a count below any floor means the corpus shrank.
 const (
 	minTotalBase     = 955
-	minTotalMySQL    = 429
+	minTotalMySQL    = 428
 	minTotalPostgres = 468
 )
 

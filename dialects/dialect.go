@@ -238,6 +238,10 @@ type Dialect struct {
 	// a term RHS — `1 + j -> 'a'` parses as JSONExtract(Add(1, j), 'a'), matching real PG
 	// operator precedence. base/mysql keep the accessor-tier behavior.
 	JSONOperatorsAreBinary bool
+	// NormalizeNotNull ports NORMALIZE_NOT_NULL (dialect.py:757, v30.17.0; postgres.py:16
+	// overrides False): whether a postfix NOTNULL builds the normalized NOT(Is(x, NULL))
+	// (true) or Is(x, NULL, negate=True), rendering `x IS NOT NULL` (false, postgres).
+	NormalizeNotNull bool
 	// JSONTypeRequiredForExtraction ports the generator flag JSON_TYPE_REQUIRED_FOR_EXTRACTION
 	// (generator.py:488); mysql (generators/mysql.py:142) and postgres (generators/postgres.py:
 	// 245) both override to True. Consumed by arrow_json_extract_sql (dialect.py:1210-1215):
@@ -370,6 +374,8 @@ func Base() *Dialect {
 		// dialect.py:670 SUPPORTS_VALUES_DEFAULT = True (base); presto overrides to False
 		// (dialects/presto.py:26).
 		SupportsValuesDefault: true,
+		// dialect.py:757 NORMALIZE_NOT_NULL = True (base); postgres overrides to False.
+		NormalizeNotNull: true,
 		// generator.py:374 DUPLICATE_KEY_UPDATE_WITH_SET = True (base); MySQL overrides to
 		// False (generators/mysql.py:137).
 		DuplicateKeyUpdateWithSet: true,

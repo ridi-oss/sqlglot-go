@@ -446,7 +446,15 @@ func (g *Generator) nullSafeEQSQL(e expressions.Expression) string {
 func (g *Generator) nullSafeNEQSQL(e expressions.Expression) string {
 	return g.binary(e, "IS DISTINCT FROM")
 }
-func (g *Generator) isSQL(e expressions.Expression) string    { return g.binary(e, "IS") }
+func (g *Generator) isSQL(e expressions.Expression) string {
+	// is_sql (generator.py:4514-4519, v30.17.0): Is(negate=True) renders `IS NOT`
+	// (postgres NOTNULL keeps this shape; NORMALIZE_NOT_NULL=False). The IS_BOOL_ALLOWED
+	// branch is presto-family-only and out of scope here.
+	if boolValue(e.Arg("negate")) {
+		return g.binary(e, "IS NOT")
+	}
+	return g.binary(e, "IS")
+}
 func (g *Generator) likeSQL(e expressions.Expression) string  { return g.likeSQLWithOp(e, "LIKE") }
 func (g *Generator) ilikeSQL(e expressions.Expression) string { return g.likeSQLWithOp(e, "ILIKE") }
 

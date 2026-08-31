@@ -784,7 +784,7 @@ var argTypes = map[Kind][]argSpec{
 	KindBitwiseXor: {{"this", true}, {"expression", true}, {"padside", false}},
 	KindDPipe:      {{"this", true}, {"expression", true}, {"safe", false}},
 	KindBetween:    {{"this", true}, {"low", true}, {"high", true}, {"symmetric", false}},
-	KindIs:         {{"this", true}, {"expression", true}},
+	KindIs:         {{"this", true}, {"expression", true}, {"negate", false}},
 	KindLike:       {{"this", true}, {"expression", true}, {"negate", false}},
 	KindILike:      {{"this", true}, {"expression", true}, {"negate", false}},
 	// SimilarTo/Escape mirror Binary's default arg_types (parser.py:1623-1624): no "negate"
