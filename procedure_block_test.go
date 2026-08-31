@@ -143,6 +143,67 @@ func TestRoutineBodyOneStatement(t *testing.T) {
 			[]string{"CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END", "SELECT 2"}},
 		{"CREATE FUNCTION f() RETURNS int LANGUAGE SQL BEGIN ATOMIC SELECT 1; END; SELECT 2", "postgres",
 			[]string{"CREATE FUNCTION f() RETURNS int LANGUAGE SQL BEGIN ATOMIC SELECT 1; END", "SELECT 2"}},
+		// Bare procedural bodies without BEGIN: IF/LOOP/REPEAT/WHILE/CASE leaders open a
+		// block ended by their `END <kw>` closer (valid MySQL, verified on 8.4).
+		{"CREATE PROCEDURE p() IF 1 THEN SELECT 1; SELECT 2; END IF", "mysql",
+			[]string{"CREATE PROCEDURE p() IF 1 THEN SELECT 1; SELECT 2; END IF"}},
+		{"CREATE PROCEDURE p() LOOP SELECT 1; SELECT 2; END LOOP", "mysql",
+			[]string{"CREATE PROCEDURE p() LOOP SELECT 1; SELECT 2; END LOOP"}},
+		{"CREATE PROCEDURE p() IF 1 THEN SELECT 1; END IF; SELECT 99", "mysql",
+			[]string{"CREATE PROCEDURE p() IF 1 THEN SELECT 1; END IF", "SELECT 99"}},
+		{"CREATE PROCEDURE p() REPEAT SELECT 1; UNTIL x END REPEAT", "mysql",
+			[]string{"CREATE PROCEDURE p() REPEAT SELECT 1; UNTIL x END REPEAT"}},
+		// IF()/REPEAT() as ordinary function calls inside a degraded body don't open blocks.
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = IF(1, 2, 3); END; SELECT 9", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = IF(1, 2, 3); END", "SELECT 9"}},
+		// Mixed nesting: IF > LOOP inside BEGIN, all balanced.
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN IF @a THEN LOOP SET @b = 1; END LOOP; END IF; END; SELECT 4", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN IF @a THEN LOOP SET @b = 1; END LOOP; END IF; END", "SELECT 4"}},
+		// Parenthesized IF condition still opens the block (MySQL accepts it).
+		{"CREATE PROCEDURE p() IF (1 = 1) THEN SELECT 1; END IF; SELECT 9", "mysql",
+			[]string{"CREATE PROCEDURE p() IF (1 = 1) THEN SELECT 1; END IF", "SELECT 9"}},
+		// MySQL `WHILE cond DO ... END WHILE` body: one statement, trailing SELECT separate
+		// (previously the structured WhileBlock mis-parse absorbed the SELECT — fail-open).
+		{"CREATE PROCEDURE p() WHILE FALSE DO SELECT 1; END WHILE; SELECT 9", "mysql",
+			[]string{"CREATE PROCEDURE p() WHILE FALSE DO SELECT 1; END WHILE", "SELECT 9"}},
+		// CREATE TRIGGER IF NOT EXISTS: the header IF is not a block opener.
+		{"CREATE TRIGGER IF NOT EXISTS t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; END; SELECT 2", "mysql",
+			[]string{"CREATE TRIGGER IF NOT EXISTS t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; END", "SELECT 2"}},
+		// Bare identifiers named begin/if/loop and IF NOT EXISTS inside a degraded body:
+		// not openers (position/next-token gates), so the batch splits cleanly.
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT begin FROM t; END; DROP TABLE users; SELECT 2", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT begin FROM t; END", "DROP TABLE users", "SELECT 2"}},
+		// Round-3 shapes: adjacent begin identifiers, table named begin, DO/REPLACE first
+		// statements, condition-name/SQLSTATE/errno handlers, identifier end inside CASE.
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN INSERT INTO log SELECT begin begin FROM src; END; DROP TABLE users; SELECT 1 end", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN INSERT INTO log SELECT begin begin FROM src; END", "DROP TABLE users", "SELECT 1 end"}},
+		{"CREATE TRIGGER a BEFORE INSERT ON x FOR EACH ROW BEGIN INSERT INTO begin SELECT 1; END; CREATE TRIGGER b BEFORE UPDATE ON x FOR EACH ROW BEGIN DO 1; END", "mysql",
+			[]string{"CREATE TRIGGER a BEFORE INSERT ON x FOR EACH ROW BEGIN INSERT INTO begin SELECT 1; END", "CREATE TRIGGER b BEFORE UPDATE ON x FOR EACH ROW BEGIN DO 1; END"}},
+		{"CREATE TRIGGER tr BEFORE UPDATE ON x FOR EACH ROW BEGIN REPLACE INTO y VALUES (1); END; SELECT 9", "mysql",
+			[]string{"CREATE TRIGGER tr BEFORE UPDATE ON x FOR EACH ROW BEGIN REPLACE INTO y VALUES (1); END", "SELECT 9"}},
+		{"CREATE PROCEDURE p() BEGIN DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' IF 1 THEN SELECT 1; END IF; END; SELECT 9", "mysql",
+			[]string{"CREATE PROCEDURE p() BEGIN DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' IF 1 THEN SELECT 1; END IF; END", "SELECT 9"}},
+		{"CREATE PROCEDURE p() BEGIN DECLARE CONTINUE HANDLER FOR 1051 IF 1 THEN SELECT 1; END IF; END; SELECT 9", "mysql",
+			[]string{"CREATE PROCEDURE p() BEGIN DECLARE CONTINUE HANDLER FOR 1051 IF 1 THEN SELECT 1; END IF; END", "SELECT 9"}},
+		{"CREATE PROCEDURE p() BEGIN DECLARE CONTINUE HANDLER FOR no_table IF 1 THEN SELECT 1; END IF; END; SELECT 9", "mysql",
+			[]string{"CREATE PROCEDURE p() BEGIN DECLARE CONTINUE HANDLER FOR no_table IF 1 THEN SELECT 1; END IF; END", "SELECT 9"}},
+		{"CREATE PROCEDURE p() BEGIN SET @a = CASE end WHEN 1 THEN 2 ELSE 3 END; END; SELECT 9", "mysql",
+			[]string{"CREATE PROCEDURE p() BEGIN SET @a = CASE end WHEN 1 THEN 2 ELSE 3 END; END", "SELECT 9"}},
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = if; END; SELECT 9", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = if; END", "SELECT 9"}},
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT loop FROM t; END; SELECT 9", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT loop FROM t; END", "SELECT 9"}},
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN CREATE TABLE IF NOT EXISTS u(i INT); END; SELECT 9", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN CREATE TABLE IF NOT EXISTS u(i INT); END", "SELECT 9"}},
+		// Labeled blocks: `lbl:` is a statement-start gate.
+		{"CREATE PROCEDURE p() BEGIN lbl: LOOP SELECT 1; END LOOP lbl; END; SELECT 5", "mysql",
+			[]string{"CREATE PROCEDURE p() BEGIN lbl: LOOP SELECT 1; END LOOP lbl; END", "SELECT 5"}},
+		// Routine characteristics before a bare body still gate the leader.
+		{"CREATE PROCEDURE p() DETERMINISTIC IF 1 THEN SELECT 1; END IF; SELECT 6", "mysql",
+			[]string{"CREATE PROCEDURE p() DETERMINISTIC IF 1 THEN SELECT 1; END IF", "SELECT 6"}},
+		// Expression CASE inside a body pairs with its own plain END.
+		{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = CASE WHEN 1 THEN 2 ELSE 3 END; END; SELECT 4", "mysql",
+			[]string{"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = CASE WHEN 1 THEN 2 ELSE 3 END; END", "SELECT 4"}},
 	}
 	for _, tc := range cases {
 		statements, err := sqlglot.Parse(tc.sql, tc.dialect)
@@ -174,10 +235,11 @@ func TestRoutineBodyOneStatement(t *testing.T) {
 // rejects it; error 1064).
 func TestDegradedCreateFailsClosed(t *testing.T) {
 	for _, sql := range []string{
+		// PG CREATE RULE with a trailing alias IF and a later END IF (must not merge).
+		// NOTE: dialect is mysql below; the PG variant is asserted separately.
 		// Unterminated body: without the depth>0 check this merged the DROP into the Command.
 		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = 1; DROP TABLE users",
-		// `begin` as a bare identifier inflates the count -> unknowable extent -> error.
-		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT begin FROM t; END; DROP TABLE users; SELECT 2",
+
 		// `end` as a bare value deflates it -> the residual top-level END chunk errors.
 		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = end; END; SELECT 2",
 		// Empty trailing chunk while unbalanced: an error, not a slice-bounds panic.
@@ -189,6 +251,24 @@ func TestDegradedCreateFailsClosed(t *testing.T) {
 		"CREATE PROCEDURE p() BEGIN SELECT 1;",
 		// Bare END as the whole batch (real MySQL error 1064): an error, not Column(END).
 		"END",
+		// A stray trailing END cannot rebalance the block stack (kind-matching): a bare
+		// identifier miscount plus a later END must ERROR, never merge the DROP into the
+		// Command (the fail-open direction the stack design exists to prevent).
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = if; END; DROP TABLE users; END",
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN CREATE TABLE IF NOT EXISTS u(i INT); END; SELECT 9; END",
+		// Same-kind false-opener probes: an identifier/alias that COULD push a kind plus a
+		// later matching `END <kw>` — must error, never balance and absorb the DROP.
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT * FROM (SELECT 1) if; END IF; DROP TABLE users; END",
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN IF 1 THEN SELECT (1) if; END IF; END IF; DROP TABLE u; END",
+		"CREATE PROCEDURE p() BEGIN DO IF(1,2,3); END IF; DROP TABLE users; END",
+		"CREATE PROCEDURE p() BEGIN DO REPEAT(1,2); END REPEAT; DROP TABLE users; END",
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT 1 AS case; END CASE; DROP TABLE users; END",
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SELECT case FROM t; END CASE; DROP TABLE u; END",
+		// whenAhead across a subquery WHEN + broken expression CASE + PG RULE header IF:
+		// all must error, never merge the DROP.
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW INSERT INTO log SELECT case FROM (SELECT when FROM src) s; DROP TABLE users; END CASE",
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = CASE WHEN 1 THEN 2; END; DROP TABLE users; END",
+		"CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET @a = CASE WHEN 1 THEN 2; END CASE; DROP TABLE users; END",
 	} {
 		if _, err := sqlglot.Parse(sql, "mysql"); err == nil {
 			t.Errorf("%q parsed; want error", sql)

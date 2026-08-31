@@ -36,9 +36,10 @@ func (p *Parser) parseCreateAsCommand(start tokens.Token) exp.Expression {
 		p.advance()
 	}
 	last := p.prev
-	depth := blockDepthDelta(p.tokens)
-	for depth > 0 && p.chunkIndex < len(p.chunks) {
-		depth += blockDepthDelta(p.chunks[p.chunkIndex])
+	stack := blockStack{dialect: p.dialect.Name}
+	stack.feed(p.tokens)
+	for !stack.ambiguous && len(stack.kinds) > 0 && p.chunkIndex < len(p.chunks) {
+		stack.feed(p.chunks[p.chunkIndex])
 		p.advanceChunk()
 		for p.curr.IsValid() {
 			p.advance()
@@ -47,12 +48,12 @@ func (p *Parser) parseCreateAsCommand(start tokens.Token) exp.Expression {
 			last = p.prev
 		}
 	}
-	// Unbalanced at exhaustion — an unterminated body, or a depth miscount (the counting is
-	// token-level; an unquoted identifier named `begin`/`case` inflates it). Either way the
-	// extent is unknowable: FAIL CLOSED with a parse error rather than silently merging the
-	// rest of the batch into one Command (fail-open for a per-statement consumer).
-	if depth > 0 {
-		p.raiseError("Unterminated BEGIN block in unsupported CREATE statement", start)
+	// Unbalanced at exhaustion, or a closer that didn't match its opener kind (END IF against
+	// a BEGIN, plain END against an IF) — either way the extent is unknowable: FAIL CLOSED
+	// with a parse error rather than silently merging the rest of the batch into one Command
+	// (fail-open for a per-statement consumer).
+	if stack.ambiguous || len(stack.kinds) > 0 {
+		p.raiseError("Unterminated or ambiguous block in unsupported CREATE statement", start)
 		p.checkErrors()
 	}
 	text := p.findSQL(start, last)
@@ -61,43 +62,283 @@ func (p *Parser) parseCreateAsCommand(start tokens.Token) exp.Expression {
 	return p.expression(exp.Command(exp.Args{"this": string(runes[:size]), "expression": string(runes[size:])}), nil, nil)
 }
 
-// blockDepthDelta is the net BEGIN-block depth change across one chunk's tokens. Openers:
-// `BEGIN` (by text, so START TRANSACTION's BEGIN-typed START doesn't count) and expression
-// `CASE` (always END-paired). `END IF|WHILE|LOOP|REPEAT|CASE` closes an uncounted opener, so
-// both tokens net zero; a plain END decrements. Heuristic by design — it only steers how far
-// a degraded Command extends, never a structured parse.
-func blockDepthDelta(toks []tokens.Token) int {
+// blockStack tracks procedural block nesting across a degraded CREATE's chunks as a
+// KIND-MATCHED stack, not a bare counter: every opener pushes its kind ("BEGIN", "CASE",
+// "IF", "LOOP", "REPEAT", "WHILE") and every `END [kw]` must pop exactly that kind — a
+// mismatch (plain END against IF, END IF against BEGIN) marks the extent ambiguous, which
+// the caller fails closed on. Openers are POSITION-GATED (see stmtStartAfter/leaderOpens/
+// whenAhead), so identifiers named if/loop/case in expression positions, `IF NOT EXISTS`,
+// function calls (`IF(…)`, `DO IF(…)`), and subquery aliases never inflate the stack —
+// which is what keeps a later matching `END <kw>` from rebalancing a frame that was never
+// opened (the merge direction). Residual ambiguity always FAILS CLOSED via `ambiguous`.
+type blockStack struct {
+	dialect   string
+	kinds     []string
+	ambiguous bool
+}
+
+// stmtStartAfter reports whether a statement can begin after the given token — the
+// positions where a bare procedural leader is a block opener rather than an identifier.
+// stackEmpty narrows the header-only positions: the routine signature's `)` and the routine
+// characteristics (`DETERMINISTIC`, `COMMENT '…'`, `SQL SECURITY INVOKER`, …) precede the
+// body only BEFORE any block has opened; inside a body (stack non-empty) a `)` is a
+// subquery/call close and a leader after it is an alias — never an opener.
+func stmtStartAfter(toks []tokens.Token, i int, stackEmpty bool) bool {
+	tok := toks[i-1]
+	switch tok.TokenType {
+	case tokens.THEN, tokens.ELSE, tokens.BEGIN, tokens.ROW, tokens.COLON:
+		// ROW: `FOR EACH ROW <body>` (MySQL TRIGGER). COLON: a `lbl:` statement label.
+		return true
+	case tokens.R_PAREN:
+		return stackEmpty
+	case tokens.STRING:
+		// COMMENT '…' characteristic (header), or `HANDLER FOR SQLSTATE ['VALUE'] '…'`.
+		if stackEmpty {
+			return true
+		}
+		if i >= 3 {
+			prev2 := stringsUpper(toks[i-2].Text)
+			return prev2 == "SQLSTATE" || prev2 == "VALUE"
+		}
+		return false
+	case tokens.NUMBER:
+		// A routine characteristic value (header), or `HANDLER FOR <errno>`.
+		if stackEmpty {
+			return true
+		}
+		return i >= 3 && stringsUpper(toks[i-2].Text) == "FOR"
+	case tokens.VAR:
+		switch stringsUpper(tok.Text) {
+		case "DO", "LOOP", "REPEAT":
+			// WHILE … DO <stmt> / LOOP <stmt> / REPEAT <stmt>. ELSEIF is deliberately NOT
+			// a gate: its operand is an EXPRESSION (`ELSEIF IF(y,…) THEN` is a function
+			// call) — the branch's statement starts after THEN, which gates already.
+			return true
+		case "SQLEXCEPTION", "SQLWARNING", "FOUND":
+			// DECLARE … HANDLER FOR <condition> <handler statement>.
+			return true
+		default:
+			// A declared condition NAME: `HANDLER FOR my_condition <handler statement>`.
+			if !stackEmpty && i >= 3 && toks[i-2].TokenType == tokens.FOR {
+				return true
+			}
+			// Any other VAR in HEADER position (stack empty): routine characteristic
+			// tails (DETERMINISTIC, INVOKER, LANGUAGE SQL) and RETURNS <type> words all
+			// precede the body. Inside a body (stack non-empty) a VAR predecessor is an
+			// expression context and never gates.
+			return stackEmpty
+		}
+	case tokens.NOT, tokens.EXISTS, tokens.FROM, tokens.COMMA, tokens.EQ, tokens.DOT,
+		tokens.TABLE, tokens.SELECT, tokens.L_PAREN, tokens.END, tokens.CASE, tokens.WHEN:
+		// Identifier-position predecessors even in a header: `IF NOT EXISTS`,
+		// `FROM if`, `= begin`, a select list — never a statement start. END is here so
+		// the `IF` of an `END IF` closer (already consumed as the suffix) can't re-open.
+		return false
+	}
+	// Any other token type in HEADER position (a RETURNS type keyword, the signature
+	// tail) precedes the body; inside a body it is expression context.
+	return stackEmpty
+}
+
+// beginOpens reports whether the BEGIN at position i starts a block: the next token must be
+// statement-shaped (a statement keyword, a procedural leader, or the closing END of an empty
+// block). An identifier named `begin` is followed by expression continuation (FROM, a comma,
+// an operator) and never pushes.
+func beginOpens(toks []tokens.Token, i int) bool {
+	if i+1 >= len(toks) {
+		return false // trailing `begin` in a chunk is an identifier/alias, not a block open
+	}
+	next := toks[i+1]
+	switch next.TokenType {
+	case tokens.SELECT, tokens.INSERT, tokens.UPDATE, tokens.DELETE, tokens.SET,
+		tokens.CASE, tokens.BEGIN, tokens.END, tokens.CREATE, tokens.DROP, tokens.WITH:
+		return true
+	case tokens.COMMAND, tokens.FETCH, tokens.REPLACE:
+		// DO/CALL tokenize as COMMAND under mysql; FETCH/REPLACE have their own types.
+		return true
+	case tokens.VAR:
+		switch stringsUpper(next.Text) {
+		case "DECLARE", "IF", "LOOP", "REPEAT", "WHILE", "CALL", "ITERATE", "LEAVE",
+			"RETURN", "OPEN", "CLOSE", "FETCH", "SIGNAL", "RESIGNAL", "ATOMIC", "DO",
+			"GET", "TRUNCATE", "ANALYZE":
+			return true
+		}
+		// A statement label: `BEGIN lbl: LOOP …`.
+		if i+2 < len(toks) && toks[i+2].TokenType == tokens.COLON {
+			return true
+		}
+	}
+	return false
+}
+
+// whenAhead reports whether a WHEN token appears at or after position i before the chunk
+// ends or nesting drops below zero — a genuine CASE always carries one; an identifier
+// named `case` never does.
+func whenAhead(toks []tokens.Token, i int) bool {
 	depth := 0
+	for j := i; j < len(toks); j++ {
+		switch toks[j].TokenType {
+		case tokens.WHEN:
+			if depth == 0 {
+				return true
+			}
+		case tokens.CASE:
+			depth++
+		case tokens.END:
+			if depth == 0 {
+				return false
+			}
+			depth--
+		}
+	}
+	return false
+}
+
+// leaderOpens disambiguates a bare leader word followed by `(`: `IF (cond) THEN …` and
+// `WHILE (cond) DO …` are statements (the balanced paren group is followed by THEN/DO),
+// while `IF(1,2,3)` / `WHILE(0)` are function calls and `LOOP`/`REPEAT` statements are
+// never followed directly by `(`. A leader not followed by `(` always opens.
+func leaderOpens(word string, toks []tokens.Token, i int) bool {
+	// `IF NOT EXISTS` (a CREATE header clause) is never an IF statement.
+	if i+1 < len(toks) && toks[i+1].TokenType == tokens.NOT {
+		return false
+	}
+	// A leader as the chunk's LAST token is an alias/identifier (`SELECT (1) IF`), never a
+	// statement — a genuine leader is always followed by its condition/body in-chunk.
+	if i+1 >= len(toks) {
+		return false
+	}
+	switch word {
+	case "IF":
+		// The IF statement's condition and THEN share its chunk (no `;` between them).
+		return thenAhead(toks, i+1, tokens.THEN)
+	case "WHILE":
+		// Likewise WHILE ... DO.
+		for j := i + 1; j < len(toks); j++ {
+			if toks[j].TokenType == tokens.VAR && stringsUpper(toks[j].Text) == "DO" {
+				return true
+			}
+		}
+		return false
+	}
+	// LOOP/REPEAT: any following token suffices (their body starts immediately); a
+	// function-call spelling `REPEAT('x',3)` never reaches here in an opener position.
+	return toks[i+1].TokenType != tokens.L_PAREN
+}
+
+// thenAhead reports whether tt appears later in the chunk at paren depth 0.
+func thenAhead(toks []tokens.Token, i int, tt tokens.TokenType) bool {
+	depth := 0
+	for j := i; j < len(toks); j++ {
+		switch toks[j].TokenType {
+		case tokens.L_PAREN:
+			depth++
+		case tokens.R_PAREN:
+			depth--
+		case tt:
+			if depth <= 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (b *blockStack) feed(toks []tokens.Token) {
+	defer func() {
+		// An expression-CASE frame must resolve within its own chunk; one surviving to
+		// the chunk boundary is broken CASE text — ambiguous, never carryable.
+		for _, k := range b.kinds {
+			if k == "XCASE" {
+				b.ambiguous = true
+			}
+		}
+	}()
 	for i, tok := range toks {
-		// A keyword adjacent to a `.` is a qualified identifier part (`NEW.begin`,
-		// `end.col`), never a block token.
+		if b.ambiguous {
+			return
+		}
+		// A keyword adjacent to a `.` is a qualified identifier part, never a block token.
 		if (i > 0 && toks[i-1].TokenType == tokens.DOT) || (i+1 < len(toks) && toks[i+1].TokenType == tokens.DOT) {
 			continue
 		}
 		switch tok.TokenType {
 		case tokens.BEGIN:
-			if stringsUpper(tok.Text) == "BEGIN" {
-				depth++
+			// Doubly gated: BEGIN opens only at a statement-start POSITION (like the
+			// other leaders) AND with a statement-shaped FOLLOWING token (beginOpens) —
+			// mid-expression `begin` (`SELECT begin SELECT…`, `DECLARE begin INT`) can
+			// never push a false same-kind frame for a stray `end` to balance.
+			if stringsUpper(tok.Text) == "BEGIN" &&
+				(i == 0 || stmtStartAfter(toks, i, len(b.kinds) == 0)) && beginOpens(toks, i) {
+				b.kinds = append(b.kinds, "BEGIN")
 			}
 		case tokens.CASE:
-			if i == 0 || toks[i-1].TokenType != tokens.END {
-				depth++
-			}
-		case tokens.END:
-			// `END IF|WHILE|LOOP|REPEAT` close openers this count ignores — net zero.
-			// `END CASE` and plain `END` decrement (their CASE/BEGIN openers counted).
-			// The suffix must be an unquoted keyword: `END` + a QUOTED alias `IF` is a
-			// closing END (miscounting it high fails closed via the depth>0 check).
-			if i+1 < len(toks) && toks[i+1].TokenType != tokens.IDENTIFIER && toks[i+1].TokenType != tokens.STRING {
-				switch stringsUpper(toks[i+1].Text) {
-				case "IF", "WHILE", "LOOP", "REPEAT":
-					continue
+			// A genuine CASE always carries a WHEN before its END (same chunk). A CASE
+			// STATEMENT (at a statement start, closed by `END CASE`, may span chunks)
+			// pushes "CASE"; an expression CASE (anywhere else, closed by plain END in
+			// ITS OWN chunk) pushes "XCASE", which must resolve before the chunk ends —
+			// so a broken expression CASE can never be balanced by a later END [CASE].
+			if (i == 0 || toks[i-1].TokenType != tokens.END) && whenAhead(toks, i+1) {
+				if i == 0 || stmtStartAfter(toks, i, len(b.kinds) == 0) {
+					b.kinds = append(b.kinds, "CASE")
+				} else {
+					b.kinds = append(b.kinds, "XCASE")
 				}
 			}
-			depth--
+		case tokens.VAR:
+			switch word := stringsUpper(tok.Text); word {
+			case "IF", "LOOP", "REPEAT", "WHILE":
+				// At a statement start the word IS the statement leader; a leader
+				// followed by `(` opens only when the paren group reads as a
+				// parenthesized condition (`IF (…) THEN`, `WHILE (…) DO`).
+				if (i == 0 || stmtStartAfter(toks, i, len(b.kinds) == 0)) && leaderOpens(word, toks, i) {
+					b.kinds = append(b.kinds, word)
+				}
+			}
+		case tokens.END:
+			suffixed := ""
+			if i+1 < len(toks) && toks[i+1].TokenType != tokens.IDENTIFIER && toks[i+1].TokenType != tokens.STRING {
+				switch suffix := stringsUpper(toks[i+1].Text); suffix {
+				case "IF", "LOOP", "REPEAT", "WHILE", "CASE":
+					suffixed = suffix
+				}
+			}
+			top := ""
+			if len(b.kinds) > 0 {
+				top = b.kinds[len(b.kinds)-1]
+			}
+			if suffixed != "" {
+				// `END <kw>` must pop exactly that kind.
+				if top != suffixed {
+					b.ambiguous = true
+					return
+				}
+				b.kinds = b.kinds[:len(b.kinds)-1]
+				continue
+			}
+			// Block-closer positions: chunk start (its own `;`-separated chunk), the
+			// chunk's LAST token (`BEGIN <stmt> END`, no inner `;`), or directly after
+			// BEGIN/END.
+			atCloserPos := i == 0 || i == len(toks)-1 ||
+				toks[i-1].TokenType == tokens.BEGIN || toks[i-1].TokenType == tokens.END
+			if top == "XCASE" {
+				// An expression CASE's plain END shares its chunk with the CASE.
+				b.kinds = b.kinds[:len(b.kinds)-1]
+				continue
+			}
+			// An identifier named `end` mid-expression (`SELECT end FROM t`) is at no
+			// closer position — skipped, so it can neither pop a real frame early nor
+			// balance a false one.
+			if !atCloserPos {
+				continue
+			}
+			if top != "BEGIN" {
+				b.ambiguous = true
+				return
+			}
+			b.kinds = b.kinds[:len(b.kinds)-1]
 		}
 	}
-	return depth
 }
 
 // parseCreateStructured ports the base/mysql/postgres-relevant control flow of _parse_create

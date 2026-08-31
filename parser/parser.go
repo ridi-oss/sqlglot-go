@@ -508,6 +508,14 @@ func (p *Parser) parseBlock(beganAlready bool) exp.Expression {
 // every later chunk.
 func (p *Parser) parseWhileBlock() exp.Expression {
 	condition := p.parseCondition()
+	// divergence (§1.18): MySQL's `WHILE cond DO ... END WHILE` is not this statement —
+	// its DO lands as a bogus alias on the condition. Erroring here routes a routine body
+	// using that form through the degraded-Command path, where the block stack folds it
+	// through END WHILE; accepting it would build a mangled WhileBlock that absorbs every
+	// following statement (fail-open).
+	if condition != nil && condition.Kind() == exp.KindAlias {
+		p.raiseError("WHILE condition cannot be aliased")
+	}
 	var body exp.Expression
 	if p.curr.TokenType == tokens.BEGIN {
 		body = p.parseBlock(false)

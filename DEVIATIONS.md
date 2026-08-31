@@ -140,16 +140,24 @@ as a dangling top-level `EndStatement` fragment (a truncated definition plus a b
 "authorized/executed" as a statement the user never wrote):
 - MySQL `CREATE FUNCTION … BEGIN … END` takes the block path when a `BEGIN` body is present
   (upstream: single-statement body, dangling `END`).
-- A CREATE the structured parse degrades (MySQL TRIGGER/DECLARE bodies, PG `BEGIN ATOMIC` —
+- A CREATE the structured parse degrades (MySQL TRIGGER/DECLARE bodies, bare
+  IF/LOOP/REPEAT/WHILE/CASE routine bodies, PG `BEGIN ATOMIC` —
   the block's first statement now gets the trailing-token check, so an unconsumable body
   statement degrades the whole definition instead of a mangled structured AST) becomes a
   `Command` extended through the block's balancing `END` chunk (`parseCreateAsCommand` +
-  `blockDepthDelta`, which nets out unquoted `END IF|WHILE|LOOP|REPEAT` and CASE pairs and
-  skips dot-qualified keywords). PG 16 executes `BEGIN ATOMIC … END; SELECT 2` as exactly
+  `blockStack`: a KIND-MATCHED stack, not a counter — openers push their kind, every
+  `END [kw]` must pop exactly that kind, mismatch → parse error. Opener gating is
+  contextual: bare IF/LOOP/REPEAT/WHILE only at statement starts (chunk start, after
+  THEN/ELSE/BEGIN/ROW/DO/label-COLON; header positions like the signature `)` and routine
+  characteristics only while no block is open), a leader before `(` only when the balanced
+  paren group is followed by THEN/DO, and CASE only with a WHEN ahead. Identifiers named
+  if/loop/case, `IF NOT EXISTS`, `IF(…)`/`DO IF(…)` calls, and subquery aliases never
+  inflate the stack, so a later matching `END <kw>` cannot rebalance a frame that was
+  never opened. The remaining ambiguity direction is FAIL CLOSED, never merge). PG 16 executes `BEGIN ATOMIC … END; SELECT 2` as exactly
   [definition, SELECT].
-- The depth count is token-level, so ambiguity FAILS CLOSED, never merges: depth still
-  positive at batch end (unterminated body, or a bare identifier named `begin`/`case`
-  inflating the count) is a parse error, and a residual bare top-level `END` chunk is a parse
+- The stack is token-level, so ambiguity FAILS CLOSED, never merges: a non-empty or
+  mismatched stack at batch end (unterminated body, a closer against the wrong kind)
+  is a parse error, and a residual bare top-level `END` chunk is a parse
   error under MySQL (real MySQL 8.0 rejects it) rather than upstream's `EndStatement`
   fragment. The same rule holds on the structured path: a `BEGIN` body that exhausts the
   batch without its terminating `END` (`CREATE PROCEDURE p() BEGIN SELECT 1;`) is a parse
