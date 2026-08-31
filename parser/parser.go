@@ -1813,6 +1813,14 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 			// binary_range_parser(exp.JSONBPathExists) (parser.py:1202): postgres `@?`.
 			p.advance()
 			this = p.parseEscape(p.expression(exp.JSONBPathExists(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
+		case tokens.AMP_LT:
+			// binary_range_parser(exp.ExtendsLeft) (parser.py:1205, v30.17.0): postgres `&<`.
+			p.advance()
+			this = p.parseEscape(p.expression(exp.ExtendsLeft(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
+		case tokens.AMP_GT:
+			// binary_range_parser(exp.ExtendsRight) (parser.py:1206, v30.17.0): postgres `&>`.
+			p.advance()
+			this = p.parseEscape(p.expression(exp.ExtendsRight(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
 		case tokens.ADJACENT:
 			// binary_range_parser(exp.Adjacent) (parser.py:1203): postgres range `-|-`.
 			p.advance()
@@ -1934,6 +1942,7 @@ var rangeChainTokens = map[tokens.TokenType]bool{
 	tokens.LT_AT: true, tokens.OVERLAPS: true, tokens.RLIKE: true, tokens.SIMILAR_TO: true,
 	tokens.QMARK_AMP: true, tokens.QMARK_PIPE: true, tokens.HASH_DASH: true,
 	tokens.AT_QMARK: true, tokens.ADJACENT: true, tokens.OPERATOR: true,
+	tokens.AMP_LT: true, tokens.AMP_GT: true,
 	tokens.DAMP: true, tokens.DAT: true, tokens.MEMBER_OF: true, tokens.SOUNDS_LIKE: true,
 }
 

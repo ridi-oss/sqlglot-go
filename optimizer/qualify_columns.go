@@ -163,7 +163,6 @@ func popTableColumnAliases(derivedTables []exp.Expression) {
 	}
 }
 
-
 // orderedColumnNames returns the accumulated USING-candidate columns in first-seen source
 // order, mirroring upstream's dict insertion order for the NATURAL-join expansion.
 func orderedColumnNames(columns map[string]string, ordered []string, resolver *Resolver) []string {

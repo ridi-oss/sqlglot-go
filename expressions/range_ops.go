@@ -8,6 +8,8 @@ func Glob(args Args) Expression                    { return newNode(KindGlob, ar
 func Overlaps(args Args) Expression                { return newNode(KindOverlaps, args) }
 func RegexpILike(args Args) Expression             { return newNode(KindRegexpILike, args) }
 func Adjacent(args Args) Expression                { return newNode(KindAdjacent, args) }
+func ExtendsLeft(args Args) Expression             { return newNode(KindExtendsLeft, args) }
+func ExtendsRight(args Args) Expression            { return newNode(KindExtendsRight, args) }
 func ArrayContainsAll(args Args) Expression        { return newNode(KindArrayContainsAll, args) }
 func ArrayContainedBy(args Args) Expression        { return newNode(KindArrayContainedBy, args) }
 func ArrayOverlaps(args Args) Expression           { return newNode(KindArrayOverlaps, args) }

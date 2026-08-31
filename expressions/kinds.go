@@ -486,6 +486,9 @@ const (
 	// KindAdjacent (core.py:2234, `class Adjacent(Expression, Binary)`): postgres
 	// range `-|-` operator.
 	KindAdjacent
+	// KindExtendsLeft/KindExtendsRight (core.py:2126,2130): postgres range `&<` / `&>`.
+	KindExtendsLeft
+	KindExtendsRight
 	// KindArrayContainsAll/KindArrayContainedBy/KindArrayOverlaps (array.py:113,117,131,
 	// all `Expression, Binary, Func`): postgres `@>`/`<@`/`&&` array operators.
 	KindArrayContainsAll
@@ -1158,6 +1161,8 @@ var argTypes = map[Kind][]argSpec{
 	KindOverlaps:                {{"this", true}, {"expression", true}},
 	KindRegexpILike:             {{"this", true}, {"expression", true}, {"flag", false}},
 	KindAdjacent:                {{"this", true}, {"expression", true}},
+	KindExtendsLeft:             {{"this", true}, {"expression", true}},
+	KindExtendsRight:            {{"this", true}, {"expression", true}},
 	KindArrayContainsAll:        {{"this", true}, {"expression", true}},
 	KindArrayContainedBy:        {{"this", true}, {"expression", true}},
 	KindArrayOverlaps:           {{"this", true}, {"expression", true}, {"null_safe", false}},
@@ -1394,10 +1399,10 @@ var traitsOf = map[Kind]Trait{
 	KindJSONObjectAgg:  TraitCondition | TraitFunc | TraitAggFunc,
 	KindArrayAgg:       TraitCondition | TraitFunc | TraitAggFunc,
 	KindArraySize:      TraitCondition | TraitFunc,
-	KindArrayContains:  TraitCondition | TraitBinary | TraitFunc,
+	KindArrayContains:  TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindInitcap:        TraitCondition | TraitFunc,
 	KindSplit:          TraitCondition | TraitFunc,
-	KindRegexpLike:     TraitCondition | TraitBinary | TraitFunc,
+	KindRegexpLike:     TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindRegexpSplit:    TraitCondition | TraitFunc,
 	KindStructExtract:  TraitCondition | TraitFunc,
 	KindStandardHash:   TraitCondition | TraitFunc,
@@ -1481,15 +1486,17 @@ var traitsOf = map[Kind]Trait{
 	// the exact upstream class each mirrors. KindJSON (query.py:1965, plain
 	// Expression) gets no row, matching e.g. KindTableAlias.
 	KindGlob:                    TraitCondition | TraitBinary | TraitPredicate,
-	KindOverlaps:                TraitCondition | TraitBinary,
-	KindRegexpILike:             TraitCondition | TraitBinary | TraitFunc,
-	KindAdjacent:                TraitCondition | TraitBinary,
-	KindArrayContainsAll:        TraitCondition | TraitBinary | TraitFunc,
-	KindArrayContainedBy:        TraitCondition | TraitBinary | TraitFunc,
+	KindOverlaps:                TraitCondition | TraitBinary | TraitPredicate,
+	KindRegexpILike:             TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindAdjacent:                TraitCondition | TraitBinary | TraitPredicate,
+	KindExtendsLeft:             TraitCondition | TraitBinary | TraitPredicate,
+	KindExtendsRight:            TraitCondition | TraitBinary | TraitPredicate,
+	KindArrayContainsAll:        TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindArrayContainedBy:        TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindArrayOverlaps:           TraitCondition | TraitBinary | TraitFunc,
-	KindJSONBContains:           TraitCondition | TraitBinary | TraitFunc,
-	KindJSONBContainsAllTopKeys: TraitCondition | TraitBinary | TraitFunc,
-	KindJSONBContainsAnyTopKeys: TraitCondition | TraitBinary | TraitFunc,
+	KindJSONBContains:           TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindJSONBContainsAllTopKeys: TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
+	KindJSONBContainsAnyTopKeys: TraitCondition | TraitBinary | TraitFunc | TraitPredicate,
 	KindJSONBDeleteAtPath:       TraitCondition | TraitBinary | TraitFunc,
 	KindJSONBPathExists:         TraitCondition | TraitBinary | TraitPredicate | TraitFunc,
 	KindOperator:                TraitCondition | TraitBinary,
@@ -1916,6 +1923,8 @@ var className = map[Kind]string{
 	KindOverlaps:                            "Overlaps",
 	KindRegexpILike:                         "RegexpILike",
 	KindAdjacent:                            "Adjacent",
+	KindExtendsLeft:                         "ExtendsLeft",
+	KindExtendsRight:                        "ExtendsRight",
 	KindArrayContainsAll:                    "ArrayContainsAll",
 	KindArrayContainedBy:                    "ArrayContainedBy",
 	KindArrayOverlaps:                       "ArrayOverlaps",
