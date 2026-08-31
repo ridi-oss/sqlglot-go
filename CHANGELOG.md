@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.30.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.29.0...v0.30.0) (2026-08-31)
+
+
+### Features
+
+* opaque_functions setting + EngineCatalog identity resolution ([#86](https://github.com/ridi-oss/sqlglot-go/issues/86)) ([e20cfdf](https://github.com/ridi-oss/sqlglot-go/commit/e20cfdfa7895415ea3e60969b6651a1b41fd6fe2))
+
 ## [0.29.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.28.3...v0.29.0) (2026-08-31)
 
 
