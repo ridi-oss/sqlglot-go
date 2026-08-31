@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.31.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.30.0...v0.31.0) (2026-08-31)
+
+
+### Features
+
+* **parser:** sqlglot v30.17.0 upstream delta — release note for [#87](https://github.com/ridi-oss/sqlglot-go/issues/87) ([#89](https://github.com/ridi-oss/sqlglot-go/issues/89)) ([fda36b3](https://github.com/ridi-oss/sqlglot-go/commit/fda36b33985b2365971a8f358b06b2be588a8d9d))
+
 ## [0.30.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.29.0...v0.30.0) (2026-08-31)
 
 
