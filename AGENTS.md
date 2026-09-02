@@ -134,5 +134,13 @@ features and breaking changes bump the **minor** (`fix` bumps the patch).
 - **To cut the release, merge that release PR.** release-please then tags `vX.Y.Z` and publishes the
   GitHub release automatically. Nothing is tagged by hand.
 
+- **Keep nested parentheses out of squash-commit bodies** — phrases like `Alias(Column(TABLE) AS
+  t)` or `Cast(Literal, DataType(...))` make release-please's commit parser **silently skip the
+  commit**: the workflow run reports success but no release PR is opened (bit v0.31.0 via #87 and
+  v0.33.0 via #93). Since the PR body becomes the squash body, this applies to PR descriptions
+  too — write such AST shapes as `Alias of Column TABLE` or put them in backticked inline code on
+  the title-less lines only if needed, or plain prose. Recovery if it happens: push an empty
+  `feat:` commit with a clean message via a nudge PR; the release PR then appears.
+
 Do **not** hand-edit `CHANGELOG.md` or create version tags manually — release-please owns both.
 Entries for v0.5.0 and earlier predate release-please and were written by hand.
