@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.32.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.31.0...v0.32.0) (2026-09-02)
+
+
+### Features
+
+* **schema:** implicit system-column marking — NewMappingSchemaWithImplicit ([#91](https://github.com/ridi-oss/sqlglot-go/issues/91)) ([8c52aff](https://github.com/ridi-oss/sqlglot-go/commit/8c52aff5701cf8e13507d7c9ea8148487e287ec3))
+
 ## [0.31.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.30.0...v0.31.0) (2026-08-31)
 
 
