@@ -18,6 +18,18 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.33.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.32.0...v0.33.0) (2026-09-02)
+
+
+### Features
+
+* release nudge for the EXPLAIN unification ([#94](https://github.com/ridi-oss/sqlglot-go/issues/94)) ([439b7d3](https://github.com/ridi-oss/sqlglot-go/commit/439b7d3870524d8d01f7bdf16999ae0b5dd19a31))
+
+
+### Documentation
+
+* nested parens in squash bodies silently break release-please ([#96](https://github.com/ridi-oss/sqlglot-go/issues/96)) ([68d58b0](https://github.com/ridi-oss/sqlglot-go/commit/68d58b0bf7c92194434d72682df0c9400618726f))
+
 ## [0.32.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.31.0...v0.32.0) (2026-09-02)
 
 
