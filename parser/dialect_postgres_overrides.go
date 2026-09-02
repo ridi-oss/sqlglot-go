@@ -94,7 +94,29 @@ func (p *Parser) parsePostgresExplainStructured() exp.Expression {
 		}
 	}
 
-	inner := p.parseStatement()
+	var inner exp.Expression
+	if p.curr.TokenType == tokens.TABLE {
+		// PG `TABLE t` is a valid EXPLAIN target (sql-explain lists SELECT-family statements;
+		// TABLE t is the SELECT * FROM t shorthand, engine-verified on PG 16/17). Without this
+		// arm the generic statement parse produced a bogus Alias(Column(TABLE) AS t).
+		p.advance()
+		if p.matchTextSeq("ONLY") {
+			// `TABLE ONLY t [*]` narrows/widens inheritance scope; the Table node cannot carry
+			// that yet — fail closed rather than under-report relations.
+			return nil
+		}
+		inner = p.parseTable(true, false, nil, false, false, false, false)
+		if inner == nil || inner.Kind() != exp.KindTable {
+			return nil
+		}
+		if p.prev.TokenType == tokens.STAR || p.curr.TokenType == tokens.STAR {
+			// `TABLE t *` includes inheritance children; parseTable consumes the star as a
+			// no-op, so the AST would name only t — fail closed instead of a wrong shape.
+			return nil
+		}
+	} else {
+		inner = p.parseStatement()
+	}
 	if inner == nil || p.curr.IsValid() {
 		return nil
 	}

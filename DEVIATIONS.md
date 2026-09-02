@@ -199,6 +199,7 @@ reconciliation note); malformed/engine-invalid forms fail closed to `Command` or
 
 | ledger id | construct → node |
 |---|---|
+| `mysql-explain-modifier-table`, `pg-explain-table` | `TABLE t` as an EXPLAIN target with modifiers (MySQL manual §15.8.2 explainable_stmt; PG accepts the SELECT-shorthand — both engine-verified). All EXPLAIN forms share the `Describe` node. Discriminators differ per dialect: MySQL → `Describe{kind:"TABLE", this:Table}`; PG → `Describe{kind:"EXPLAIN"}` with `this.Kind()==Table` (kind stays the EXPLAIN label — key off the target's Kind, not the string). Generator keeps the `TABLE` keyword (upstream's `EXPLAIN TABLE t` → `DESCRIBE t` conflates a query-explain with a metadata describe) |
 | `pg-explain` | Postgres `EXPLAIN` → `Describe{kind:"EXPLAIN"}` with structured options + parsed inner statement |
 | `mysql-replace` | `REPLACE INTO …` → `Insert{replace:true}` (MySQL generator renders `REPLACE`) |
 | `mysql-describe-column` | `DESCRIBE tbl col\|'wild'` → `Describe{this:Table, column}` (single identifier/wild only) |

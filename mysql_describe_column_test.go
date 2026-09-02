@@ -148,12 +148,25 @@ func TestMySQLDescribeColumnBoundaries(t *testing.T) {
 	})
 	// A leading ANALYZE/FORMAT modifier is the query-explain form (`EXPLAIN ANALYZE TABLE t` is an
 	// explain of the `TABLE t` query — a row-reading scan — not a metadata describe), and no
-	// trailing PARTITION/AS JSON is valid after a col. All must fail closed to Command rather than
-	// misclassify a query-explain as a table-describe or admit a statement MySQL rejects.
+	// trailing PARTITION/AS JSON is valid after a col. Modifier+TABLE forms now parse structurally
+	// (Describe{kind:"TABLE"} — see the explain-table extension); the invalid modifier+col and
+	// trailing-clause forms still fail closed to Command.
+	t.Run("modifier TABLE forms are structured query-explains", func(t *testing.T) {
+		for _, sql := range []string{
+			"EXPLAIN ANALYZE TABLE t",
+			"EXPLAIN FORMAT=JSON TABLE t",
+		} {
+			e, err := sqlglot.ParseOne(sql, "mysql")
+			if err != nil {
+				t.Fatalf("parse %q: %v", sql, err)
+			}
+			if e.Kind() != exp.KindDescribe || e.Text("kind") != "TABLE" || e.This() == nil || e.This().Kind() != exp.KindTable {
+				t.Fatalf("%q: want Describe{kind:TABLE, this:Table}: %s", sql, e.ToS())
+			}
+		}
+	})
 	t.Run("modifier and trailing-clause forms fail closed", func(t *testing.T) {
 		for _, sql := range []string{
-			"EXPLAIN ANALYZE TABLE t",         // query-explain of `TABLE t`
-			"EXPLAIN FORMAT=JSON TABLE t",     // query-explain of `TABLE t`
 			"EXPLAIN ANALYZE users id",        // ANALYZE modifier + col is invalid
 			"EXPLAIN FORMAT=JSON users id",    // FORMAT modifier + col is invalid
 			"DESCRIBE users id PARTITION(p1)", // no PARTITION after a col
