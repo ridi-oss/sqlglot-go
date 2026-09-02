@@ -192,9 +192,13 @@ type findCacheKey struct {
 }
 
 type MappingSchema struct {
-	mapping            *Mapping
-	mappingTrie        *trieNode
-	visible            *Mapping
+	mapping     *Mapping
+	mappingTrie *trieNode
+	visible     *Mapping
+	// implicitColumns retains each marked table's implicit set (normalized key space, table path
+	// joined by nestedSet order) so AddTable can recompute the visible complement instead of
+	// leaving it stale when a marked table's column set changes.
+	implicitColumns    map[string]map[string]bool
 	normalize          bool
 	dialect            *dialects.Dialect
 	supportedTableArgs []string
@@ -233,6 +237,138 @@ func NewMappingSchema(schema *Mapping, dialect dialects.DialectType, normalize b
 	m.mappingTrie = newTrie(reverseEach(flattenSchema(m.mapping, m.depth())), nil)
 	return m, nil
 }
+
+// NewMappingSchemaWithImplicit is NewMappingSchema plus a NON-UPSTREAM implicit-column marking
+// (DEVIATIONS): implicit mirrors the mapping's nesting with []string leaves naming the columns
+// that exist in the mapping but are engine-implicit (e.g. PG's ctid/xmin/xmax/cmin/cmax/tableoid).
+// An implicit column resolves like any column when named explicitly, but is excluded from
+// `SELECT *` / `t.*` expansion and from NATURAL JOIN / USING candidate sets — the upstream
+// `visible` mechanism, populated as the implicit set's complement. The implicit *Mapping uses the
+// same node keys as the RAW mapping (pre-normalization, never re-split on dots — a table literally
+// named "x.foo" is a node key like any other): depth 1 = table → []string, depth 2 =
+// schema → table → []string, depth 3 = catalog → schema → table → []string (the primary consumer
+// shape). An implicit key or column absent from the mapping is an input error (fail-closed),
+// never silently ignored.
+func NewMappingSchemaWithImplicit(schema *Mapping, implicit *Mapping, dialect dialects.DialectType, normalize bool) (*MappingSchema, error) {
+	rawDepth := 0
+	if schema != nil {
+		rawDepth = dictDepth(schema) - 1
+	}
+	// Resolve implicit table keys against the RAW mapping before any normalization, so callers
+	// address tables exactly as they spelled them.
+	type implicitEntry struct {
+		keys    []string
+		columns []string
+	}
+	var entries []implicitEntry
+	if implicit != nil && implicit.Len() > 0 {
+		// Walk the implicit tree explicitly rather than trusting dictDepth/flattenSchema, which
+		// both skip empty branches — a malformed marking (empty nested mapping, wrong-depth leaf)
+		// must error, never silently mark nothing.
+		var walk func(node *Mapping, keys []string) error
+		walk = func(node *Mapping, keys []string) error {
+			if node.Len() == 0 {
+				return sqlerrors.NewSchemaError("Implicit branch %s is empty", strings.Join(keys, "."))
+			}
+			for _, key := range node.Keys() {
+				value, _ := node.Get(key)
+				path := append(append([]string(nil), keys...), key)
+				switch v := value.(type) {
+				case *Mapping:
+					if len(path) >= rawDepth {
+						return sqlerrors.NewSchemaError("Implicit mapping must match the schema's nesting level: %d.", rawDepth)
+					}
+					if err := walk(v, path); err != nil {
+						return err
+					}
+				case []string:
+					if len(path) != rawDepth {
+						return sqlerrors.NewSchemaError("Implicit mapping must match the schema's nesting level: %d.", rawDepth)
+					}
+				default:
+					return sqlerrors.NewSchemaError("Implicit leaf for table %s must be a []string of column names", strings.Join(path, "."))
+				}
+			}
+			return nil
+		}
+		if err := walk(implicit, nil); err != nil {
+			return nil, err
+		}
+		for _, keys := range flattenSchema(implicit, rawDepth) {
+			leaf, err := nestedGet(implicit, keys, keys, true)
+			if err != nil {
+				return nil, err
+			}
+			columns, ok := leaf.([]string)
+			if !ok {
+				return nil, sqlerrors.NewSchemaError("Implicit leaf for table %s must be a []string of column names", strings.Join(keys, "."))
+			}
+			columnsValue, err := nestedGet(schema, keys, keys, false)
+			if err != nil || columnsValue == nil {
+				return nil, sqlerrors.NewSchemaError("Implicit marking for unknown table: %s", strings.Join(keys, "."))
+			}
+			tableColumns, ok := columnsValue.(*Mapping)
+			if !ok {
+				return nil, sqlerrors.NewSchemaError("Implicit table %s must match the schema's nesting level: %d.", strings.Join(keys, "."), rawDepth)
+			}
+			for _, column := range columns {
+				if _, ok := tableColumns.Get(column); !ok {
+					return nil, sqlerrors.NewSchemaError("Implicit column %s not in table %s's mapping", column, strings.Join(keys, "."))
+				}
+			}
+			entries = append(entries, implicitEntry{keys: keys, columns: columns})
+		}
+	}
+
+	m, err := NewMappingSchema(schema, dialect, normalize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate visible = mapping minus implicit, in normalized key space (the space ColumnNames
+	// probes). Only tables WITH an implicit marking get a visible entry — ColumnNames treats an
+	// absent entry as all-visible, matching upstream's optional visible mapping.
+	for _, entry := range entries {
+		normalizedKeys := entry.keys
+		if normalize {
+			normalizedKeys, err = m.normalizeRelationKeys(entry.keys, m.dialect)
+			if err != nil {
+				return nil, err
+			}
+		}
+		implicitSet := map[string]bool{}
+		for _, column := range entry.columns {
+			name := column
+			if normalize {
+				name, err = m.normalizeName(column, m.dialect, false, nil)
+				if err != nil {
+					return nil, err
+				}
+			}
+			implicitSet[name] = true
+		}
+		columnsValue, err := nestedGet(m.mapping, normalizedKeys, normalizedKeys, true)
+		if err != nil {
+			return nil, err
+		}
+		tableColumns := columnsValue.(*Mapping)
+		visible := []string{}
+		for _, column := range tableColumns.Keys() {
+			if !implicitSet[column] {
+				visible = append(visible, column)
+			}
+		}
+		nestedSet(m.visible, normalizedKeys, visible)
+		if m.implicitColumns == nil {
+			m.implicitColumns = map[string]map[string]bool{}
+		}
+		m.implicitColumns[implicitPathKey(normalizedKeys)] = implicitSet
+	}
+	return m, nil
+}
+
+// implicitPathKey encodes a normalized table path injectively (see normalizeMapping's %q note).
+func implicitPathKey(keys []string) string { return fmt.Sprintf("%q", keys) }
 
 func (m *MappingSchema) Dialect() *dialects.Dialect { return m.dialect }
 
@@ -597,6 +733,17 @@ func (m *MappingSchema) AddTable(table any, columnMapping any, dialect dialects.
 	}
 	parts := tableParts(normalizedTable)
 	nestedSet(m.mapping, reverseStrings(parts), normalizedColumnMapping)
+	// A marked table's visible complement must track its column set: recompute from the retained
+	// implicit set, or star expansion would use a stale list (hiding a newly added real column).
+	if implicitSet := m.implicitColumns[implicitPathKey(reverseStrings(parts))]; implicitSet != nil {
+		visible := []string{}
+		for _, key := range normalizedColumnMapping.Keys() {
+			if !implicitSet[key] {
+				visible = append(visible, key)
+			}
+		}
+		nestedSet(m.visible, reverseStrings(parts), visible)
+	}
 	newTrie([][]string{parts}, m.mappingTrie)
 	m.findCache = map[findCacheKey]*Mapping{}
 	m.depthCache = 0
@@ -623,15 +770,42 @@ func (m *MappingSchema) ColumnNames(table any, onlyVisible bool, dialect dialect
 	if !onlyVisible || m.visible == nil || m.visible.Len() == 0 {
 		return schema.Keys(), nil
 	}
-	visibleValue, err := nestedGet(m.visible, m.SupportedTableArgs(), reverseStrings(tableParts(normalizedTable)), true)
+	// Resolve the visible entry at the same TRIE-RESOLVED path Find used for the mapping: the
+	// visible store is written at the full normalized path, so probing with the caller's possibly
+	// partial parts ("users" against a cat.sch.users mapping) would miss and over-allow — an
+	// implicit column would leak into star expansion.
+	supported, err := m.supportedTableArgsInternal()
 	if err != nil {
 		return nil, err
 	}
+	parts := tableParts(normalizedTable)
+	if len(parts) > len(supported) {
+		parts = parts[:len(supported)]
+	}
+	resolvedParts, err := findInTrie(parts, m.mappingTrie, false)
+	if err != nil || resolvedParts == nil {
+		// Ambiguous/unknown against the trie yet Find returned a schema above: fail closed on
+		// the visibility question rather than guess.
+		return []string{}, err
+	}
+	visibleValue, err := nestedGet(m.visible, m.SupportedTableArgs(), reverseStrings(resolvedParts), false)
+	if err != nil {
+		return nil, err
+	}
+	if visibleValue == nil {
+		// No visible entry at the resolved path: the table was never marked — all-visible.
+		// (Intentional divergence from upstream's `or []`: upstream populates visible for every
+		// table or not at all; this port marks tables selectively.)
+		return schema.Keys(), nil
+	}
+	visible, ok := visibleValue.([]string)
+	if !ok {
+		// Unexpected shape (e.g. an intermediate *Mapping from a prefix walk): fail closed.
+		return []string{}, nil
+	}
 	visibleSet := map[string]bool{}
-	if visible, ok := visibleValue.([]string); ok {
-		for _, col := range visible {
-			visibleSet[col] = true
-		}
+	for _, col := range visible {
+		visibleSet[col] = true
 	}
 	out := []string{}
 	for _, col := range schema.Keys() {

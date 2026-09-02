@@ -169,7 +169,7 @@ func orderedColumnNames(columns map[string]string, ordered []string, resolver *R
 	seen := map[string]bool{}
 	var out []string
 	for _, sourceName := range ordered {
-		for _, columnName := range resolver.GetSourceColumns(sourceName) {
+		for _, columnName := range resolver.GetSourceColumns(sourceName, true) {
 			if columns[columnName] != "" && !seen[columnName] {
 				seen[columnName] = true
 				out = append(out, columnName)
@@ -182,7 +182,10 @@ func orderedColumnNames(columns map[string]string, ordered []string, resolver *R
 func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 	columns := map[string]string{}
 	updateSourceColumns := func(sourceName string) {
-		for _, columnName := range resolver.GetSourceColumns(sourceName) {
+		// onlyVisible: implicit (system) columns are not part of the row type, so NATURAL JOIN /
+		// USING candidate sets never include them (engine behavior; upstream passes no filter
+		// here, but upstream also has no way to mark a column implicit).
+		for _, columnName := range resolver.GetSourceColumns(sourceName, true) {
 			if _, ok := columns[columnName]; !ok {
 				columns[columnName] = sourceName
 			}
@@ -238,7 +241,7 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 		ordered = append(ordered, joinTable)
 
 		using := expressionsFor(join, "using")
-		joinColumns := resolver.GetSourceColumns(joinTable)
+		joinColumns := resolver.GetSourceColumns(joinTable, true)
 
 		// v30.17.0 (qualify_columns.py:247-257): a NATURAL JOIN is a USING join over the
 		// columns common to both sides; when those can't be determined, NATURAL stays.
@@ -261,6 +264,10 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 		usingIdentifierCount := len(using)
 		isSemiOrAntiJoin := isSemiOrAntiJoin(join)
 
+		isImplicitIn := func(sourceName, identifier string) bool {
+			return containsString(resolver.GetSourceColumns(sourceName), identifier) &&
+				!containsString(resolver.GetSourceColumns(sourceName, true), identifier)
+		}
 		for _, identifierExpression := range using {
 			identifier := identifierExpression.Name()
 			table := columns[identifier]
@@ -268,6 +275,16 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 			if table == "" || !containsString(joinColumns, identifier) {
 				if len(columns) > 0 && columns["*"] == "" && len(joinColumns) > 0 {
 					panic(&sqlerrors.OptimizeError{Msg: "Cannot automatically join: " + identifier})
+				}
+				// A USING identifier that names an IMPLICIT column of any involved source must
+				// fail even when the opposite source's schema is unknown (the upstream guard
+				// above tolerates unknown schemas): the engine rejects USING on system columns,
+				// and falling through would rewrite the invalid USING into a valid-looking ON
+				// comparison of hidden columns.
+				for _, sourceName := range append(append([]string(nil), ordered...), joinTable) {
+					if isImplicitIn(sourceName, identifier) {
+						panic(&sqlerrors.OptimizeError{Msg: "Cannot automatically join: " + identifier})
+					}
 				}
 			}
 

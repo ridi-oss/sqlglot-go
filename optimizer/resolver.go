@@ -221,12 +221,38 @@ func (r *Resolver) GetSourceColumns(name string, onlyVisible ...bool) []string {
 			columnAliases = sourceScope.Expression.AliasColumnNames()
 		}
 		if len(columnAliases) > 0 {
+			// Positional column aliases apply to the ROW columns only: an implicit (system)
+			// column never consumes an alias position and keeps its own name (PG: `users AS
+			// u(a, b)` aliases id and name; u.ctid still resolves). Implicit = in the full
+			// list but not the visible list; for sources without a visibility notion the two
+			// lists are identical and this is the plain positional zip.
+			implicit := map[string]bool{}
+			if table, ok := source.(exp.Expression); ok && !visible && table != nil && table.Kind() == exp.KindTable {
+				visibleColumns, err := r.schema.ColumnNames(table, true, "", nil)
+				if err != nil {
+					panic(err)
+				}
+				visibleSet := map[string]bool{}
+				for _, col := range visibleColumns {
+					visibleSet[col] = true
+				}
+				for _, col := range columns {
+					if !visibleSet[col] {
+						implicit[col] = true
+					}
+				}
+			}
 			aliased := make([]string, len(columns))
 			copy(aliased, columns)
+			aliasIndex := 0
 			for i := range aliased {
-				if i < len(columnAliases) && columnAliases[i] != "" {
-					aliased[i] = columnAliases[i]
+				if implicit[aliased[i]] {
+					continue
 				}
+				if aliasIndex < len(columnAliases) && columnAliases[aliasIndex] != "" {
+					aliased[i] = columnAliases[aliasIndex]
+				}
+				aliasIndex++
 			}
 			columns = aliased
 		}
