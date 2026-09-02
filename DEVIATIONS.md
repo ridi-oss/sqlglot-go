@@ -168,6 +168,16 @@ Additive analysis features; default behavior and fixture output unchanged.
   structured nodes and render form-faithfully (never the STR_POSITION/CHR/comma↔FROM-FOR
   canonicalizations); comma forms of the same names go opaque. Bare no-paren niladics
   (`CURRENT_DATE`, …) stay structured. Tests `opaque_functions_test.go`.
+- **Implicit (system) columns** (`schema.NewMappingSchemaWithImplicit`): marks in-mapping columns
+  as engine-implicit (PG `ctid`/`xmin`/`xmax`/`cmin`/`cmax`/`tableoid`), populating the upstream
+  `visible` mechanism as the marking's complement. Explicit refs resolve/lineage like any column;
+  implicit columns are excluded from `SELECT *`/`t.*` (upstream-ported onlyVisible path) and from
+  NATURAL JOIN / USING candidate sets (`expandUsing`/`orderedColumnNames` now pass onlyVisible —
+  upstream passes no filter there, but upstream also cannot mark a column implicit; engine-verified:
+  PG system columns are not part of the row type). Derived scopes no longer carry them via `*`, so
+  an outer `ctid` over a subquery fails resolution exactly like the engine. Markings for unknown
+  tables/columns fail closed at construction. Tests `schema/implicit_columns_test.go`,
+  `optimizer/implicit_columns_test.go`.
 - **Engine identity resolution** (`QualifyOpts.EngineCatalog` + `CallReport`/`RelationReport`):
   classifies each `Anonymous` call as Builtin|UDF|Unknown and each table as
   SystemRelation|UserRelation|Unknown with a canonical `schema.name` identity, per the verified
