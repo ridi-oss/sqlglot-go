@@ -55,7 +55,12 @@ func (g *Generator) describeSQL(e expressions.Expression) string {
 				options = " " + options
 			}
 		}
-		return "EXPLAIN" + options + " " + g.sqlKey(e, "this")
+		target := g.sqlKey(e, "this")
+		if inner := asExpression(e.Arg("this")); inner != nil && inner.Kind() == expressions.KindTable {
+			// A bare Table target is the `TABLE t` SELECT shorthand — keep its keyword.
+			target = "TABLE " + target
+		}
+		return "EXPLAIN" + options + " " + target
 	}
 
 	style := g.sqlKey(e, "style")
@@ -80,7 +85,15 @@ func (g *Generator) describeSQL(e expressions.Expression) string {
 	if column != "" {
 		column = " " + column
 	}
-	return "DESCRIBE" + style + format + " " + g.sqlKey(e, "this") + column + partition + asJSON
+	target := g.sqlKey(e, "this")
+	if e.Text("kind") == "TABLE" && g.dialect.Name == "mysql" {
+		// Unlike upstream (which drops the keyword, generating `DESCRIBE t` — a METADATA read),
+		// `TABLE t` stays under MySQL: EXPLAIN TABLE t is a query plan of the table-scan
+		// statement, a different command from DESCRIBE t (engine-verified; see DEVIATIONS).
+		// Base and other dialects keep upstream's collapse.
+		target = "TABLE " + target
+	}
+	return "DESCRIBE" + style + format + " " + target + column + partition + asJSON
 }
 
 // loadDataSQL ports loaddata_sql (generator.py:3007-3033), minus the `files`

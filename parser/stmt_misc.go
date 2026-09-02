@@ -92,7 +92,9 @@ func (p *Parser) parseDescribe() exp.Expression {
 func (p *Parser) parseDescribeStructured() exp.Expression {
 	var kind any
 	if p.matchSet(creatables) {
-		kind = p.prev.Text
+		// parser.py:2399 upper()s the creatable kind; the source spelling must not leak into
+		// the kind discriminator (`explain table t` and `EXPLAIN TABLE t` are the same form).
+		kind = stringsUpper(p.prev.Text)
 	}
 	var style any
 	if p.matchTexts(describeStyles) {
@@ -117,7 +119,24 @@ func (p *Parser) parseDescribeStructured() exp.Expression {
 	}
 
 	var this exp.Expression
-	if p.statementParser(p.curr.TokenType) != nil {
+	modifierTable := false
+	if kind == nil && p.dialect.Name == "mysql" && (style != nil || format != nil) && p.curr.TokenType == tokens.TABLE {
+		// MySQL explainable_stmt includes the TABLE statement, and modifiers precede it:
+		// {EXPLAIN|DESCRIBE|DESC} [ANALYZE [FORMAT=TREE] | FORMAT=x] TABLE tbl (manual §15.8.2,
+		// engine-verified on 8.0/8.4). The plain `DESCRIBE TABLE t` form is captured by the
+		// creatables match above; this arm catches the target AFTER a style/format modifier,
+		// which previously degraded to Command. kind stays "TABLE" so all forms share the
+		// Describe{kind:"TABLE", this:Table} shape.
+		p.advance()
+		kind = "TABLE"
+		modifierTable = true
+		this = p.parseTable(true, false, nil, false, false, false, false)
+		if this == nil || this.Kind() != exp.KindTable || this.Arg("partition") != nil {
+			// parseTable consumes MySQL partition selection onto the Table node, but the TABLE
+			// statement grammar has none (engine-verified 1064) — fail closed.
+			return nil
+		}
+	} else if p.statementParser(p.curr.TokenType) != nil {
 		this = p.parseStatement()
 	} else {
 		this = p.parseDescribeThis()
@@ -159,7 +178,10 @@ func (p *Parser) parseDescribeStructured() exp.Expression {
 	asJSON := false
 	// The col_name/wild form takes no further clauses — skip the generic property/partition/AS JSON
 	// parsers so a trailing `PARTITION(...)` / `AS JSON` fails closed (MySQL rejects both after a col).
-	if column == nil {
+	// The modifier+TABLE query-explain form takes no metadata clauses either: MySQL rejects
+	// `EXPLAIN ANALYZE TABLE t PARTITION(p0)` and `... AS JSON`, so skipping these parsers
+	// leaves such tokens for the leftover guard to fail closed.
+	if column == nil && !modifierTable {
 		properties := p.parseProperties()
 		if properties != nil {
 			expressions = properties.Expressions()
