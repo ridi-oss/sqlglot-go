@@ -1,6 +1,7 @@
 package dialects_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/ridi-oss/sqlglot-go/dialects"
@@ -31,9 +32,9 @@ func TestAthenaIsOuterBaseDialect(t *testing.T) {
 		t.Fatalf("Name = %q, want athena", d.Name)
 	}
 	if d.IndexOffset != base.IndexOffset ||
-		d.NormalizationStrategy != base.NormalizationStrategy ||
+		d.NormalizationStrategy != dialects.CaseInsensitive ||
 		d.SupportsUserDefinedTypes != base.SupportsUserDefinedTypes {
-		t.Fatalf("Athena should retain outer base flags: athena=%+v base=%+v", d, base)
+		t.Fatalf("Athena should retain base flags except case-insensitive normalization: athena=%+v base=%+v", d, base)
 	}
 	if d.TokenizerFactory == nil {
 		t.Fatal("Athena TokenizerFactory = nil, want classify-and-re-tokenize factory")
@@ -117,11 +118,11 @@ func TestAthenaRetokenizesWithChosenEngine(t *testing.T) {
 	}
 }
 
-func TestAthenaUnloadIsCommandOnlyInAthena(t *testing.T) {
+func TestAthenaUnloadKeywordIsAthenaOnly(t *testing.T) {
 	sql := `UNLOAD (SELECT * FROM "t") TO 's3://x'`
 	athena := athenaTokens(t, sql)
-	if len(athena) != 2 || athena[0].TokenType != tokens.COMMAND || athena[0].Text != "UNLOAD" || athena[1].TokenType != tokens.STRING {
-		t.Fatalf("Athena UNLOAD tokens = %s, want COMMAND plus packed STRING", tokens.ReprTokens(athena))
+	if len(athena) < 3 || athena[0].TokenType != tokens.UNLOAD || athena[1].TokenType != tokens.L_PAREN || athena[2].TokenType != tokens.SELECT {
+		t.Fatalf("Athena UNLOAD tokens = %s, want unpacked query tokens", tokens.ReprTokens(athena))
 	}
 
 	trino, err := dialects.Trino().NewTokenizer().Tokenize(sql)
@@ -129,7 +130,7 @@ func TestAthenaUnloadIsCommandOnlyInAthena(t *testing.T) {
 		t.Fatalf("Tokenize(trino UNLOAD): %v", err)
 	}
 	if len(trino) == 0 || trino[0].TokenType != tokens.VAR || trino[0].Text != "UNLOAD" {
-		t.Fatalf("standalone Trino UNLOAD leaked Athena COMMAND mapping: %s", tokens.ReprTokens(trino))
+		t.Fatalf("standalone Trino UNLOAD leaked Athena UNLOAD mapping: %s", tokens.ReprTokens(trino))
 	}
 }
 
@@ -163,6 +164,9 @@ func TestAthenaTokenizerDoesNotMutateSourceDialects(t *testing.T) {
 	if hive.TokenizerConfig.Quotes[`"`] != `"` {
 		t.Fatal("Hive double-quote string configuration changed")
 	}
+	if !hive.TokenizerConfig.Commands[tokens.SHOW] || !trino.TokenizerConfig.Commands[tokens.COMMAND] {
+		t.Fatal("Athena command unpacking mutated a source dialect")
+	}
 }
 
 func TestAthenaLeadingCommentsDoNotAffectRouting(t *testing.T) {
@@ -175,36 +179,146 @@ func TestAthenaLeadingCommentsDoNotAffectRouting(t *testing.T) {
 	}
 }
 
-func TestAthenaSemicolonBatchUsesOneGlobalRoute(t *testing.T) {
-	hiveBatch := athenaTokens(t, `SHOW TABLES; SELECT "x" FROM "t"`)
-	if !hasHiveTokenStream(hiveBatch) {
-		t.Fatalf("SHOW batch should route wholly through Hive: %s", tokens.ReprTokens(hiveBatch))
-	}
-	foundHiveString := false
-	for _, token := range hiveBatch[1:] {
-		if token.TokenType == tokens.STRING && token.Text == "x" {
-			foundHiveString = true
+func TestAthenaSemicolonBatchRoutesEachStatement(t *testing.T) {
+	for _, sql := range []string{
+		`SHOW TABLES; SELECT "$path" FROM t`,
+		"CREATE TABLE `t` (x INT); SELECT \"x\" FROM \"t\"",
+	} {
+		got := athenaTokens(t, sql)
+		if !hasHiveTokenStream(got) {
+			t.Fatalf("DDL must route through Hive: %s", tokens.ReprTokens(got))
+		}
+		foundIdentifier := false
+		for _, token := range got {
+			if token.TokenType == tokens.UNKNOWN || token.TokenType == tokens.STRING && token.Text != "TABLES" {
+				t.Fatalf("incorrect engine token: %s", token)
+			}
+			if token.TokenType == tokens.IDENTIFIER && (token.Text == "$path" || token.Text == "x") {
+				foundIdentifier = true
+			}
+		}
+		if !foundIdentifier {
+			t.Fatalf("missing quoted query identifier: %s", tokens.ReprTokens(got))
 		}
 	}
-	if !foundHiveString {
-		t.Fatalf("second statement was not re-tokenized through the global Hive route: %s", tokens.ReprTokens(hiveBatch))
+	got := athenaTokens(t, `SHOW TABLES; SELECT 1; SHOW TABLES`)
+	count := 0
+	for i, token := range got {
+		if token.TokenType == tokens.HIVE_TOKEN_STREAM {
+			count++
+			if i > 0 && got[i-1].TokenType != tokens.SEMICOLON {
+				t.Fatalf("sentinel must lead a statement: %s", tokens.ReprTokens(got))
+			}
+		}
+	}
+	if count != 2 {
+		t.Fatalf("sentinel count = %d, want 2", count)
+	}
+}
+
+func TestAthenaTokenizerPreservesPositionsAndComments(t *testing.T) {
+	for _, sql := range []string{
+		"-- lead\nSELECT '한;글'; -- same line\nSELECT \"x;y\"; /* tail */",
+		"SELECT 1; /* middle */ SELECT 2; SELECT 3",
+		"SELECT 1;\r\n-- next\r\nSELECT 2;\rSELECT 3",
+		";; SELECT 1; ; -- end",
+		"SELECT 1;\n-- lead\nSELECT 2\n-- trailing",
+		"  ", "-- comment only", "SELECT 1;   ",
+	} {
+		want, err := dialects.Trino().NewTokenizer().Tokenize(sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := athenaTokens(t, sql)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%q\ngot  %s\nwant %s", sql, tokens.ReprTokens(got), tokens.ReprTokens(want))
+		}
+	}
+	for _, sql := range []string{
+		"-- lead\nCREATE TABLE `한;글` (x INT); -- tail",
+		`SELECT "a" FROM "t"`,
+	} {
+		got := athenaTokens(t, sql)
+		d := dialects.Trino()
+		if hasHiveTokenStream(got) {
+			d = dialects.Hive()
+			got = got[1:]
+		}
+		want, err := d.NewTokenizer().Tokenize(sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("single-statement tokens changed: got %s, want %s", tokens.ReprTokens(got), tokens.ReprTokens(want))
+		}
+	}
+}
+
+func TestAthenaMixedTokenizerPositions(t *testing.T) {
+	const sql = "-- lead\nCREATE TABLE `한;글` (x INT); -- DDL tail\nSELECT 1; /* query tail */ CREATE TABLE `next` (x INT);"
+	got := athenaTokens(t, sql)
+	var unmarked []tokens.Token
+	for _, token := range got {
+		if token.TokenType != tokens.HIVE_TOKEN_STREAM {
+			unmarked = append(unmarked, token)
+		}
+	}
+	want, err := dialects.Hive().NewTokenizer().Tokenize(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(unmarked, want) {
+		t.Fatalf("mixed statement positions/comments changed:\ngot %s\nwant %s", tokens.ReprTokens(unmarked), tokens.ReprTokens(want))
 	}
 
-	trinoBatch := athenaTokens(t, "CREATE TABLE `t` (x INT); SELECT \"x\" FROM \"t\"")
-	if hasHiveTokenStream(trinoBatch) {
-		t.Fatalf("DDL batch containing a later SELECT should route wholly through Trino: %s", tokens.ReprTokens(trinoBatch))
-	}
-	foundBacktickUnknown := false
-	foundTrinoIdentifier := false
-	for _, token := range trinoBatch {
-		if token.TokenType == tokens.UNKNOWN && token.Text == "`" {
-			foundBacktickUnknown = true
+	// Engines disagree on double quotes: the query chunk must be Trino-tokenized at exact offsets.
+	const mixed = "CREATE TABLE `한;글` (x INT);\nSELECT \"$path\" FROM t; CREATE TABLE `n` (y INT)"
+	runes := []rune(mixed)
+	pathSeen := false
+	for _, token := range athenaTokens(t, mixed) {
+		if token.TokenType == tokens.HIVE_TOKEN_STREAM {
+			continue
 		}
-		if token.TokenType == tokens.IDENTIFIER && token.Text == "x" {
-			foundTrinoIdentifier = true
+		if token.Text == "$path" {
+			pathSeen = true
+			if token.TokenType != tokens.IDENTIFIER || string(runes[token.Start:token.End+1]) != `"$path"` || token.Line != 2 {
+				t.Fatalf("query chunk not Trino-tokenized in place: %s", tokens.ReprTokens([]tokens.Token{token}))
+			}
+		}
+		if token.TokenType == tokens.VAR || token.TokenType == tokens.SELECT || token.TokenType == tokens.CREATE {
+			if got := string(runes[token.Start : token.End+1]); got != token.Text {
+				t.Fatalf("token %q offsets point at %q", token.Text, got)
+			}
 		}
 	}
-	if !foundBacktickUnknown || !foundTrinoIdentifier {
-		t.Fatalf("batch did not retain the one global Trino route: %s", tokens.ReprTokens(trinoBatch))
+	if !pathSeen {
+		t.Fatal("\"$path\" token missing")
+	}
+}
+
+func TestAthenaBoundaryDisagreementsAndHintComments(t *testing.T) {
+	// Hive reads "…" as a backslash-escaped string; the classifier reads it as an identifier.
+	got := athenaTokens(t, `CREATE TABLE t (x INT) LOCATION "a\";b\"c"; SELECT 1`)
+	semis := 0
+	for _, token := range got {
+		if token.TokenType == tokens.SEMICOLON {
+			semis++
+		}
+		if token.TokenType == tokens.STRING && token.Text != `a";b"c` {
+			t.Fatalf("string split at an escaped quote: %s", tokens.ReprTokens(got))
+		}
+	}
+	if semis != 1 {
+		t.Fatalf("want one statement boundary, got %d: %s", semis, tokens.ReprTokens(got))
+	}
+
+	// Trino has no `/*+` hint; the trailing comment payload must be Trino's, not the classifier's.
+	got = athenaTokens(t, "SELECT 1; /*+ keep */ SELECT 2")
+	want, err := dialects.Trino().NewTokenizer().Tokenize("SELECT 1; /*+ keep */ SELECT 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("hint comment payload changed:\ngot  %s\nwant %s", tokens.ReprTokens(got), tokens.ReprTokens(want))
 	}
 }

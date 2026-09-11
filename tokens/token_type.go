@@ -420,6 +420,7 @@ const (
 	UNCACHE
 	UNDROP
 	UNION
+	UNLOAD
 	UNNEST
 	UNPIVOT
 	UPDATE
@@ -867,6 +868,7 @@ var tokenTypeNames = map[TokenType]string{
 	UNCACHE:                 "UNCACHE",
 	UNDROP:                  "UNDROP",
 	UNION:                   "UNION",
+	UNLOAD:                  "UNLOAD",
 	UNNEST:                  "UNNEST",
 	UNPIVOT:                 "UNPIVOT",
 	UPDATE:                  "UPDATE",

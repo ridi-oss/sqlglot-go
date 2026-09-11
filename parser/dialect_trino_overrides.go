@@ -28,6 +28,8 @@ func init() {
 	registerDialectParserOverrides("trino", trinoParserOverrideSet())
 
 	athena := trinoParserOverrideSet()
+	athena.StatementParsers[tokens.DESCRIBE] = (*Parser).parseAthenaExplainStatement
+	athena.StatementParsers[tokens.UNLOAD] = (*Parser).parseAthenaUnloadStatement
 	athena.StatementParsers[tokens.USING] = func(p *Parser) exp.Expression {
 		return p.parseAsCommand(p.prev)
 	}

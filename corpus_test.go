@@ -17,7 +17,7 @@ import (
 // corpusRecord is one round-trip case: parse Sql under Dialect, generate with
 // Pretty, and expect the output to equal Want. Scope A (identity.sql) sets
 // Dialect="" and Want==Sql (the line itself); Scope B (dialect_identity.jsonl,
-// produced by the P1 extraction script) sets Dialect to "mysql"/"postgres" and
+// produced by the P1 extraction script) sets Dialect to the upstream test dialect and
 // carries an independent Want (upstream's validate_identity write_sql).
 //
 // JSON field names match the P1 contract: {"dialect":..,"sql":..,"want":..,"pretty":..}.
@@ -148,7 +148,10 @@ func categorize(rec corpusRecord, got string, perr, gerr error) string {
 	if strings.Contains(rec.Want, "CAST(") || strings.Contains(rec.Sql, "::") {
 		return "gen: cast/type"
 	}
-	return "gen: mismatch"
+	if strings.HasPrefix(rec.Sql, "CREATE ") || strings.HasPrefix(rec.Sql, "ALTER ") {
+		return "gen: ddl/properties"
+	}
+	return "gen: canonicalization"
 }
 
 // firstPhrase trims a parse error message down to its leading sentence,
@@ -219,54 +222,28 @@ func writeGaps(fails map[gapKey]string) error {
 	return os.WriteFile(parityGapsPath, []byte(b.String()), 0o644)
 }
 
-// Scope B (dialect_identity.jsonl). These floors reflect the combined parity slices
-// merged into main: the TYPE/CAST/`::`/AT TIME ZONE slice, the FROM/TABLE-modifier/
-// LOCK/STATEMENT slice, and the FUNCTION + JSON-operator slice. Coverage now spans:
-//   - TYPE/CAST: `1::int`-style literal casts, bare `ARRAY<...>`/`STRUCT<...>` type
-//     expressions, `x AT TIME ZONE zone` (chainable), postgres PSEUDO_TYPE/
-//     OBJECT_IDENTIFIER round-trips, postgres UDT CAST targets, the mysql SET(...) enum
-//     CAST target and `CHAR CHARACTER SET <cs>` suffix (mysql attimezone_sql drops the
-//     zone + flags unsupported, matching upstream).
-//   - FROM/stmt/lock: TABLESAMPLE (`(BUCKET .. OUT OF ..)`, `(N ROWS)`, `(N PERCENT)`,
-//     postgres `SYSTEM (N) REPEATABLE (N)`); LATERAL VIEW attach; row-locking reads
-//     FOR UPDATE/SHARE/KEY SHARE/NO KEY UPDATE (with OF/NOWAIT/SKIP LOCKED/WAIT, gated
-//     on LockingReadsSupported; mysql `LOCK IN SHARE MODE` -> `FOR SHARE`); CACHE/UNCACHE
-//     TABLE; postgres COPY (degrading to a raw Command for shapes upstream doesn't model);
-//     the STRAIGHT_JOIN-as-alias guard.
-//   - functions/JSON: JSON_OBJECT/JSON_OBJECTAGG/JSON_VALUE (with OnCondition/JSONKeyValue),
-//     CHR/CHAR + `CONVERT ... USING <charset>`, the STR_TO_*/TIME_STR_TO_* temporal family,
-//     XMLELEMENT/XMLTABLE/XMLNAMESPACE, and the JSON arrow operators (-> ->> #> #>>) with
-//     the only_json_types gate choosing operator vs. JSON_EXTRACT_PATH[_TEXT] function form
-//     for postgres (mysql/base emit JSON_EXTRACT).
-//
-// The residual parity tail (testdata/parity_gaps.txt's last 25/26 entries: byte/hex/bit
-// string literals + postgres e-strings, mysql session parameters/`:=` assignment/BINARY
-// cast/CHARSET(...)/CHAR(0x.. USING ..), postgres Distance operators/VALUES-join grouping/
-// DATE_PART/adjacent-string CONCAT/empty ARRAY[]::type[]/VARIADIC, the LEAD/LAG AggFunc
-// window-reparse gate, and matchRParen's dropped trailing-comment attachment) is now fully
-// closed - parity_gaps.txt is empty and every corpus record passes.
-// These are monotonic pass floors — raise them as coverage improves, never lower them to
-// mask a regression. A drop below any floor fails the build even if the regressing case is
-// also (illegitimately) added to parity_gaps.txt. Values below are reconciled by a full
-// SQLGLOT_CORPUS_UPDATE=1 run on the merged tree.
+// Scope B includes MySQL, Postgres, and the Presto-family dialects Athena, Trino,
+// Presto, and Hive. Their gaps in testdata/parity_gaps.txt are the generator-port
+// burndown list. Pass and total floors are monotonic: raise them, never lower them.
 const (
 	minPassBase     = 980
 	minPassMySQL    = 428
 	minPassPostgres = 468
+	minPassAthena   = 22
+	minPassTrino    = 45
+	minPassPresto   = 24
+	minPassHive     = 37
 )
 
-// Minimum record counts per corpus, from the committed fixtures (identity.sql:
-// 955 lines; dialect_identity.jsonl: 429 mysql + 468 postgres). Unlike the pass
-// floors, these ratchet how many cases are *exercised*, independent of how many
-// pass. Without them, silently dropping a FAILING record — a truncated
-// re-extraction, or deleting dialect_identity.jsonl entirely — would leave the
-// suite green: the pass-floor ratchet only notices dropped *passing* cases, and
-// the subset check tolerates now-stale gap entries. Raise these when the corpus
-// legitimately grows; a count below any floor means the corpus shrank.
+// Total floors catch dropped failing records that pass floors cannot detect.
 const (
 	minTotalBase     = 980
 	minTotalMySQL    = 428
 	minTotalPostgres = 468
+	minTotalAthena   = 50
+	minTotalTrino    = 112
+	minTotalPresto   = 48
+	minTotalHive     = 61
 )
 
 // TestCorpus is the single round-trip harness for both the base-dialect
@@ -308,7 +285,28 @@ func TestCorpus(t *testing.T) {
 		fails[gapKey{Dialect: rec.Dialect, Sql: rec.Sql}] = categorize(rec, got, perr, gerr)
 	}
 
-	passBase, passMySQL, passPostgres := pass[""], pass["mysql"], pass["postgres"]
+	floors := []struct {
+		dialect  string
+		minPass  int
+		minTotal int
+	}{
+		{"", minPassBase, minTotalBase},
+		{"mysql", minPassMySQL, minTotalMySQL},
+		{"postgres", minPassPostgres, minTotalPostgres},
+		{"athena", minPassAthena, minTotalAthena},
+		{"trino", minPassTrino, minTotalTrino},
+		{"presto", minPassPresto, minTotalPresto},
+		{"hive", minPassHive, minTotalHive},
+	}
+	var counts []string
+	for _, floor := range floors {
+		name := floor.dialect
+		if name == "" {
+			name = "base"
+		}
+		counts = append(counts, fmt.Sprintf("%s pass=%d/%d fail=%d", name,
+			pass[floor.dialect], total[floor.dialect], total[floor.dialect]-pass[floor.dialect]))
+	}
 
 	if os.Getenv("SQLGLOT_CORPUS_UPDATE") != "" {
 		if err := writeGaps(fails); err != nil {
@@ -320,8 +318,7 @@ func TestCorpus(t *testing.T) {
 		// mode (`go test ./...`) still buffers a passing test's output, so run:
 		//   SQLGLOT_CORPUS_UPDATE=1 go test . -run TestCorpus -v
 		fmt.Fprintf(os.Stderr,
-			"updated %s: N=%d base pass=%d/%d mysql pass=%d/%d postgres pass=%d/%d\n",
-			parityGapsPath, len(records), passBase, total[""], passMySQL, total["mysql"], passPostgres, total["postgres"])
+			"updated %s: N=%d; %s\n", parityGapsPath, len(records), strings.Join(counts, "; "))
 		return
 	}
 
@@ -339,33 +336,19 @@ func TestCorpus(t *testing.T) {
 			parityGapsPath, strings.Join(untracked, "\n"))
 	}
 
-	if passBase < minPassBase {
-		t.Errorf("base corpus round-trip regressed: pass=%d, want >= %d", passBase, minPassBase)
+	for _, floor := range floors {
+		name := floor.dialect
+		if name == "" {
+			name = "base"
+		}
+		if pass[floor.dialect] < floor.minPass {
+			t.Errorf("%s corpus round-trip regressed: pass=%d, want >= %d", name, pass[floor.dialect], floor.minPass)
+		}
+		if total[floor.dialect] < floor.minTotal {
+			t.Errorf("%s corpus shrank: %d records exercised, want >= %d (a corpus case was dropped)", name, total[floor.dialect], floor.minTotal)
+		}
 	}
-	if passMySQL < minPassMySQL {
-		t.Errorf("mysql corpus round-trip regressed: pass=%d, want >= %d", passMySQL, minPassMySQL)
-	}
-	if passPostgres < minPassPostgres {
-		t.Errorf("postgres corpus round-trip regressed: pass=%d, want >= %d", passPostgres, minPassPostgres)
-	}
-
-	// Completeness floors: catch a corpus that shrank (a dropped/omitted case),
-	// which neither the subset check nor the pass floors would notice on their own.
-	if total[""] < minTotalBase {
-		t.Errorf("base corpus shrank: %d records exercised, want >= %d (a corpus case was dropped)", total[""], minTotalBase)
-	}
-	if total["mysql"] < minTotalMySQL {
-		t.Errorf("mysql corpus shrank: %d records exercised, want >= %d (dialect_identity.jsonl truncated or missing?)", total["mysql"], minTotalMySQL)
-	}
-	if total["postgres"] < minTotalPostgres {
-		t.Errorf("postgres corpus shrank: %d records exercised, want >= %d (dialect_identity.jsonl truncated or missing?)", total["postgres"], minTotalPostgres)
-	}
-
-	t.Logf("corpus totals: N=%d; base pass=%d/%d fail=%d; mysql pass=%d/%d fail=%d; postgres pass=%d/%d fail=%d",
-		len(records),
-		passBase, total[""], total[""]-passBase,
-		passMySQL, total["mysql"], total["mysql"]-passMySQL,
-		passPostgres, total["postgres"], total["postgres"]-passPostgres)
+	t.Logf("corpus totals: N=%d; %s", len(records), strings.Join(counts, "; "))
 }
 
 // TestParseCorpusJSONL validates the JSONL loader independently of P1's

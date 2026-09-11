@@ -41,6 +41,8 @@ Tests: `optimizer/qualify_tables_mysql_test.go`, `schema/` tests.
 and the dialect-accepting entry points take `nil | string | *Dialect`, mirroring upstream
 `DialectType`. Gap-closure, not a divergence. Only `normalization_strategy` (plus the Go-only
 `mysql_version`/`mysql_ansi_quotes`) is supported; upstream's `version` is not.
+Athena's Hive/Trino sub-parsers inherit the outer dialect's `opaque_functions` and
+`normalization_strategy` (upstream constructs bare sub-dialects).
 
 ### 1.4 MySQL `--` comment requires trailing space
 Upstream comments out `SELECT 1--2` in every dialect. MySQL requires ASCII whitespace/control (or
@@ -149,6 +151,23 @@ Tests `procedure_block_test.go`, `statement_span_test.go`, `block_stack_fuzz_tes
 
 ---
 
+### 1.19 Athena folds quoted identifiers
+
+Upstream's outer `Athena` dialect inherits base `LOWERCASE` (unquoted folds, quoted verbatim), an
+oversight: Athena is Trino, and Trino folds every identifier, quoted or not (`presto.py:35`
+`CASE_INSENSITIVE`). `dialects.Athena()` sets `CaseInsensitive`, so `"MyCol"` and `mycol` are one
+column under Qualify and `FoldIdentifierName`, matching the Athena docs (names are
+case-insensitive and stored lowercase). Athena also folds full-Unicode (Trino's Java
+`toLowerCase`), so §1.1's ASCII-only rule does not apply to it: `"CAFÉ"` → `café`.
+
+### 1.20 Athena routes each statement of a batch separately
+
+Upstream (`athena.py:89-111`) classifies the whole input once and re-tokenizes all of it as Hive or
+Trino, so `SHOW TABLES; SELECT "$path" FROM t` turns `"$path"` into a string literal. The port
+splits the classifier stream on `;` and routes/re-tokenizes per statement, offsetting token
+positions so spans stay exact. Single statements tokenize as upstream does, except the ledgered
+`athena-*` grammar extensions below, which need real tokens where upstream packs a raw tail.
+
 ## Opt-in behavioral extensions beyond upstream
 
 Additive analysis features; default behavior and fixture output unchanged.
@@ -182,7 +201,9 @@ Additive analysis features; default behavior and fixture output unchanged.
   classifies each `Anonymous` call as Builtin|UDF|Unknown and each table as
   SystemRelation|UserRelation|Unknown with a canonical `schema.name` identity, per the verified
   engine algorithms (MySQL native-priority + current-database scoping; PG search_path with
-  pg_catalog implicitly first unless explicitly listed; ambiguity fails closed to Unknown). The
+  pg_catalog implicitly first unless explicitly listed; Athena `catalog.database.table` with the
+  consumer-supplied `DefaultCatalog` + `CurrentDatabase`, calls a single global builtin set with a
+  bare-name identity, qualified calls Unknown; ambiguity fails closed to Unknown). The
   catalog is a pure consumer input introspected from the live target — no name sets ship with
   sqlglot-go — and resolution is report-only: the AST is never rewritten. Tests
   `optimizer/engine_catalog_test.go`.
@@ -215,6 +236,10 @@ reconciliation note); malformed/engine-invalid forms fail closed to `Command` or
 | `mysql-into-outfile`, `mysql-into-dumpfile` | `SELECT … INTO OUTFILE\|DUMPFILE '/path'` → `Into{kind, this:path}` + structured export options; placement/tail rules match MySQL, violations fail closed |
 | `pg-user-type-typed-literal` | PG `<type-name> 'str'` (space typed-literal) → the same `Cast` as `'str'::type`; also ports the `STRING_ALIASES` flag properly (base/PG reject implicit string aliases, MySQL accepts) |
 | `pg-start-transaction`, `mysql-start-transaction-snapshot` | `START TRANSACTION [modes]` → `Transaction` (PG `START`→BEGIN token; MySQL `WITH CONSISTENT SNAPSHOT`) |
+| `athena-show-columns`, `athena-show-create-table`, `athena-show-create-view`, `athena-show-databases`, `athena-show-schemas`, `athena-show-partitions`, `athena-show-tables`, `athena-show-tblproperties`, `athena-show-views` | Athena (Hive-routed) `SHOW …` → `Show{this:<canonical UPPER form>, target:Table, db, like}`; the SHOW token leaves Hive's tokenizer `Commands` set under athena only |
+| `athena-explain` | Athena `EXPLAIN [ANALYZE] [(FORMAT\|TYPE …)] stmt` per the Athena docs (ANALYZE allows only FORMAT TEXT\|JSON; targets SELECT, CTAS, INSERT) → `Describe{kind:"EXPLAIN"}` (same shape as `pg-explain`); inner statement fully parsed |
+| `athena-unload` | `UNLOAD (query) TO 's3://…' WITH (format = …, …)` → `Unload{this:Subquery, files, params}` (a dedicated Kind so athena/trino `COPY` keeps upstream's rendering); documented properties only, `format` required and validated, inner query fully parsed |
+| `athena-rename-partition` | `ALTER TABLE t PARTITION (k = v) RENAME TO PARTITION (k = v)` → `Alter{actions:[AlterRename{this:Partition}]}` (upstream parse-errors) |
 | `mysql-create-user`, `mysql-create-role`, `mysql-alter-user`, `mysql-drop-user`, `mysql-drop-role` | account DDL → structured `Create`/`Alter`/`Drop` root with `kind:"USER"\|"ROLE"`; body kept verbatim in a `Command` child |
 
 Cross-cutting rules for the SET/SHOW family:

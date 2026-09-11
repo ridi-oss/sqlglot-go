@@ -233,6 +233,27 @@ and (where it goes beyond upstream grammar) the Class-A ledger. Corpus/fidelity 
   `Unresolved` is the zero value (fail-closed); nil report is a strict no-op. Composes with R3: a DML
   root classifies its target _and_ read-sources from the analysis traversal.
 
+## Athena enabler parity (slice A of the Athena-for-proxy-monster plan) — DONE
+
+Brings dialect `athena` to feature parity with the mysql/postgres enabler surface pm consumes:
+settings (`opaque_functions`, `normalization_strategy`) reach the Hive/Trino sub-parsers;
+per-statement Hive/Trino routing for batches (DEVIATIONS §1.20); `CaseInsensitive` folding
+(§1.19); `ResolveEngineIdentities` athena algorithm (`DefaultCatalog` + `CurrentDatabase`,
+`catalog.database.table` identities, global builtins); structured `SHOW *`, `EXPLAIN`, `UNLOAD`,
+`RENAME TO PARTITION` (ledger `athena-*`); and the upstream identity corpus for
+athena/trino/presto/hive wired into `corpus_test.go` with monotonic floors. The remaining
+`parity_gaps.txt` rows for those four dialects are the burndown list for the next slices:
+
+- **B — Presto + Trino generator port** (`generators/presto.py`, `generators/trino.py`; routed for
+  athena queries). Closes `ARRAY[…]`/`ROW`/`ELEMENT_AT`/`CARDINALITY`/`SEQUENCE`/`APPROX_PERCENTILE`/
+  `AT_TIMEZONE`/`LISTAGG`/`DATE_ADD` arg order/`TIMESTAMP WITH TIME ZONE`/`TABLESAMPLE` spelling.
+- **C — Hive generator + Athena DDL router** (`generators/hive.py`, `generators/athena.py`). Restores
+  `EXTERNAL`/`LOCATION`/`STORED AS`/`TBLPROPERTIES`/backticks/`STRING`; fixes `ADD PARTITION …
+  LOCATION` generation error and `PARTITION (…) SET LOCATION` dropping its clause.
+- **D — parser drift vs v30.17**: Presto `LOCALTIME[STAMP]` niladics, `DATE_FORMAT`/`DATE_PARSE`/
+  `REGEXP_*`/`SHA256` nodes, Hive `CHANGE COLUMN`/`DISTRIBUTE BY`+`SORT BY` windows/`${hiveconf:x}`,
+  Trino `DECLARE`/`SQL SECURITY`. Trino inline `WITH FUNCTION` UDFs are deferred (Athena rejects them).
+
 ## Athena support (Presto/Trino/Hive parser chain), scoped to lineage — DONE
 
 **DONE (2026-07, main @ e428a54).** All 4 slices landed + merged, each `go test ./...` green with

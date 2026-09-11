@@ -8,6 +8,9 @@ import "github.com/ridi-oss/sqlglot-go/expressions"
 // parser/stmt_show.go's parseShow), so the base branch below only matters for an exp.Show built
 // programmatically rather than parsed.
 func (g *Generator) showSQL(e expressions.Expression) string {
+	if g.dialect.Name == "hive" || g.dialect.Name == "athena" {
+		return g.hiveShowSQL(e)
+	}
 	if g.dialect.Name == "postgres" {
 		// Postgres `SHOW <name>` (a grammar extension): the parameter name is in "this".
 		return "SHOW " + e.Text("this")
@@ -125,4 +128,36 @@ func (g *Generator) oldstyleLimitSQL(e expressions.Expression) string {
 
 func init() {
 	dispatch[expressions.KindShow] = (*Generator).showSQL
+}
+
+func (g *Generator) hiveShowSQL(e expressions.Expression) string {
+	sql := "SHOW " + e.Name()
+	if target := g.sqlKey(e, "target"); target != "" {
+		if e.Name() == "COLUMNS" {
+			prefix := e.Text("from_")
+			if prefix == "" {
+				prefix = "FROM"
+			}
+			sql += " " + prefix
+		}
+		sql += " " + target
+	}
+	if db := g.sqlKey(e, "db"); db != "" {
+		if prefix := e.Text("from_"); e.Name() == "COLUMNS" && prefix != "" {
+			sql += " " + prefix + " " + db
+		} else {
+			sql += " IN " + db
+		}
+	}
+	if pattern := g.sqlKey(e, "like"); pattern != "" {
+		switch e.Name() {
+		case "TBLPROPERTIES":
+			sql += " (" + pattern + ")"
+		case "TABLES":
+			sql += " " + pattern
+		default:
+			sql += " LIKE " + pattern
+		}
+	}
+	return sql
 }

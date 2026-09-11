@@ -388,6 +388,14 @@ func (p *Parser) parseAlterTableDrop() []exp.Expression {
 
 // parseAlterTableRenameBase ports the base _parse_alter_table_rename (parser.py:8858-8873).
 func (p *Parser) parseAlterTableRenameBase() exp.Expression {
+	if p.parserOverrideKey() == "athena-hive" && p.peekTextSeq("TO", "PARTITION") {
+		p.advance()
+		partition := p.parsePartition()
+		if !athenaPartitionAssignments(partition) {
+			return nil
+		}
+		return p.expression(exp.AlterRename(exp.Args{"this": partition}), nil, nil)
+	}
 	if p.match(tokens.COLUMN) || (!p.dialect.AlterRenameRequiresColumn && !p.peekTextSeq("TO")) {
 		exists := p.parseExists(false)
 		oldColumn := p.parseColumn()

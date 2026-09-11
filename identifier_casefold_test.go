@@ -51,7 +51,7 @@ func TestIdentifierCaseFoldASCIIOnly_Path(t *testing.T) {
 		// Presto/Trino/Athena/Hive (CaseInsensitive): fold to lower, ASCII-only.
 		{"presto", "presto", "SELECT CAFÉ FROM t", "SELECT cafÉ FROM t"},
 		{"trino", "trino", "SELECT CAFÉ FROM t", "SELECT cafÉ FROM t"},
-		{"athena", "athena", "SELECT CAFÉ FROM t", "SELECT cafÉ FROM t"},
+		{"athena (full-Unicode, DEVIATIONS 1.19)", "athena", "SELECT CAFÉ FROM t", "SELECT café FROM t"},
 		{"hive", "hive", "SELECT CAFÉ FROM t", "SELECT cafÉ FROM t"},
 	}
 	for _, c := range cases {

@@ -13,17 +13,21 @@ func (p *Parser) isAthenaRouter() bool {
 	return p.dialect != nil && strings.EqualFold(p.dialect.Name, "athena")
 }
 
-// athenaSubParser mirrors AthenaParser's Hive/Trino dispatch in parsers/athena.py:24-74. The
-// Athena tokenizer has already classified the statement; this seam only consumes its leading
-// HIVE_TOKEN_STREAM marker. Query statements use a concrete Trino dialect with Athena's parser
-// class overlay so parser flags continue to see Trino.
+// athenaSubParser consumes the tokenizer's Hive marker (parsers/athena.py:59-74).
 func (p *Parser) athenaSubParser(rawTokens []tokens.Token) (*Parser, []tokens.Token) {
-	var subParser *Parser
-	if len(rawTokens) > 0 && rawTokens[0].TokenType == tokens.HIVE_TOKEN_STREAM {
-		subParser = NewWithErrorLevel(dialects.Hive(), p.errorLevel)
+	hive := len(rawTokens) > 0 && rawTokens[0].TokenType == tokens.HIVE_TOKEN_STREAM
+	d := dialects.Trino()
+	if hive {
+		d = dialects.Hive()
 		rawTokens = rawTokens[1:]
+	}
+	d.OpaqueFunctions = p.dialect.OpaqueFunctions
+	d.NormalizationStrategy = p.dialect.NormalizationStrategy
+	var subParser *Parser
+	if hive {
+		subParser = newWithErrorLevelAndOverrideName(d, p.errorLevel, "athena-hive")
 	} else {
-		subParser = newWithErrorLevelAndOverrideName(dialects.Trino(), p.errorLevel, "athena")
+		subParser = newWithErrorLevelAndOverrideName(d, p.errorLevel, "athena")
 	}
 
 	subParser.errorMessageContext = p.errorMessageContext
@@ -32,22 +36,60 @@ func (p *Parser) athenaSubParser(rawTokens []tokens.Token) (*Parser, []tokens.To
 	return subParser, rawTokens
 }
 
-func (p *Parser) preserveAthenaErrors(subParser *Parser) {
-	p.errors = append([]*sqlerrors.ParseError(nil), subParser.Errors()...)
-}
-
 func (p *Parser) parseAthena(rawTokens []tokens.Token, sql string) ([]exp.Expression, error) {
-	p.Reset()
-	subParser, routedTokens := p.athenaSubParser(rawTokens)
-	expressions, err := subParser.Parse(routedTokens, sql)
-	p.preserveAthenaErrors(subParser)
-	return expressions, err
+	return p.parseAthenaChunks(rawTokens, sql, func(sub *Parser, chunk []tokens.Token) ([]exp.Expression, error) {
+		return sub.Parse(chunk, sql)
+	})
 }
 
 func (p *Parser) parseIntoAthena(rawTokens []tokens.Token, sql string, into exp.Kind) ([]exp.Expression, error) {
+	return p.parseAthenaChunks(rawTokens, sql, func(sub *Parser, chunk []tokens.Token) ([]exp.Expression, error) {
+		return sub.ParseInto(chunk, sql, into)
+	})
+}
+
+func (p *Parser) parseAthenaChunks(rawTokens []tokens.Token, sql string, parse func(*Parser, []tokens.Token) ([]exp.Expression, error)) ([]exp.Expression, error) {
 	p.Reset()
-	subParser, routedTokens := p.athenaSubParser(rawTokens)
-	expressions, err := subParser.ParseInto(routedTokens, sql, into)
-	p.preserveAthenaErrors(subParser)
-	return expressions, err
+	p.sql = sql
+	var expressions []exp.Expression
+	var firstErr error
+	start := 0
+	budget := p.maxNodes
+	for end := 0; end <= len(rawTokens); end++ {
+		if end < len(rawTokens) && rawTokens[end].TokenType != tokens.SEMICOLON {
+			continue
+		}
+		limit := end
+		if end < len(rawTokens) {
+			limit++
+		} else if start == end && end > 0 {
+			break
+		}
+		// Keep the delimiter so the base parser retains its comment-only chunks.
+		sub, chunk := p.athenaSubParser(rawTokens[start:limit])
+		sub.maxNodes = budget
+		parsed, err := parse(sub, chunk)
+		p.errors = append(p.errors, sub.Errors()...)
+		if budget > -1 {
+			// One node budget for the whole batch, as the base parser counts it.
+			budget -= sub.nodeCount
+			if budget < 0 {
+				budget = 0
+			}
+		}
+		if err != nil {
+			if p.errorLevel == sqlerrors.IMMEDIATE || p.errorLevel == sqlerrors.RAISE {
+				return nil, err
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		expressions = append(expressions, parsed...)
+		start = limit
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return expressions, nil
 }

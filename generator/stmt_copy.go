@@ -9,6 +9,7 @@ import (
 func init() {
 	dispatch[expressions.KindCopy] = (*Generator).copySQL
 	dispatch[expressions.KindCopyParameter] = (*Generator).copyParameterSQL
+	dispatch[expressions.KindUnload] = (*Generator).unloadSQL
 	dispatch[expressions.KindCredentials] = (*Generator).credentialsSQL
 }
 
@@ -143,4 +144,14 @@ func (g *Generator) copySQL(e expressions.Expression) string {
 	}
 
 	return "COPY" + this + kind + " " + files + credentials + params
+}
+
+func (g *Generator) unloadSQL(e expressions.Expression) string {
+	var params []string
+	if values, ok := e.Arg("params").([]expressions.Expression); ok {
+		for _, param := range values {
+			params = append(params, g.sqlKey(param, "this")+" = "+g.sqlKey(param, "expression"))
+		}
+	}
+	return "UNLOAD " + g.sqlKey(e, "this") + " TO " + g.expressions(exprsOptions{expression: e, key: "files", flat: true}) + " WITH (" + strings.Join(params, ", ") + ")"
 }

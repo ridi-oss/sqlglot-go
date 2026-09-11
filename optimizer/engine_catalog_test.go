@@ -369,3 +369,162 @@ func TestEngineCatalogViaQualify(t *testing.T) {
 		t.Errorf("unexpected qualify output: %q, want %q", got, want)
 	}
 }
+
+func athenaCatalog() *optimizer.EngineCatalog {
+	return &optimizer.EngineCatalog{
+		BuiltinFunctions: names("date_format", "café"),
+		DefaultCatalog:   "awsdatacatalog",
+		CurrentDatabase:  "app",
+		CatalogSystemRelations: map[string]map[string]map[string]bool{
+			"awsdatacatalog": {"information_schema": names("tables"), "app": names("collision")},
+		},
+		CatalogUserRelations: map[string]map[string]map[string]bool{
+			"awsdatacatalog": {"app": names("orders", "mytable", "collision", "café", "a.b", `a"b`), "other": names("orders")},
+			"external":       {"app": names("orders")},
+		},
+		SystemFunctionSchemas: map[string]map[string]bool{"sys": names("date_format")},
+		UDFSchemas:            map[string]map[string]bool{"app": names("missing")},
+		LoadableFunctions:     names("missing"),
+	}
+}
+
+func TestEngineCatalogAthenaCalls(t *testing.T) {
+	for _, tt := range []struct {
+		name, sql string
+		want      optimizer.ResolvedCall
+	}{
+		{"builtin", "SELECT date_format(x, '%Y')", optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "date_format"}},
+		{"uppercase builtin", "SELECT DATE_FORMAT(x, '%Y')", optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "date_format"}},
+		{"quoted builtin", `SELECT "DATE_FORMAT"(x, '%Y')`, optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "date_format"}},
+		{"missing ignores other tiers", "SELECT missing(x)", optimizer.ResolvedCall{}},
+		{"qualified builtin", "SELECT sys.date_format(x, '%Y')", optimizer.ResolvedCall{}},
+		{"deep qualifier", "SELECT cat.sys.date_format(x, '%Y')", optimizer.ResolvedCall{}},
+		{"non-ASCII folds", "SELECT CAFÉ(x)", optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "café"}},
+		{"ambiguous name", `SELECT "a.b"(x)`, optimizer.ResolvedCall{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls, _, _ := resolveOne(t, "athena, opaque_functions=true", tt.sql, athenaCatalog(), []string{"app"})
+			if got := onlyCall(t, calls); got != tt.want {
+				t.Errorf("%q = %+v, want %+v", tt.sql, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngineCatalogAthenaRelations(t *testing.T) {
+	for _, tt := range []struct {
+		name, sql                       string
+		defaultCatalog, currentDatabase string
+		want                            optimizer.ResolvedRelation
+	}{
+		{"one part", "SELECT * FROM orders", "awsdatacatalog", "app", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.orders"}},
+		{"two parts", "SELECT * FROM other.orders", "awsdatacatalog", "app", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.other.orders"}},
+		{"three parts", "SELECT * FROM awsdatacatalog.app.orders", "", "", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.orders"}},
+		{"external catalog", "SELECT * FROM external.app.orders", "awsdatacatalog", "app", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "external.app.orders"}},
+		{"system", "SELECT * FROM information_schema.tables", "awsdatacatalog", "app", optimizer.ResolvedRelation{Kind: optimizer.SystemRelation, Identity: "awsdatacatalog.information_schema.tables"}},
+		{"collision", "SELECT * FROM collision", "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"missing relation", "SELECT * FROM missing", "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"missing catalog", "SELECT * FROM orders", "", "app", optimizer.ResolvedRelation{}},
+		{"missing database ignores search path", "SELECT * FROM orders", "awsdatacatalog", "", optimizer.ResolvedRelation{}},
+		{"explicit database without current", "SELECT * FROM app.orders", "awsdatacatalog", "", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.orders"}},
+		{"quoted table", `SELECT * FROM "MyTable"`, "awsdatacatalog", "app", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.mytable"}},
+		{"quoted qualifiers", `SELECT * FROM "AWSDATACATALOG"."APP"."MyTable"`, "", "", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.mytable"}},
+		{"non-ASCII folds", `SELECT * FROM "CAFÉ"`, "awsdatacatalog", "app", optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.café"}},
+		{"non-ASCII CTE shadows catalog", `WITH "CAFÉ" AS (SELECT 1) SELECT * FROM "café"`, "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"CTE", "WITH orders AS (SELECT 1) SELECT * FROM orders", "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"quoted CTE", `WITH "MyTable" AS (SELECT 1) SELECT * FROM mytable`, "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"dotted table", `SELECT * FROM "a.b"`, "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"quoted table component", `SELECT * FROM "a""b"`, "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"dotted catalog", `SELECT * FROM "a.b".app.orders`, "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"dotted database", `SELECT * FROM "a.b".orders`, "awsdatacatalog", "app", optimizer.ResolvedRelation{}},
+		{"invalid default catalog", "SELECT * FROM orders", "a.b", "app", optimizer.ResolvedRelation{}},
+		{"invalid current database", "SELECT * FROM orders", "awsdatacatalog", "a.b", optimizer.ResolvedRelation{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog := athenaCatalog()
+			catalog.DefaultCatalog, catalog.CurrentDatabase = tt.defaultCatalog, tt.currentDatabase
+			_, relations, _ := resolveOne(t, "athena", tt.sql, catalog, []string{"app"})
+			if len(relations) != 1 {
+				t.Fatalf("want 1 relation entry, got %d", len(relations))
+			}
+			for _, got := range relations {
+				if got != tt.want {
+					t.Errorf("%q = %+v, want %+v", tt.sql, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestEngineCatalogAthenaDoesNotEnableRelatedDialects(t *testing.T) {
+	for _, dialect := range []string{"trino", "presto", "hive"} {
+		t.Run(dialect, func(t *testing.T) {
+			catalog := athenaCatalog()
+			catalog.BuiltinFunctions["missing"] = true
+			calls, relations, _ := resolveOne(t, dialect+", opaque_functions=true", "SELECT missing(x) FROM orders", catalog, nil)
+			if got := onlyCall(t, calls); got != (optimizer.ResolvedCall{}) {
+				t.Errorf("call = %+v, want Unknown", got)
+			}
+			if len(relations) != 1 {
+				t.Fatalf("want 1 relation entry, got %d", len(relations))
+			}
+			for _, got := range relations {
+				if got != (optimizer.ResolvedRelation{}) {
+					t.Errorf("relation = %+v, want Unknown", got)
+				}
+			}
+		})
+	}
+}
+
+func TestEngineCatalogAthenaViaQualify(t *testing.T) {
+	dialect := "athena, opaque_functions=true"
+	e, err := sqlglot.ParseOne("SELECT date_format(orders.created_at, '%Y') FROM orders", dialect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := map[exp.Expression]optimizer.ResolvedCall{}
+	relations := map[exp.Expression]optimizer.ResolvedRelation{}
+	opts := optimizer.DefaultQualifyOpts()
+	opts.Dialect = dialect
+	opts.QualifyColumns = false
+	opts.ValidateQualifyColumns = false
+	opts.QuoteIdentifiers = false
+	opts.EngineCatalog = athenaCatalog()
+	opts.CallReport = calls
+	opts.RelationReport = relations
+	out := optimizer.Qualify(e, opts)
+	if got := onlyCall(t, calls); got != (optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "date_format"}) {
+		t.Errorf("call = %+v, want Builtin date_format", got)
+	}
+	if len(relations) != 1 {
+		t.Fatalf("want 1 relation entry, got %d", len(relations))
+	}
+	for _, got := range relations {
+		if got != (optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.orders"}) {
+			t.Errorf("relation = %+v, want UserRelation awsdatacatalog.app.orders", got)
+		}
+	}
+	got, err := sqlglot.Generate(out, dialect, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "SELECT date_format(orders.created_at, '%Y') FROM orders AS orders"; got != want {
+		t.Errorf("qualify output = %q, want %q", got, want)
+	}
+}
+
+func TestEngineCatalogAthenaQuotedNamesWithLowercaseStrategy(t *testing.T) {
+	calls, relations, _ := resolveOne(t, "athena, normalization_strategy=lowercase, opaque_functions=true", `SELECT "DATE_FORMAT"(x, '%Y') FROM "AWSDATACATALOG"."APP"."MyTable"`, athenaCatalog(), nil)
+	if got := onlyCall(t, calls); got != (optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "date_format"}) {
+		t.Errorf("call = %+v, want Builtin date_format", got)
+	}
+	if len(relations) != 1 {
+		t.Fatalf("want 1 relation entry, got %d", len(relations))
+	}
+	for _, got := range relations {
+		if got != (optimizer.ResolvedRelation{Kind: optimizer.UserRelation, Identity: "awsdatacatalog.app.mytable"}) {
+			t.Errorf("relation = %+v, want UserRelation awsdatacatalog.app.mytable", got)
+		}
+	}
+}

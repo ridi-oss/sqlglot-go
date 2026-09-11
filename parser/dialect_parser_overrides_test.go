@@ -363,3 +363,27 @@ func TestAthenaRouterCopiesLimitsAndPreservesErrors(t *testing.T) {
 		t.Fatal("Athena wrapper did not preserve sub-parser errors")
 	}
 }
+
+func TestAthenaBatchSharesNodeBudget(t *testing.T) {
+	const sql = "SELECT a FROM t; SELECT b FROM u"
+	athena := dialects.Athena()
+	raw, err := athena.NewTokenizer().Tokenize(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trinoRaw, err := dialects.Trino().NewTokenizer().Tokenize(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for budget := 1; budget < 40; budget++ {
+		base := NewWithErrorLevel(dialects.Trino(), sqlerrors.RAISE)
+		base.maxNodes = budget
+		_, baseErr := base.Parse(trinoRaw, sql)
+		p := NewWithErrorLevel(athena, sqlerrors.RAISE)
+		p.maxNodes = budget
+		_, err := p.Parse(raw, sql)
+		if (err != nil) != (baseErr != nil) {
+			t.Fatalf("maxNodes=%d: athena err=%v, base err=%v", budget, err, baseErr)
+		}
+	}
+}

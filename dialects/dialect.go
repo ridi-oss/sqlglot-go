@@ -996,8 +996,17 @@ func (d *Dialect) FoldIdentifierName(name string, isTable bool) string {
 	case Uppercase, CaseInsensitiveUppercase:
 		return asciiUpper(name)
 	default: // Lowercase, CaseInsensitive
-		return asciiLower(name)
+		return d.lower(name)
 	}
+}
+
+// lower is the dialect's lowercase fold: ASCII-only (DEVIATIONS 1.1) except Athena, whose Trino
+// engine folds every identifier with Java toLowerCase (DEVIATIONS 1.19).
+func (d *Dialect) lower(name string) string {
+	if d.Name == "athena" {
+		return strings.ToLower(name)
+	}
+	return asciiLower(name)
 }
 
 func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
@@ -1035,7 +1044,7 @@ func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
 		if s == Uppercase || s == CaseInsensitiveUppercase {
 			e.Set("this", asciiUpper(this))
 		} else {
-			e.Set("this", asciiLower(this))
+			e.Set("this", d.lower(this))
 		}
 	}
 	return e

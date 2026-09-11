@@ -177,3 +177,116 @@ func athenaKindCount(expression exp.Expression, kind exp.Kind) int {
 	}
 	return count
 }
+
+func TestAthenaOpaqueFunctionSettings(t *testing.T) {
+	const dialect = "athena, opaque_functions=true"
+	for _, call := range []string{"SUBSTR(a, 1, 2)", "CONCAT(a, b)", "date_format(x, 'y')"} {
+		sql := "SELECT " + call + " FROM t"
+		expression, err := sqlglot.ParseOne(sql, dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := expression.Expressions()[0]; got.Kind() != exp.KindAnonymous {
+			t.Fatalf("%s: expected opaque function, got %s", call, got.ToS())
+		}
+		generated, err := sqlglot.Generate(expression, dialect, generator.Options{})
+		if err != nil || generated != sql {
+			t.Fatalf("%s: generated %q, %v", sql, generated, err)
+		}
+		reparsed, err := sqlglot.ParseOne(generated, dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := sqlglot.Generate(reparsed, dialect, generator.Options{})
+		if err != nil || again != generated {
+			t.Fatalf("not idempotent: %q, %v", again, err)
+		}
+	}
+	for _, tc := range []struct {
+		sql  string
+		kind exp.Kind
+	}{
+		{"SELECT SUBSTRING(a FROM 1 FOR 2)", exp.KindSubstring},
+		{"SELECT CAST(a AS VARCHAR)", exp.KindCast},
+	} {
+		e, err := sqlglot.ParseOne(tc.sql, dialect)
+		if err != nil || e.Expressions()[0].Kind() != tc.kind {
+			t.Fatalf("%s: got %v, %v", tc.sql, e, err)
+		}
+	}
+}
+
+func TestAthenaMixedBatchSpans(t *testing.T) {
+	for _, tc := range []struct {
+		sql   string
+		first exp.Kind
+		spans []string
+	}{
+		{`SHOW TABLES; SELECT "$path" FROM t`, exp.KindShow, []string{"SHOW TABLES", `SELECT "$path" FROM t`}},
+		{"-- lead\nCREATE TABLE `t` (x INT); SELECT \"x\" FROM \"t\";", exp.KindCreate, []string{"CREATE TABLE `t` (x INT)", `SELECT "x" FROM "t"`}},
+	} {
+		expressions, err := sqlglot.Parse(tc.sql, "athena")
+		if err != nil || len(expressions) != len(tc.spans) {
+			t.Fatalf("%q: %v, %v", tc.sql, expressions, err)
+		}
+		if expressions[0].Kind() != tc.first || expressions[1].Kind() != exp.KindSelect {
+			t.Fatalf("unexpected statement kinds: %v, %v", expressions[0].Kind(), expressions[1].Kind())
+		}
+		for i, e := range expressions {
+			if text, ok := e.SpanText(); !ok || text != tc.spans[i] {
+				t.Fatalf("statement %d span = %q, want %q", i, text, tc.spans[i])
+			}
+		}
+		column := expressions[1].Expressions()[0]
+		if column.Kind() != exp.KindColumn || column.This().Arg("quoted") != true {
+			t.Fatalf("query projection must be a quoted column: %s", column.ToS())
+		}
+	}
+	for _, sql := range []string{";; SELECT 1; SELECT 2;", "-- lead\nSELECT '한;글'; -- middle\nSELECT \"x;y\"; /* end */", "SELECT 1;  ", "  "} {
+		got, err := sqlglot.Parse(sql, "athena")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := sqlglot.Parse(sql, "postgres")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%q: got %d statements, want %d", sql, len(got), len(want))
+		}
+		for i := range got {
+			if got[i] == nil || want[i] == nil {
+				if got[i] != nil || want[i] != nil {
+					t.Fatalf("%q: statement %d nil mismatch", sql, i)
+				}
+				continue
+			}
+			gotText, gotOK := got[i].SpanText()
+			wantText, wantOK := want[i].SpanText()
+			if gotText != wantText || gotOK != wantOK {
+				t.Fatalf("%q: span %d = %q, want %q", sql, i, gotText, wantText)
+			}
+		}
+	}
+}
+
+func TestAthenaNormalizationSettings(t *testing.T) {
+	for _, tc := range []struct {
+		dialect string
+		want    string
+	}{
+		{"athena", `SELECT "mixed", unquoted FROM "table"`},
+		{"athena, normalization_strategy=case_sensitive", `SELECT "MiXeD", Unquoted FROM "TaBlE"`},
+		{"athena, normalization_strategy=uppercase", `SELECT "MiXeD", UNQUOTED FROM "TaBlE"`},
+	} {
+		e, err := sqlglot.ParseOne(`SELECT "MiXeD", Unquoted FROM "TaBlE"`, tc.dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e = optimizer.NormalizeIdentifiers(e, tc.dialect)
+		got, err := sqlglot.Generate(e, tc.dialect, generator.Options{})
+		if err != nil || got != tc.want {
+			t.Fatalf("%s: got %q, %v, want %q", tc.dialect, got, err, tc.want)
+		}
+	}
+}

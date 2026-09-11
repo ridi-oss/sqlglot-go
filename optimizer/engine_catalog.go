@@ -11,12 +11,12 @@ import (
 // (DEVIATIONS: opaque_functions companion). It is a PURE consumer input, introspected from the
 // live target instance — sqlglot-go ships no name sets, only the resolution algorithm. All name
 // keys are expected pre-folded: function names lowercase (function identifiers are
-// case-insensitive in both engines), relation names folded per the dialect's strategy.
+// case-insensitive in all supported engines), relation names folded per the dialect's strategy.
 // A name missing from the catalog resolves Unknown (fail-closed).
 type EngineCatalog struct {
 	// BuiltinFunctions is the priority builtin name set: MySQL natives (builtin > loadable >
 	// stored — unshadowable), or PG's pg_catalog functions (implicitly first on the search
-	// path unless pg_catalog is explicitly listed).
+	// path unless pg_catalog is explicitly listed), or Athena's global builtin names.
 	BuiltinFunctions map[string]bool
 	// SystemFunctionSchemas classifies QUALIFIED calls: schema -> function names
 	// (e.g. pg_catalog, information_schema).
@@ -39,9 +39,15 @@ type EngineCatalog struct {
 	// table shadows a same-named system view — a consumer that cannot track temp objects must
 	// deny temp-creating statements upstream or accept that shadow as unmodeled.
 	TempRelations map[string]bool
-	// CurrentDatabase scopes MySQL's unqualified stored functions and relations, which resolve
-	// against the current database only.
+	// CurrentDatabase scopes MySQL's unqualified stored functions and relations, and Athena's
+	// unqualified relations, which resolve against the current database only.
 	CurrentDatabase string
+	// DefaultCatalog is the implicit catalog for three-level engines, supplied by the consumer.
+	DefaultCatalog string
+	// CatalogSystemRelations maps catalog -> database -> system relation names for three-level engines.
+	CatalogSystemRelations map[string]map[string]map[string]bool
+	// CatalogUserRelations maps catalog -> database -> user relation names for three-level engines.
+	CatalogUserRelations map[string]map[string]map[string]bool
 }
 
 // CallKind classifies a resolved function call. Unknown is the zero value (fail-closed).
@@ -84,14 +90,15 @@ func (k RelationKind) String() string {
 	}
 }
 
-// ResolvedCall reports one function call's identity. Identity is the canonical
-// "schema.name" (folded) — the hard contract consumers key policy on — empty when Unknown.
+// ResolvedCall reports a folded function identity: schema.name, or a bare MySQL/Athena builtin name.
+// Identity is empty when Unknown.
 type ResolvedCall struct {
 	Kind     CallKind
 	Identity string
 }
 
-// ResolvedRelation reports one relation's identity ("schema.name", folded; empty when Unknown).
+// ResolvedRelation reports a folded schema.name identity, or catalog.database.name for Athena.
+// Identity is empty when Unknown.
 type ResolvedRelation struct {
 	Kind     RelationKind
 	Identity string
@@ -116,19 +123,29 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 		panic(err)
 	}
 	name := strings.ToLower(d.Name)
-	supported := name == "mysql" || name == "postgres"
+	supported := name == "mysql" || name == "postgres" || name == "athena"
 	r := &engineResolver{catalog: catalog, dialect: d, searchPath: searchPath, ctes: cteNames(expression)}
+	if name == "athena" {
+		folded := make(map[string]bool, len(r.ctes))
+		for alias := range r.ctes {
+			folded[d.FoldIdentifierName(alias, true)] = true
+		}
+		r.ctes = folded
+	}
 	for _, node := range expression.Walk() {
 		switch node.Kind() {
 		case exp.KindAnonymous:
 			if calls != nil {
 				if !supported {
-					// Only the verified MySQL/PG algorithms are modeled — any other dialect
-					// fails closed to Unknown rather than borrowing PG semantics.
+					// Other dialects, including Presto/Trino/Hive, do not borrow Athena semantics.
 					calls[node] = ResolvedCall{}
 					continue
 				}
-				calls[node] = r.resolveCall(node)
+				if name == "athena" {
+					calls[node] = r.resolveAthenaCall(node)
+				} else {
+					calls[node] = r.resolveCall(node)
+				}
 			}
 		case exp.KindTable:
 			if relations != nil && node.This() != nil && node.This().Kind() == exp.KindIdentifier {
@@ -136,7 +153,11 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 					relations[node] = ResolvedRelation{}
 					continue
 				}
-				relations[node] = r.resolveRelation(node)
+				if name == "athena" {
+					relations[node] = r.resolveAthenaRelation(node)
+				} else {
+					relations[node] = r.resolveRelation(node)
+				}
 			}
 		}
 	}
@@ -396,6 +417,62 @@ func (r *engineResolver) relationInSchema(schemaName, name string) ResolvedRelat
 	}
 	if user {
 		return ResolvedRelation{Kind: UserRelation, Identity: schemaName + "." + name}
+	}
+	return ResolvedRelation{}
+}
+
+func (r *engineResolver) resolveAthenaCall(node exp.Expression) ResolvedCall {
+	if parent := node.Parent(); parent != nil && parent.Kind() == exp.KindDot && asExpression(parent.Arg("expression")) == node {
+		return ResolvedCall{}
+	}
+	var name string
+	switch value := node.Arg("this").(type) {
+	case string:
+		name = value
+	case exp.Expression:
+		if value != nil && value.Kind() == exp.KindIdentifier {
+			name = value.Name()
+		}
+	}
+	// Athena folds quoted names too, unlike MySQL/PG's resolver rules.
+	name = r.dialect.FoldIdentifierName(name, false)
+	if name != "" && identityComponentOK(name) && r.catalog.BuiltinFunctions[name] {
+		return ResolvedCall{Kind: CallBuiltin, Identity: name}
+	}
+	return ResolvedCall{}
+}
+
+func (r *engineResolver) resolveAthenaRelation(node exp.Expression) ResolvedRelation {
+	name := r.dialect.FoldIdentifierName(node.This().Name(), true)
+	if name == "" || !identityComponentOK(name) || r.ctes[name] {
+		return ResolvedRelation{}
+	}
+	parts := []string{r.catalog.DefaultCatalog, r.catalog.CurrentDatabase}
+	for i, key := range []string{"catalog", "schema"} {
+		if value := node.Arg(key); value != nil {
+			identifier := asExpression(value)
+			if identifier == nil || identifier.Kind() != exp.KindIdentifier {
+				return ResolvedRelation{}
+			}
+			parts[i] = identifier.Name()
+		}
+		parts[i] = r.dialect.FoldIdentifierName(parts[i], true)
+		if parts[i] == "" || !identityComponentOK(parts[i]) {
+			return ResolvedRelation{}
+		}
+	}
+	catalog, database := parts[0], parts[1]
+	system := r.catalog.CatalogSystemRelations[catalog][database][name]
+	user := r.catalog.CatalogUserRelations[catalog][database][name]
+	if system && user {
+		return ResolvedRelation{}
+	}
+	identity := catalog + "." + database + "." + name
+	if system {
+		return ResolvedRelation{Kind: SystemRelation, Identity: identity}
+	}
+	if user {
+		return ResolvedRelation{Kind: UserRelation, Identity: identity}
 	}
 	return ResolvedRelation{}
 }

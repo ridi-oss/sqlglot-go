@@ -323,6 +323,9 @@ const (
 	// subclasses with no mixin, so they get none (mirroring e.g. KindTableAlias).
 	KindCopy
 	KindCopyParameter
+	// Unload is the Athena `UNLOAD (query) TO 's3://…' WITH (…)` export (grammar extension
+	// athena-unload); Copy's shape without Copy's COPY rendering.
+	KindUnload
 	KindCredentials
 	// KindJSONObject/KindJSONObjectAgg/KindJSONKeyValue/KindOnCondition/KindJSONValue port
 	// the JSON_OBJECT/JSON_OBJECTAGG/JSON_VALUE function family: exp.JSONObject/
@@ -1082,6 +1085,7 @@ var argTypes = map[Kind][]argSpec{
 	// Copy/CopyParameter/Credentials (dml.py:166-174, 162-163, 177-184).
 	KindCopy:          {{"this", true}, {"kind", true}, {"files", false}, {"credentials", false}, {"format", false}, {"params", false}},
 	KindCopyParameter: {{"this", true}, {"expression", false}, {"expressions", false}},
+	KindUnload:        {{"this", true}, {"files", true}, {"params", false}},
 	KindCredentials:   {{"credentials", false}, {"encryption", false}, {"storage", false}, {"iam_role", false}, {"region", false}},
 	// Chr (string.py:24): arg_types = {"expressions": True, "charset": False}.
 	KindChr: {{"expressions", true}, {"charset", false}},
@@ -1439,7 +1443,8 @@ var traitsOf = map[Kind]Trait{
 	// Copy is `class Copy(Expression, DML)` (dml.py:166); CopyParameter/Credentials are
 	// plain Expression subclasses with no mixin, so they get no row here (matching e.g.
 	// KindTableAlias above).
-	KindCopy: TraitDML,
+	KindCopy:   TraitDML,
+	KindUnload: TraitDML,
 	// Chr is `class Chr(Expression, Func)` (string.py:23), same mixins as KindStruct above.
 	KindChr: TraitCondition | TraitFunc,
 	// StrToDate/StrToTime/StrToUnix/TimeStrToDate/TimeStrToTime/TimeStrToUnix are all
@@ -1865,6 +1870,7 @@ var className = map[Kind]string{
 	KindUncache:                             "Uncache",
 	KindCopy:                                "Copy",
 	KindCopyParameter:                       "CopyParameter",
+	KindUnload:                              "Unload",
 	KindCredentials:                         "Credentials",
 	KindJSONObject:                          "JSONObject",
 	KindJSONObjectAgg:                       "JSONObjectAgg",

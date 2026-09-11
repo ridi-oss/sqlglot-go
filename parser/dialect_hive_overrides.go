@@ -15,7 +15,19 @@ import (
 // Hive's ALTER CHANGE, _parse_partition_and_order, _parse_parameter, _to_prop_eq, and
 // CURRENT_TIME-removal overrides remain out of scope.
 func init() {
-	registerDialectParserOverrides("hive", dialectParserOverrideSet{
+	registerDialectParserOverrides("hive", hiveParserOverrideSet())
+	// Athena's Hive-routed statements (ledger athena-show-*, athena-rename-partition) — standalone
+	// Hive keeps upstream's Command/parse-error behavior.
+	athenaHive := hiveParserOverrideSet()
+	athenaHive.StatementParsers = map[tokens.TokenType]parserOverrideFunc{
+		tokens.SHOW:  (*Parser).parseHiveShow,
+		tokens.ALTER: (*Parser).parseHiveAlter,
+	}
+	registerDialectParserOverrides("athena-hive", athenaHive)
+}
+
+func hiveParserOverrideSet() dialectParserOverrideSet {
+	return dialectParserOverrideSet{
 		FunctionParsers: map[string]parserOverrideFunc{
 			"PERCENTILE": func(p *Parser) exp.Expression {
 				return p.parseHiveQuantileFunction(exp.KindQuantile)
@@ -56,7 +68,7 @@ func init() {
 			},
 		},
 		TypeParser: (*Parser).parseHiveTypes,
-	})
+	}
 }
 
 func (p *Parser) parseHiveTransform() exp.Expression {
