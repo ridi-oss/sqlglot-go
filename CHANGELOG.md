@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.36.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.35.0...v0.36.0) (2026-09-11)
+
+
+### Features
+
+* **parser:** Presto, Trino and Hive parser drift vs sqlglot v30.17.0 ([#101](https://github.com/ridi-oss/sqlglot-go/issues/101)) ([9627433](https://github.com/ridi-oss/sqlglot-go/commit/9627433c42aa428109dce89ac1e113be2b073a93))
+
 ## [0.35.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.34.0...v0.35.0) (2026-09-11)
 
 
