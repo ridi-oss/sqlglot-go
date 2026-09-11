@@ -244,12 +244,13 @@ per-statement Hive/Trino routing for batches (DEVIATIONS §1.20); `CaseInsensiti
 athena/trino/presto/hive wired into `corpus_test.go` with monotonic floors. The remaining
 `parity_gaps.txt` rows for those four dialects are the burndown list for the next slices:
 
-- **B — Presto + Trino generator port** (`generators/presto.py`, `generators/trino.py`; routed for
-  athena queries). Closes `ARRAY[…]`/`ROW`/`ELEMENT_AT`/`CARDINALITY`/`SEQUENCE`/`APPROX_PERCENTILE`/
-  `AT_TIMEZONE`/`LISTAGG`/`DATE_ADD` arg order/`TIMESTAMP WITH TIME ZONE`/`TABLESAMPLE` spelling.
-- **C — Hive generator + Athena DDL router** (`generators/hive.py`, `generators/athena.py`). Restores
-  `EXTERNAL`/`LOCATION`/`STORED AS`/`TBLPROPERTIES`/backticks/`STRING`; fixes `ADD PARTITION …
-  LOCATION` generation error and `PARTITION (…) SET LOCATION` dropping its clause.
+- **B + C — DONE.** Presto/Trino/Hive generators + the Athena Hive/Trino generator router
+  (`generator/dialect_dispatch.go` seam: per-dialect dispatch/type-mapping/property-location
+  overlays walked through `trino → presto`, `athena-trino → trino`, `athena-hive → hive`).
+  Corpus (validate_identity + same-dialect validate_all writes): athena 51/51, presto 147/170,
+  hive 134/141, trino 66/115; every remaining gap is parser-side
+  (MATCH_RECOGNIZE, `FOR TIMESTAMP|VERSION AS OF`, Trino inline `WITH FUNCTION` routines, Hive
+  `INSERT OVERWRITE DIRECTORY`).
 - **D — parser drift vs v30.17**: Presto `LOCALTIME[STAMP]` niladics, `DATE_FORMAT`/`DATE_PARSE`/
   `REGEXP_*`/`SHA256` nodes, Hive `CHANGE COLUMN`/`DISTRIBUTE BY`+`SORT BY` windows/`${hiveconf:x}`,
   Trino `DECLARE`/`SQL SECURITY`. Trino inline `WITH FUNCTION` UDFs are deferred (Athena rejects them).

@@ -1,96 +1,33 @@
-{"dialect":"athena","category":"gen: canonicalization","sql":"/* leading comment */CREATE SCHEMA foo"}
-{"dialect":"athena","category":"gen: canonicalization","sql":"/* leading comment */SELECT * FROM foo"}
-{"dialect":"athena","category":"gen: canonicalization","sql":"DESCRIBE foo.bar"}
-{"dialect":"athena","category":"gen: canonicalization","sql":"DROP TABLE \"foo\""}
-{"dialect":"athena","category":"gen: canonicalization","sql":"DROP TABLE `foo`"}
-{"dialect":"athena","category":"gen: canonicalization","sql":"DROP TABLE foo"}
-{"dialect":"athena","category":"gen: canonicalization","sql":"WITH foo AS (SELECT a, b FROM bar) SELECT * FROM foo"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"ALTER TABLE `foo` DROP COLUMN `id`"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"ALTER TABLE `foo`.`bar` ADD COLUMN `end_ts` BIGINT"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE IF NOT EXISTS foo (a INT, b STRING) ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe' WITH SERDEPROPERTIES ('case.insensitive'='FALSE') LOCATION 's3://table/path'"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE `foo` (`id` INT) LOCATION 's3://foo/'"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE foo (id INT) COMMENT 'test comment'"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE foo (id INT) LOCATION 's3://foo/'"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE foo (id INT, val STRING) CLUSTERED BY (id, val) INTO 10 BUCKETS"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE foo (id INT, val STRING) STORED AS PARQUET LOCATION 's3://foo' TBLPROPERTIES ('has_encryped_data'='true', 'classification'='test')"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE george.t (id INT COMMENT 'foo \\\\ bar') LOCATION 's3://my-bucket/'"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE my_table (id BIGINT COMMENT 'this is the row\\'s id') LOCATION 's3://my-s3-bucket'"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE x (y INT) ROW FORMAT SERDE 'serde' ROW FORMAT DELIMITED FIELDS TERMINATED BY '1' WITH SERDEPROPERTIES ('input.regex'='')"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE OR REPLACE TABLE iceberg_table (`id` BIGINT, `data` STRING, category STRING) PARTITIONED BY (category, BUCKET(16, id)) LOCATION 's3://amzn-s3-demo-bucket/your-folder/' TBLPROPERTIES ('table_type'='ICEBERG', 'write_compression'='snappy')"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE SCHEMA \"foo\""}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE SCHEMA `foo`"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE TABLE IF NOT EXISTS t (name STRING) LOCATION 's3://bucket/tmp/mytable/' TBLPROPERTIES ('table_type'='iceberg', 'FORMAT'='parquet')"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE TABLE foo WITH (table_type='HIVE', external_location='s3://foo/', format='parquet', partitioned_by=ARRAY['ds']) AS SELECT * FROM a"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE TABLE foo WITH (table_type='ICEBERG', location='s3://foo/', format='orc', partitioning=ARRAY['bucket(id, 5)']) AS SELECT * FROM a"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE TABLE iceberg_table (`id` BIGINT, `data` STRING, category STRING) PARTITIONED BY (category, BUCKET(16, id)) LOCATION 's3://amzn-s3-demo-bucket/your-folder/' TBLPROPERTIES ('table_type'='ICEBERG', 'write_compression'='snappy')"}
-{"dialect":"athena","category":"gen: ddl/properties","sql":"CREATE VIEW foo AS SELECT id FROM tbl"}
-{"dialect":"athena","category":"generate: error","sql":"CREATE EXTERNAL TABLE `my_table` (`a7` ARRAY<DATE>) ROW FORMAT SERDE 'a' STORED AS INPUTFORMAT 'b' OUTPUTFORMAT 'c' LOCATION 'd' TBLPROPERTIES ('e'='f')"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"DATE_SUB(CURRENT_DATE, 1 + 1)"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"DAY(TO_DATE(x))"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"PERCENTILE(ALL x, 0.5)"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"PERCENTILE(DISTINCT x, 0.5)"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"SELECT TO_JSON(PARSE_JSON('{\"key\": 123}'))"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"SELECT WEEKOFYEAR('2024-05-22'), DAYOFMONTH('2024-05-22'), DAYOFWEEK('2024-05-22')"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"TO_DATE(TO_DATE(x))"}
-{"dialect":"hive","category":"gen: canonicalization","sql":"TRUNC(date_col, 'MM')"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"ALTER TABLE X ADD COLUMNS (y INT, z STRING)"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"ALTER TABLE X ADD COLUMNS (y INT, z STRING) CASCADE"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"ALTER TABLE x CHANGE a a VARCHAR(10)"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"ALTER VIEW v1 SET TBLPROPERTIES ('tblp1'='1', 'tblp2'='2')"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE X (y INT) STORED BY 'x'"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"CREATE EXTERNAL TABLE x (y INT) ROW FORMAT SERDE 'serde' ROW FORMAT DELIMITED FIELDS TERMINATED BY '1' WITH SERDEPROPERTIES ('input.regex'='')"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"CREATE FUNCTION my_func AS 'com.example.MyFunc' USING ARCHIVE 'hdfs://path/to/archive.zip'"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"CREATE FUNCTION my_func AS 'com.example.MyFunc' USING FILE 'hdfs://path/to/file.py'"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"CREATE FUNCTION my_func AS 'com.example.MyFunc' USING JAR 'hdfs://path/to/my.jar'"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"CREATE OR REPLACE TEMPORARY FUNCTION some_func AS 'my_jar.SomeFunctionUDF' USING JAR 's3://bucket/my.jar'"}
-{"dialect":"hive","category":"gen: ddl/properties","sql":"CREATE TABLE foo (col STRUCT<struct_col_a: VARCHAR((50))>)"}
-{"dialect":"hive","category":"generate: error","sql":"CREATE EXTERNAL TABLE `my_table` (`a7` ARRAY<DATE>) ROW FORMAT SERDE 'a' STORED AS INPUTFORMAT 'b' OUTPUTFORMAT 'c' LOCATION 'd' TBLPROPERTIES ('e'='f')"}
 {"dialect":"hive","category":"parse: Expecting )","sql":"SELECT ROW() OVER (DISTRIBUTE BY x SORT BY y)"}
 {"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"INSERT OVERWRITE DIRECTORY 'x' ROW FORMAT DELIMITED FIELDS TERMINATED BY '\u0001' COLLECTION ITEMS TERMINATED BY ',' MAP KEYS TERMINATED BY ':' LINES TERMINATED BY '' STORED AS TEXTFILE SELECT * FROM `a`.`b`"}
 {"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM my_table TIMESTAMP AS OF DATE_ADD(CURRENT_DATE, -1)"}
 {"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM my_table VERSION AS OF DATE_ADD(CURRENT_DATE, -1)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"APPROX_PERCENTILE(a, b, c, d)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"DATE_ADD('DAY', 1, y)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"DATE_ADD('DAY', FLOOR(5), y)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"FROM_UNIXTIME(a, b)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"FROM_UNIXTIME(a, b, c)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"FROM_UTF8(x, y)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"SELECT * FROM x OFFSET 1 LIMIT 1"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"SELECT BOOL_OR(a > 10) FROM asd AS T(a)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"SELECT SPLIT_TO_MAP('a:1;b:2;a:3', ';', ':', (k, v1, v2) -> CONCAT(v1, v2))"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"START TRANSACTION ISOLATION LEVEL REPEATABLE READ"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"START TRANSACTION READ WRITE, ISOLATION LEVEL SERIALIZABLE"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TRUNCATE(3.14159)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TRUNCATE(3.14159, 2)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"VAR_POP(a)"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"string_agg(x, ',')"}
-{"dialect":"presto","category":"gen: cast/type","sql":"CAST(x AS HYPERLOGLOG)"}
-{"dialect":"presto","category":"gen: cast/type","sql":"SELECT DATE_ADD('DAY', MOD(5, 2.5), y), DATE_ADD('DAY', CEIL(5.5), y)"}
-{"dialect":"presto","category":"gen: cast/type","sql":"TIMESTAMP '2025-06-20 11:22:29 Europe/Prague'"}
-{"dialect":"presto","category":"gen: ddl/properties","sql":"CREATE OR REPLACE VIEW v SECURITY DEFINER AS SELECT id FROM t"}
-{"dialect":"presto","category":"gen: ddl/properties","sql":"CREATE OR REPLACE VIEW v SECURITY INVOKER AS SELECT id FROM t"}
+{"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM x TABLESAMPLE (1 PERCENT) AS foo"}
+{"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM x.z TABLESAMPLE(10 PERCENT) y"}
+{"dialect":"hive","category":"parse: Required keyword","sql":"SELECT ${hiveconf:some_var}"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"DATE_FORMAT(x, '%Y-%m-%d %H:%i:%S')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"DATE_PARSE(x, '%Y-%m-%d %H:%i:%S')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"JSON '\"foo\"'"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"JSON_FORMAT(JSON '\"x\"')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"REGEXP_REPLACE('abcd', '[ab]')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'dd')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'hh')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'hh24')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'mi')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'mm')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'ss')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'yy')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'yyyy')"}
+{"dialect":"presto","category":"gen: canonicalization","sql":"UNHEX(x)"}
+{"dialect":"presto","category":"gen: cast/type","sql":"SELECT CAST(JSON '[1,23,456]' AS ARRAY(INTEGER))"}
+{"dialect":"presto","category":"gen: cast/type","sql":"SELECT CAST(JSON '{\"k1\":1,\"k2\":23,\"k3\":456}' AS MAP(VARCHAR, INTEGER))"}
+{"dialect":"presto","category":"gen: ddl/properties","sql":"CREATE TABLE test STORED AS 'PARQUET' AS SELECT 1"}
 {"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT\n  *\nFROM orders\nMATCH_RECOGNIZE (\n  PARTITION BY custkey\n  ORDER BY\n    orderdate\n  MEASURES\n    A.totalprice AS starting_price,\n    LAST(B.totalprice) AS bottom_price,\n    LAST(C.totalprice) AS top_price\n  ONE ROW PER MATCH\n  AFTER MATCH SKIP PAST LAST ROW\n  PATTERN (A B+ C+ D+)\n  DEFINE\n    B AS totalprice < PREV(totalprice),\n    C AS totalprice > PREV(totalprice) AND totalprice <= A.totalprice,\n    D AS totalprice > PREV(totalprice),\n    E AS MAX(foo) >= NEXT(bar)\n)"}
 {"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM example.testdb.customer_orders FOR TIMESTAMP AS OF CAST('2022-03-23 09:59:29.803 Europe/Vienna' AS TIMESTAMP)"}
 {"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM example.testdb.customer_orders FOR VERSION AS OF 8954597067493422955"}
 {"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM foo FOR TIMESTAMP AS OF CAST('2020-01-01 00:00:00' AS TIMESTAMP) AS bar"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT LISTAGG(DISTINCT col, ',') WITHIN GROUP (ORDER BY col ASC) FROM tbl"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT LISTAGG(col) WITHIN GROUP (ORDER BY col DESC) FROM tbl"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT LISTAGG(col, '; ' ON OVERFLOW ERROR) WITHIN GROUP (ORDER BY col ASC) FROM tbl"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE '...' WITH COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE '...' WITHOUT COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE WITH COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE WITHOUT COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT TRIM('!' FROM '!foo!')"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT TRIM('!foo!', '!')"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT TRIM(BOTH '$' FROM '$var$')"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT TRIM(TRAILING 'ER' FROM UPPER('worker'))"}
-{"dialect":"trino","category":"gen: canonicalization","sql":"SELECT VERSION()"}
-{"dialect":"trino","category":"gen: cast/type","sql":"SELECT TIMESTAMP '2012-10-31 01:00 +2'"}
-{"dialect":"trino","category":"gen: cast/type","sql":"SELECT TIMESTAMP '2012-10-31 01:00 -2'"}
-{"dialect":"trino","category":"gen: ddl/properties","sql":"CREATE TABLE \"foo\" (\"a\" VARCHAR, \"b\" INTEGER, \"c\" DATE) WITH (PARTITIONED_BY=ARRAY['a', 'b'])"}
-{"dialect":"trino","category":"gen: ddl/properties","sql":"CREATE TABLE \"foo\" (\"a\" VARCHAR, \"b\" INTEGER, \"c\" DATE) WITH (PARTITIONING=ARRAY['a', 'bucket(4, b)', 'month(c)'])"}
-{"dialect":"trino","category":"gen: ddl/properties","sql":"CREATE TABLE foo (a VARCHAR, b INTEGER, c DATE) WITH (PARTITIONED_BY=ARRAY['a', 'b'])"}
-{"dialect":"trino","category":"gen: ddl/properties","sql":"CREATE TABLE foo (a VARCHAR, b INTEGER, c DATE) WITH (PARTITIONING=ARRAY['a', 'bucket(4, b)', 'month(c)'])"}
+{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"U&'Hello winter #2603 !' UESCAPE '#'"}
+{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"u&'Hello winter #2603 !' UESCAPE '#'"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION count_evens(n BIGINT) RETURNS BIGINT BEGIN DECLARE total BIGINT DEFAULT 0; DECLARE i BIGINT DEFAULT 0; WHILE i < n DO SET total = total + 1; IF i = 0 THEN SET total = total + 1; END IF; SET i = i + 1; END WHILE; RETURN total; END SELECT COUNT_EVENS(3)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION custom_sqrt(a INTEGER) RETURNS DOUBLE COMMENT 'Custom sqrt function' RETURNS NULL ON NULL INPUT NOT DETERMINISTIC LANGUAGE SQL SECURITY DEFINER WITH (weight=42, cost='low') RETURN a SELECT CUSTOM_SQRT(4)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION declare() RETURNS INTEGER RETURN 1 SELECT DECLARE()"}

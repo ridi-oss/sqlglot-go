@@ -113,20 +113,17 @@ func TestOverflowTruncateBehaviorRendering(t *testing.T) {
 	}
 }
 
-func TestTrinoVersionKeepsCanonicalRendering(t *testing.T) {
-	// VERSION -> CURRENT_VERSION is the canonical Func fallback. The Trino VERSION transform is
-	// intentionally out of scope for this part.
+func TestTrinoVersionRendersVersion(t *testing.T) {
+	// generators/trino.py:26 exp.CurrentVersion: rename_func("VERSION").
 	for _, dialect := range []string{"trino", "athena"} {
-		if got := roundTrip(t, dialect, "SELECT VERSION()"); got != "SELECT CURRENT_VERSION()" {
-			t.Errorf("%s VERSION rendering = %q, want %q", dialect, got, "SELECT CURRENT_VERSION()")
+		if got := roundTrip(t, dialect, "SELECT VERSION()"); got != "SELECT VERSION()" {
+			t.Errorf("%s VERSION rendering = %q, want %q", dialect, got, "SELECT VERSION()")
 		}
 	}
 }
 
 func TestTrinoListaggAndTrimParseShapeOnly(t *testing.T) {
-	// Trino's GroupConcat -> LISTAGG and Trim standard-form spellings require generator
-	// TRANSFORMS, which are explicitly out of scope. These assertions therefore stop at the
-	// parser shape and do not round-trip either expression through the generator.
+	// Round-trip spelling is covered by the trino identity corpus; these pin the parse shape.
 	for _, dialect := range []string{"trino", "athena"} {
 		t.Run(dialect+"/listagg", func(t *testing.T) {
 			expression, err := sqlglot.ParseOne("SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE '...' WITH COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl", dialect)

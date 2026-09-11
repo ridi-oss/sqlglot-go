@@ -130,6 +130,10 @@ func hiveBuildDateAdd(args []exp.Expression) exp.Expression {
 func hiveBuildDateSub(args []exp.Expression) exp.Expression {
 	delta := hiveSeqGet(args, 1)
 	if delta != nil {
+		// expression * -1 (parsers/hive.py:45) wraps a binary operand in parens (core.py:1399-1408).
+		if delta.Is(exp.TraitBinary) {
+			delta = exp.Paren(exp.Args{"this": delta})
+		}
 		delta = exp.Mul(exp.Args{
 			"this":       delta,
 			"expression": exp.LiteralNumber(-1),
@@ -446,13 +450,17 @@ func hiveFormatTime(format exp.Expression) exp.Expression {
 // hiveConvertTimeFormat ports time.py:10-62. In particular, it remembers the longest
 // completed trie match and reprocesses the first character after that match on failure.
 func hiveConvertTimeFormat(value string) (string, bool) {
+	return hiveConvertTimeFormatWith(value, hiveTimeMapping, hiveTimeTrie)
+}
+
+func hiveConvertTimeFormatWith(value string, mapping map[string]string, trie *hiveTimeTrieNode) (string, bool) {
 	if value == "" {
 		return "", false
 	}
 
 	characters := []rune(value)
 	start, end := 0, 1
-	current := hiveTimeTrie
+	current := trie
 	chunks := make([]string, 0, len(characters))
 	matchedSymbol := ""
 
@@ -471,7 +479,7 @@ func hiveConvertTimeFormat(value string) (string, bool) {
 			}
 			start += len([]rune(chars))
 			chunks = append(chunks, chars)
-			current = hiveTimeTrie
+			current = trie
 		} else {
 			current = next
 			if current.exists {
@@ -487,11 +495,55 @@ func hiveConvertTimeFormat(value string) (string, bool) {
 
 	var converted strings.Builder
 	for _, chunk := range chunks {
-		if replacement, ok := hiveTimeMapping[chunk]; ok {
+		if replacement, ok := mapping[chunk]; ok {
 			converted.WriteString(replacement)
 		} else {
 			converted.WriteString(chunk)
 		}
 	}
 	return converted.String(), true
+}
+
+// HiveFormatTime renders a sqlglot strftime format back in Hive's pattern language
+// (Generator.format_time with INVERSE_TIME_MAPPING, dialect.py:265-271); "" when format is empty.
+func HiveFormatTime(format string) string {
+	if format == "" {
+		return ""
+	}
+	return hiveInverseFormat(format)
+}
+
+// HiveTimeFormat is Hive's TIME_FORMAT ('yyyy-MM-dd HH:mm:ss') without the quotes.
+const HiveTimeFormat = "yyyy-MM-dd HH:mm:ss"
+
+// HiveDateFormat is Hive's DATE_FORMAT ('yyyy-MM-dd') without the quotes.
+const HiveDateFormat = "yyyy-MM-dd"
+
+var hiveInverseTimeMapping = func() map[string]string {
+	inverse := map[string]string{}
+	// Later (longer, canonical) keys win over the single-letter aliases, matching dict order.
+	for _, k := range []string{"y", "Y", "YYYY", "yyyy", "YY", "yy", "MMMM", "MMM", "MM", "M", "dd", "d", "HH", "H", "hh", "h", "mm", "m", "ss", "s", "SSSSSS", "a", "DD", "D", "E", "EE", "EEE", "EEEE", "z", "Z"} {
+		inverse[hiveTimeMapping[k]] = k
+	}
+	return inverse
+}()
+
+var hiveInverseTimeTrie = func() *hiveTimeTrieNode {
+	root := &hiveTimeTrieNode{children: map[rune]*hiveTimeTrieNode{}}
+	for pattern := range hiveInverseTimeMapping {
+		current := root
+		for _, char := range pattern {
+			if current.children[char] == nil {
+				current.children[char] = &hiveTimeTrieNode{children: map[rune]*hiveTimeTrieNode{}}
+			}
+			current = current.children[char]
+		}
+		current.exists = true
+	}
+	return root
+}()
+
+func hiveInverseFormat(value string) string {
+	converted, _ := hiveConvertTimeFormatWith(value, hiveInverseTimeMapping, hiveInverseTimeTrie)
+	return converted
 }

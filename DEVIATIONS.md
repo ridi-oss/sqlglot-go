@@ -257,8 +257,11 @@ Cross-cutting rules for the SET/SHOW family:
 
 ## 2. Cross-dialect-only deviations (never affect same-dialect round-trip)
 
-Cross-dialect transpilation is out of scope. Presto/trino/hive/athena generator
-`TRANSFORMS`/`TYPE_MAPPING` are not ported, and several of their functions parse as `Anonymous`
+Cross-dialect transpilation is out of scope. The Presto/Trino/Hive/Athena generators port the
+same-dialect surface of upstream's `TRANSFORMS`/`TYPE_MAPPING`/`PROPERTIES_LOCATION`
+(`generator/dialect_{presto,trino,hive,athena}.go`); the transpile-only `Select` preprocess chain
+(eliminate_qualify/distinct_on, explode_projection_to_unnest, semi/anti joins) and transforms whose
+source nodes only other dialects build are not. Several Presto functions still parse as `Anonymous`
 (`DATE_FORMAT`, `DATE_PARSE`, `TO_CHAR`, `DATE_TRUNC`, `REGEXP_*`, `LOCALTIME[STAMP]`, `CONCAT_WS`)
 — lineage still sees column args; same-dialect `.sql()` echoes them.
 

@@ -13,6 +13,67 @@ import (
 func Presto() *Dialect {
 	d := Base()
 	d.Name = "presto"
+	// generators/presto.py:439-500.
+	d.ReservedKeywords = map[string]bool{
+		"alter":             true,
+		"and":               true,
+		"as":                true,
+		"between":           true,
+		"by":                true,
+		"case":              true,
+		"cast":              true,
+		"constraint":        true,
+		"create":            true,
+		"cross":             true,
+		"current_time":      true,
+		"current_timestamp": true,
+		"deallocate":        true,
+		"delete":            true,
+		"describe":          true,
+		"distinct":          true,
+		"drop":              true,
+		"else":              true,
+		"end":               true,
+		"escape":            true,
+		"except":            true,
+		"execute":           true,
+		"exists":            true,
+		"extract":           true,
+		"false":             true,
+		"for":               true,
+		"from":              true,
+		"full":              true,
+		"group":             true,
+		"having":            true,
+		"in":                true,
+		"inner":             true,
+		"insert":            true,
+		"intersect":         true,
+		"into":              true,
+		"is":                true,
+		"join":              true,
+		"left":              true,
+		"like":              true,
+		"natural":           true,
+		"not":               true,
+		"null":              true,
+		"on":                true,
+		"or":                true,
+		"order":             true,
+		"outer":             true,
+		"prepare":           true,
+		"right":             true,
+		"select":            true,
+		"table":             true,
+		"then":              true,
+		"true":              true,
+		"union":             true,
+		"using":             true,
+		"values":            true,
+		"when":              true,
+		"where":             true,
+		"with":              true,
+	}
 	// dialects/presto.py:18-35 class attributes. Delimiters inherit base ANSI '/" (presto.py
 	// declares no Tokenizer QUOTES/IDENTIFIERS override), so QuoteStart/IdentifierStart stay as
 	// Base() set them; DPipeIsStringConcat likewise stays at the base True (no override).
@@ -23,6 +84,8 @@ func Presto() *Dialect {
 	d.TablesampleSizeIsPercent = true
 	d.SupportsLimitAll = true
 	d.SupportsValuesDefault = false
+	// generators/presto.py:260 INTERVAL_ALLOWS_PLURAL_FORM = False.
+	d.IntervalAllowsPluralForm = false
 	// dialects/presto.py:35 NORMALIZATION_STRATEGY = NormalizationStrategy.CASE_INSENSITIVE;
 	// first in-scope consumer of dialects.CaseInsensitive.
 	d.NormalizationStrategy = CaseInsensitive

@@ -126,56 +126,45 @@ func TestPrestoFunctionsParseToKind(t *testing.T) {
 	}
 }
 
-// TestPrestoFunctionsRoundTrip pins the actual presto->presto rendering of the overlay, covering
-// each custom closure's argument handling: the DATE_ADD/DATE_DIFF unit/expression/this reorder
-// (parsers/presto.py:85-90), APPROX_PERCENTILE's 3/4-arg weight reorder, FROM_UNIXTIME's 2/3-arg
-// zone-vs-hours/minutes split, FROM_UTF8/TO_UTF8's injected "utf-8" charset, ELEMENT_AT's Bracket
-// lowering, STRPOS's occurrence arg, and NOW()'s CurrentTimestamp. The output SQL is the canonical
-// class-name (not the Presto spelling) because the Presto generator is out of scope this slice -
-// same as dialect_funcs_test.go's mysql MOD/postgres CHARACTER_LENGTH transform assertions. The
-// SHA2/MD5Digest/JSONFormat render their upstream _sql_names via the generator's sqlNameOverrides
-// (JSON_FORMAT / MD5_DIGEST / SHA2), matching .reference presto-read base-write; they are pinned
-// below alongside the closures.
+// TestPrestoFunctionsRoundTrip pins the parser closures' argument handling (parsers/presto.py:
+// 70-140) through the Presto generator: every Presto spelling round-trips verbatim.
 func TestPrestoFunctionsRoundTrip(t *testing.T) {
 	cases := []struct{ sql, want string }{
 		{"SELECT APPROX_DISTINCT(x)", "SELECT APPROX_DISTINCT(x)"},
 		{"SELECT JSON_FORMAT(x)", "SELECT JSON_FORMAT(x)"},
-		{"SELECT MD5(x)", "SELECT MD5_DIGEST(x)"},
-		{"SELECT SHA256(x)", "SELECT SHA2(x, 256)"},
-		{"SELECT SHA512(x)", "SELECT SHA2(x, 512)"},
-		{"SELECT ARBITRARY(x)", "SELECT ANY_VALUE(x)"},
-		{"SELECT CARDINALITY(x)", "SELECT ARRAY_LENGTH(x)"},
-		{"SELECT CONTAINS(x, 1)", "SELECT ARRAY_CONTAINS(x, 1)"},
-		{"SELECT APPROX_PERCENTILE(x, 0.5, 100)", "SELECT APPROX_QUANTILE(x, 0.5, 100)"},
-		{"SELECT APPROX_PERCENTILE(x, w, 0.5, 100)", "SELECT APPROX_QUANTILE(x, 0.5, 100, w)"},
-		{"SELECT BITWISE_AND(a, b)", "SELECT a & b"},
-		{"SELECT BITWISE_OR(a, b)", "SELECT a | b"},
-		{"SELECT BITWISE_XOR(a, b)", "SELECT a ^ b"},
-		{"SELECT BITWISE_NOT(a)", "SELECT ~a"},
-		{"SELECT DATE_ADD('day', 1, ts)", "SELECT DATE_ADD(ts, 1, 'day')"},
-		{"SELECT DATE_DIFF('day', a, b)", "SELECT DATEDIFF(b, a, 'day')"},
-		{"SELECT DAY_OF_WEEK(x)", "SELECT DAYOFWEEK_ISO(x)"},
-		{"SELECT DOW(x)", "SELECT DAYOFWEEK_ISO(x)"},
+		{"SELECT MD5(x)", "SELECT MD5(x)"},
+		{"SELECT SHA256(x)", "SELECT SHA256(x)"},
+		{"SELECT SHA512(x)", "SELECT SHA512(x)"},
+		{"SELECT ARBITRARY(x)", "SELECT ARBITRARY(x)"},
+		{"SELECT CARDINALITY(x)", "SELECT CARDINALITY(x)"},
+		{"SELECT CONTAINS(x, 1)", "SELECT CONTAINS(x, 1)"},
+		{"SELECT APPROX_PERCENTILE(x, 0.5, 100)", "SELECT APPROX_PERCENTILE(x, 0.5, 100)"},
+		{"SELECT APPROX_PERCENTILE(x, w, 0.5, 100)", "SELECT APPROX_PERCENTILE(x, w, 0.5, 100)"},
+		{"SELECT BITWISE_AND(a, b)", "SELECT BITWISE_AND(a, b)"},
+		{"SELECT BITWISE_OR(a, b)", "SELECT BITWISE_OR(a, b)"},
+		{"SELECT BITWISE_XOR(a, b)", "SELECT BITWISE_XOR(a, b)"},
+		{"SELECT BITWISE_NOT(a)", "SELECT BITWISE_NOT(a)"},
+		{"SELECT DATE_ADD('day', 1, ts)", "SELECT DATE_ADD('DAY', 1, ts)"},
+		{"SELECT DATE_DIFF('day', a, b)", "SELECT DATE_DIFF('DAY', a, b)"},
+		{"SELECT DAY_OF_WEEK(x)", "SELECT DAY_OF_WEEK(x)"},
+		{"SELECT DOW(x)", "SELECT DAY_OF_WEEK(x)"},
 		{"SELECT DOY(x)", "SELECT DAY_OF_YEAR(x)"},
-		{"SELECT ELEMENT_AT(m, k)", "SELECT m[k]"},
-		{"SELECT FROM_HEX(x)", "SELECT UNHEX(x)"},
-		{"SELECT FROM_UNIXTIME(x, z)", "SELECT UNIX_TO_TIME(x, z)"},
-		{"SELECT FROM_UNIXTIME(x, h, m)", "SELECT UNIX_TO_TIME(x, h, m)"},
-		{"SELECT FROM_UTF8(x)", "SELECT DECODE(x, 'utf-8')"},
-		{"SELECT LEVENSHTEIN_DISTANCE(a, b)", "SELECT LEVENSHTEIN(a, b)"},
-		// Presto renders CurrentTimestamp bare (generators/presto.py:289 `lambda *_:
-		// "CURRENT_TIMESTAMP"`); the previous parenthesized expectation was a port bug fixed by
-		// the niladic-function generator gating.
+		{"SELECT ELEMENT_AT(m, k)", "SELECT ELEMENT_AT(m, k)"},
+		{"SELECT FROM_HEX(x)", "SELECT FROM_HEX(x)"},
+		{"SELECT FROM_UNIXTIME(x, z)", "SELECT FROM_UNIXTIME(x, z)"},
+		{"SELECT FROM_UNIXTIME(x, h, m)", "SELECT FROM_UNIXTIME(x, h, m)"},
+		{"SELECT FROM_UTF8(x)", "SELECT FROM_UTF8(x)"},
+		{"SELECT LEVENSHTEIN_DISTANCE(a, b)", "SELECT LEVENSHTEIN_DISTANCE(a, b)"},
 		{"SELECT NOW()", "SELECT CURRENT_TIMESTAMP"},
 		{"SELECT REPLACE(a, b, c)", "SELECT REPLACE(a, b, c)"},
-		{"SELECT ROW(a, b)", "SELECT STRUCT(a, b)"},
-		{"SELECT SEQUENCE(a, b)", "SELECT GENERATE_SERIES(a, b)"},
-		{"SELECT SET_AGG(x)", "SELECT ARRAY_UNIQUE_AGG(x)"},
-		{"SELECT SPLIT_TO_MAP(a, b, c)", "SELECT STR_TO_MAP(a, b, c)"},
-		{"SELECT STRPOS(a, b, 2)", "SELECT STR_POSITION(a, b, 2)"},
-		{"SELECT SLICE(a, 1, 2)", "SELECT ARRAY_SLICE(a, 1, 2)"},
-		{"SELECT TO_UNIXTIME(x)", "SELECT TIME_TO_UNIX(x)"},
-		{"SELECT TO_UTF8(x)", "SELECT ENCODE(x, 'utf-8')"},
+		{"SELECT ROW(a, b)", "SELECT ROW(a, b)"},
+		{"SELECT SEQUENCE(a, b)", "SELECT SEQUENCE(a, b)"},
+		{"SELECT SET_AGG(x)", "SELECT SET_AGG(x)"},
+		{"SELECT SPLIT_TO_MAP(a, b, c)", "SELECT SPLIT_TO_MAP(a, b, c)"},
+		{"SELECT STRPOS(a, b, 2)", "SELECT STRPOS(a, b, 2)"},
+		{"SELECT SLICE(a, 1, 2)", "SELECT SLICE(a, 1, 2)"},
+		{"SELECT TO_UNIXTIME(x)", "SELECT TO_UNIXTIME(x)"},
+		{"SELECT TO_UTF8(x)", "SELECT TO_UTF8(x)"},
 		{"SELECT WEEK(x)", "SELECT WEEK_OF_YEAR(x)"},
 	}
 	for _, tc := range cases {
@@ -213,11 +202,11 @@ func TestPrestoDeferredFunctionsStayAnonymous(t *testing.T) {
 }
 
 // TestPrestoCastRowStruct verifies the ROW -> STRUCT token remap (dialects/presto.py:62) reaches
-// the STRUCT-token CAST path (parser_types.go:144-146): CAST(x AS ROW(a INT, b VARCHAR)) builds a
-// struct type.
+// the STRUCT-token CAST path (parser_types.go:144-146) and renders back as ROW(...) with Presto's
+// TYPE_MAPPING (INT -> INTEGER).
 func TestPrestoCastRowStruct(t *testing.T) {
 	got := dialectRoundTrip(t, "presto", "SELECT CAST(x AS ROW(a INT, b VARCHAR))")
-	want := "SELECT CAST(x AS STRUCT<a INT, b VARCHAR>)"
+	want := "SELECT CAST(x AS ROW(a INTEGER, b VARCHAR))"
 	if got != want {
 		t.Errorf("presto CAST(... AS ROW(...)) ->\n  got  %q\n  want %q", got, want)
 	}

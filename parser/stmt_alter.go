@@ -70,10 +70,42 @@ func init() {
 }
 
 func (p *Parser) alterParsers() map[string]func(*Parser) []exp.Expression {
-	if p.dialect.Name == "mysql" {
+	switch p.dialect.Name {
+	case "mysql":
 		return mysqlAlterParsers
+	case "hive":
+		return hiveAlterParsers
 	}
 	return alterParsers
+}
+
+// hiveAlterParsers ports parsers/hive.py:138-141 (ALTER_PARSERS + CHANGE).
+var hiveAlterParsers map[string]func(*Parser) []exp.Expression
+
+func init() {
+	hiveAlterParsers = make(map[string]func(*Parser) []exp.Expression, len(alterParsers)+1)
+	for k, v := range alterParsers {
+		hiveAlterParsers[k] = v
+	}
+	hiveAlterParsers["CHANGE"] = func(p *Parser) []exp.Expression {
+		return ensureListExpr(p.parseHiveAlterTableChange())
+	}
+}
+
+// parseHiveAlterTableChange ports parsers/hive.py:224-243 _parse_alter_table_change.
+func (p *Parser) parseHiveAlterTableChange() exp.Expression {
+	p.match(tokens.COLUMN)
+	this := p.parseField(true, nil, false)
+	columnNew := p.parseField(true, nil, false)
+	dtype := p.parseTypes(false, true, true, true)
+	var comment any = false
+	if p.match(tokens.COMMENT) {
+		comment = p.parseString()
+	}
+	if this == nil || columnNew == nil || dtype == nil {
+		p.raiseError("Expected 'CHANGE COLUMN' to be followed by 'column_name' 'column_name' 'data_type'")
+	}
+	return p.expression(exp.AlterColumn(exp.Args{"this": this, "rename_to": columnNew, "dtype": dtype, "comment": comment}), nil, nil)
 }
 
 func (p *Parser) alterAlterParsers() (map[string]func(*Parser) exp.Expression, map[string]bool) {

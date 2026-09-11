@@ -11,7 +11,8 @@ this script monkeypatches Validator.validate_identity to record every (dialect, 
 tuple it is called with, then runs the selected dialect test classes under unittest so every call
 site — including loop/template expansions — fires for real. The output feeds the Go parity harness
 (corpus_test.go); it is not run by `go test` itself.
-MySQL/Postgres records carry hand-added cases, so re-extract those dialects deliberately.
+MySQL/Postgres records carry hand-added cases, so re-extract those dialects deliberately. For the
+Presto-family dialects the same-dialect write of validate_all is recorded too.
 
 Run manually (after `scripts/fetch-reference.sh`, since .reference/ is gitignored):
 
@@ -59,6 +60,7 @@ from tests.dialects.test_mysql import TestMySQL  # noqa: E402
 from tests.dialects.test_postgres import TestPostgres  # noqa: E402
 
 DIALECTS = ("mysql", "postgres", "athena", "trino", "presto", "hive")
+SAME_DIALECT_WRITES = {"athena", "trino", "presto", "hive"}
 
 captured = []
 
@@ -75,6 +77,7 @@ def patched_validate_identity(
             "sql": sql,
             "want": write_sql or sql,
             "pretty": bool(pretty),
+            "identify": bool(identify),
         }
     )
     try:
@@ -91,9 +94,22 @@ def patched_validate_identity(
 
 
 def patched_validate_all(self, sql, read=None, write=None, pretty=False, identify=False):
-    # Out of scope for this corpus (cross-dialect transpile, not same-dialect identity). Best
-    # effort only, so an unrelated validate_all failure never aborts a test method before its
-    # later validate_identity calls fire.
+    # Cross-dialect writes are out of scope, but write[self.dialect] is a same-dialect
+    # expectation for sql. Recorded for the Presto-family dialects only; mysql/postgres keep
+    # their hand-curated records. Best effort only, so an unrelated validate_all failure never
+    # aborts a test method before its later validate_identity calls fire.
+    if self.dialect in SAME_DIALECT_WRITES and write and self.dialect in write:
+        want = write[self.dialect]
+        if isinstance(want, str):
+            captured.append(
+                {
+                    "dialect": self.dialect,
+                    "sql": sql,
+                    "want": want,
+                    "pretty": bool(pretty),
+                    "identify": bool(identify),
+                }
+            )
     try:
         # Presto checks transpilation logs before later identity cases (test_presto.py:754).
         if self.dialect == "presto":
@@ -171,7 +187,7 @@ def main():
     for rec in captured:
         if rec["dialect"] not in selected:
             continue
-        key = (rec["dialect"], rec["sql"], rec["want"], rec["pretty"])
+        key = (rec["dialect"], rec["sql"], rec["want"], rec["pretty"], rec.get("identify", False))
         records[key] = rec
 
     deduped = sorted(

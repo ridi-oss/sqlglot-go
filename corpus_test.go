@@ -26,6 +26,8 @@ type corpusRecord struct {
 	Sql     string `json:"sql"`
 	Want    string `json:"want"`
 	Pretty  bool   `json:"pretty"`
+	// Identify mirrors validate_identity(identify=True): quote every identifier on output.
+	Identify bool `json:"identify,omitempty"`
 }
 
 // gapKey identifies a tracked round-trip gap. It intentionally excludes the
@@ -130,7 +132,11 @@ func roundTrip(rec corpusRecord) (got string, perr, gerr error) {
 	if perr != nil {
 		return "", perr, nil
 	}
-	got, gerr = sqlglot.Generate(expression, rec.Dialect, generator.Options{Pretty: rec.Pretty})
+	opts := generator.Options{Pretty: rec.Pretty}
+	if rec.Identify {
+		opts.Identify = true
+	}
+	got, gerr = sqlglot.Generate(expression, rec.Dialect, opts)
 	return got, nil, gerr
 }
 
@@ -229,10 +235,10 @@ const (
 	minPassBase     = 980
 	minPassMySQL    = 428
 	minPassPostgres = 468
-	minPassAthena   = 22
-	minPassTrino    = 45
-	minPassPresto   = 24
-	minPassHive     = 37
+	minPassAthena   = 51
+	minPassTrino    = 66
+	minPassPresto   = 147
+	minPassHive     = 134
 )
 
 // Total floors catch dropped failing records that pass floors cannot detect.
@@ -240,10 +246,10 @@ const (
 	minTotalBase     = 980
 	minTotalMySQL    = 428
 	minTotalPostgres = 468
-	minTotalAthena   = 50
-	minTotalTrino    = 112
-	minTotalPresto   = 48
-	minTotalHive     = 61
+	minTotalAthena   = 51
+	minTotalTrino    = 115
+	minTotalPresto   = 170
+	minTotalHive     = 141
 )
 
 // TestCorpus is the single round-trip harness for both the base-dialect
