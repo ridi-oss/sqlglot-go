@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.36.1](https://github.com/ridi-oss/sqlglot-go/compare/v0.36.0...v0.36.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **parser:** PIVOT and UNPIVOT stay usable as table and CTE aliases ([#103](https://github.com/ridi-oss/sqlglot-go/issues/103)) ([720488b](https://github.com/ridi-oss/sqlglot-go/commit/720488b188bcf20576bdf8bff501ea2a933a0039))
+
 ## [0.36.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.35.0...v0.36.0) (2026-09-11)
 
 
