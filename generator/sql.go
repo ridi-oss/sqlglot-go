@@ -1878,6 +1878,8 @@ func (g *Generator) dataTypeSQL(e expressions.Expression) string {
 			typeSQL = g.sqlKey(e, "kind")
 		} else if tv == expressions.DTypeCharacterSet {
 			return "CHAR CHARACTER SET " + g.sqlKey(e, "kind")
+		} else if mapped, ok := g.lookupTypeMapping(tv); ok {
+			typeSQL = mapped
 		} else if mapped, ok := g.typeMappingTable()[tv]; ok {
 			typeSQL = mapped
 		} else {

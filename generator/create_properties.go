@@ -103,6 +103,9 @@ func init() {
 }
 
 func (g *Generator) propertyLocation(property expressions.Expression) (propertyLocation, bool) {
+	if location, ok := g.lookupPropertyLocation(property.Kind()); ok {
+		return location, true
+	}
 	if property.Kind() == expressions.KindPartitionedByProperty {
 		switch g.dialect.Name {
 		case "postgres":

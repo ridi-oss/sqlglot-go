@@ -8,7 +8,7 @@ import "github.com/ridi-oss/sqlglot-go/expressions"
 // parser/stmt_show.go's parseShow), so the base branch below only matters for an exp.Show built
 // programmatically rather than parsed.
 func (g *Generator) showSQL(e expressions.Expression) string {
-	if g.dialect.Name == "hive" || g.dialect.Name == "athena" {
+	if g.isDialect("hive") {
 		return g.hiveShowSQL(e)
 	}
 	if g.dialect.Name == "postgres" {

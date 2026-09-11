@@ -188,12 +188,11 @@ func (g *Generator) convertConcatArgs(e expressions.Expression) []any {
 // in-scope corpus case exercises an mysql/base Array node), so they fall through to
 // functionFallbackSQL here too, which renders the identical ARRAY(a, b, c) paren form.
 func (g *Generator) arraySQL(e expressions.Expression) string {
-	switch g.dialect.Name {
-	case "presto", "trino", "athena":
+	if g.isDialect("presto") {
 		// generators/presto.py:316-319 (the struct-field-name preprocess has no effect here).
 		return "ARRAY[" + g.expressions(exprsOptions{expression: e, flat: true}) + "]"
-	case "postgres":
-	default:
+	}
+	if g.dialect.Name != "postgres" {
 		return g.functionFallbackSQL(e)
 	}
 	exprs := listFromValue(e.Arg("expressions"))

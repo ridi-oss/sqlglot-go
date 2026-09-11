@@ -42,6 +42,9 @@ type Generator struct {
 	dialect             *dialects.Dialect
 	unsupportedMessages []string
 	nextName            int
+	// opts is kept so a routed sub-generator (Athena → Hive/Trino) is built with the same options.
+	opts         Options
+	overrideName string
 
 	identifierStart string
 	identifierEnd   string
@@ -124,6 +127,7 @@ func New(d *dialects.Dialect, o Options) *Generator {
 	}
 
 	return &Generator{
+		opts:                               o,
 		pretty:                             o.Pretty,
 		identify:                           o.Identify,
 		normalize:                          o.Normalize,
@@ -180,6 +184,9 @@ func (g *Generator) Generate(e expressions.Expression) (sql string, err error) {
 	}()
 	if e == nil {
 		return "", nil
+	}
+	if g.dialect.Name == "athena" && g.overrideName == "" {
+		return g.athenaChild(e).Generate(e)
 	}
 	e = e.Copy()
 	e = g.preprocess(e)
@@ -290,7 +297,7 @@ func (g *Generator) genWithComment(v any, comment bool) string {
 		if isNilExpression(tv) {
 			return ""
 		}
-		h := dispatch[tv.Kind()]
+		h := g.lookupDispatch(tv.Kind())
 		var sql string
 		if h != nil {
 			sql = h(g, tv)

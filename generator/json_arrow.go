@@ -48,7 +48,7 @@ func (g *Generator) jsonExtractSQL(e expressions.Expression) string {
 		}
 		return g.funcCall("JSON_EXTRACT_PATH", jsonExtractArgs(e), "(", ")", true)
 	}
-	if (g.dialect.Name == "trino" || g.dialect.Name == "athena") && boolValue(e.Arg("json_query")) {
+	if g.isDialect("trino") && boolValue(e.Arg("json_query")) {
 		path := g.sqlKey(e, "expression")
 
 		option := g.sqlKey(e, "option")
