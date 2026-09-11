@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.34.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.33.0...v0.34.0) (2026-09-11)
+
+
+### Features
+
+* **athena:** enabler parity with mysql/postgres — settings, per-statement routing, engine identities, SHOW/EXPLAIN/UNLOAD ([#97](https://github.com/ridi-oss/sqlglot-go/issues/97)) ([3914a0e](https://github.com/ridi-oss/sqlglot-go/commit/3914a0ef2bef7553b02979c1e99a21f6fde42e1c))
+
 ## [0.33.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.32.0...v0.33.0) (2026-09-02)
 
 
