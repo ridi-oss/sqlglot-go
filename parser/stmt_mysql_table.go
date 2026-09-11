@@ -35,7 +35,7 @@ func (p *Parser) parseMysqlTableStatement() exp.Expression {
 	// missing name under the default IMMEDIATE parser). Require its `this` to be a plain Identifier:
 	// this rejects table functions/placeholders, and also the lenient-parser case where a missing
 	// name leaves `this` nil — retreat so the statement fails closed instead of yielding a Select.
-	if this := asExpr(table.Arg("this")); this == nil || this.Kind() != exp.KindIdentifier {
+	if this := asExpr(table.Arg("this")); this == nil || this.Kind() != exp.KindIdentifier || table.Arg("pivots") != nil {
 		p.retreat(start)
 		return nil
 	}

@@ -3,6 +3,7 @@ package parser_test
 import (
 	"testing"
 
+	sqlglot "github.com/ridi-oss/sqlglot-go"
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
@@ -127,5 +128,51 @@ func TestUnpivotTargets(t *testing.T) {
 	fields := expressionsForArg(pivot, "fields")
 	if len(fields) != 1 || fields[0].This() == nil || fields[0].This().Kind() != exp.KindIdentifier {
 		t.Fatalf("unpivot FOR target mismatch:\n%s", pivot.ToS())
+	}
+}
+
+// PIVOT/UNPIVOT are TABLE_ALIAS_TOKENS (parser.py:836); only a following `(` makes them a
+// clause, because _parse_table_parts consumes pivots before the alias (parser.py:4973).
+func TestPivotAsIdentifier(t *testing.T) {
+	for _, dialect := range []string{"", "mysql", "postgres", "presto", "athena"} {
+		for _, tc := range []struct{ sql, want string }{
+			{"WITH pivot AS (SELECT 1) SELECT * FROM pivot", "WITH pivot AS (SELECT 1) SELECT * FROM pivot"},
+			{"SELECT * FROM t pivot WHERE pivot.a = 1", "SELECT * FROM t AS pivot WHERE pivot.a = 1"},
+			{"SELECT * FROM (SELECT 1) pivot", "SELECT * FROM (SELECT 1) AS pivot"},
+			{"SELECT * FROM t unpivot JOIN u ON TRUE", "SELECT * FROM t AS unpivot JOIN u ON TRUE"},
+		} {
+			e := parseOneDialect(t, tc.sql, dialect)
+			if got, err := generateSQL(t, e, dialect); err != nil || got != tc.want {
+				t.Errorf("%s %q: got %q, %v; want %q", dialect, tc.sql, got, err, tc.want)
+			}
+		}
+		// A following `(` still makes it a clause. SQL is asserted for base only: upstream
+		// mysql/postgres/presto drop PIVOT via no_pivot_sql, which the generator does not port yet.
+		e := parseOneDialect(t, "SELECT * FROM t pivot (SUM(a) FOR b IN (1, 2))", dialect)
+		if len(e.FindAll(exp.KindPivot)) != 1 || e.Arg("from_").(exp.Expression).This().Arg("alias") != nil {
+			t.Errorf("%s: want one Pivot and no alias: %s", dialect, e.ToS())
+		}
+		if dialect == "" {
+			if got, err := generateSQL(t, e, dialect); err != nil || got != "SELECT * FROM t PIVOT(SUM(a) FOR b IN (1, 2))" {
+				t.Errorf("base pivot clause: got %q, %v", got, err)
+			}
+		}
+		if _, err := sqlglot.ParseOne("SELECT * FROM t pivot (a, b)", dialect); err == nil {
+			t.Errorf("%s: `pivot (a, b)` must fail like upstream", dialect)
+		}
+	}
+}
+
+// Go-specific table-parts callers stay fail-closed when a PIVOT clause trails the target
+// (upstream rejects these; parseTableParts parses pivots for every caller as upstream does).
+func TestPivotClauseRejectedOnRestrictedTargets(t *testing.T) {
+	for _, tc := range []struct{ dialect, sql string }{
+		{"mysql", "TABLE t PIVOT(SUM(a) FOR b IN (1))"},
+		{"mysql", "DROP INDEX i ON t PIVOT(SUM(a) FOR b IN (1))"},
+		{"postgres", "DROP INDEX i ON t PIVOT(SUM(a) FOR b IN (1))"},
+	} {
+		if _, err := sqlglot.ParseOne(tc.sql, tc.dialect); err == nil {
+			t.Errorf("%s %q: want parse error", tc.dialect, tc.sql)
+		}
 	}
 }

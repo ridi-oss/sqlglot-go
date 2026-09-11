@@ -1452,7 +1452,13 @@ func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool,
 	if schemaPart == nil && isDBReference {
 		p.raiseError(fmt.Sprintf("Expected database name but got %s", p.curr.String()))
 	}
-	return p.expression(exp.Table(exp.Args{"this": table, "schema": schemaPart, "catalog": catalog}), nil, nil)
+	result := p.expression(exp.Table(exp.Args{"this": table, "schema": schemaPart, "catalog": catalog}), nil, nil)
+	// parser.py:4973-4975: a PIVOT clause binds to the table parts, ahead of any alias, so a
+	// bare `pivot` that is not followed by `(` stays available as an alias.
+	if pivots := p.parsePivots(); pivots != nil {
+		result.Set("pivots", pivots)
+	}
+	return result
 }
 
 func (p *Parser) parseTablePart(schema bool) exp.Expression {
@@ -1533,7 +1539,7 @@ func (p *Parser) parseTableAlias(aliasTokensArg map[tokens.TokenType]bool) exp.E
 	// is otherwise a member of ID_VAR_TOKENS (tableAliasTokens here). The Go port compensates
 	// in this guard because it dropped _parse_table's fast-path terminator check
 	// (ROADMAP.md:142-144).
-	if p.curr.TokenType == tokens.PIVOT || p.curr.TokenType == tokens.UNPIVOT || p.curr.TokenType == tokens.STRAIGHT_JOIN {
+	if p.curr.TokenType == tokens.STRAIGHT_JOIN {
 		return nil
 	}
 	anyToken := p.match(tokens.ALIAS)
@@ -3461,6 +3467,10 @@ func (p *Parser) parseSubquery(this exp.Expression, parseAlias bool) exp.Express
 		return nil
 	}
 	args := exp.Args{"this": this}
+	// _parse_subquery (parser.py:4295-4301): pivots bind before the alias.
+	if pivots := p.parsePivots(); pivots != nil {
+		args["pivots"] = pivots
+	}
 	if parseAlias {
 		args["alias"] = p.parseTableAlias(nil)
 	}

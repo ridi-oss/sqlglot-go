@@ -59,7 +59,7 @@ func (p *Parser) parseHiveShowStructured() exp.Expression {
 	args["this"] = name
 	if target {
 		table := p.parseTableParts(true, false, false, false)
-		if table.This() == nil || table.This().Kind() != exp.KindIdentifier || table.Name() == "" {
+		if table.This() == nil || table.This().Kind() != exp.KindIdentifier || table.Name() == "" || table.Arg("pivots") != nil {
 			return nil
 		}
 		args["target"] = table
@@ -122,7 +122,7 @@ func (p *Parser) parseAthenaDBReference() exp.Expression {
 			dots++
 		}
 	}
-	if db == nil || db.This() != nil || dots > 1 {
+	if db == nil || db.This() != nil || dots > 1 || db.Arg("pivots") != nil {
 		return nil
 	}
 	schema := asExpressionArg(db, "schema")

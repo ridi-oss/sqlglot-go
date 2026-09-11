@@ -55,7 +55,11 @@ func (p *Parser) parseDrop() exp.Expression {
 		// db-qualified `ON db.tbl` that real MySQL 8.0.46 accepts. Parse the full table parts here —
 		// scoped to DROP so CREATE/ALTER keep upstream's ON handling — so the qualifier survives. The
 		// missing-name case fails closed via parseTableParts' own raiseError. See DEVIATIONS §1.
-		cluster = p.expression(exp.OnProperty(exp.Args{"this": p.parseTableParts(false, false, false, false)}), nil, nil)
+		target := p.parseTableParts(false, false, false, false)
+		if target.Arg("pivots") != nil {
+			p.raiseError("Invalid expression / Unexpected token")
+		}
+		cluster = p.expression(exp.OnProperty(exp.Args{"this": target}), nil, nil)
 	}
 
 	var expressions []exp.Expression
