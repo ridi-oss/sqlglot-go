@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.35.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.34.0...v0.35.0) (2026-09-11)
+
+
+### Features
+
+* **generator:** Presto, Trino, Hive and Athena generators ([#99](https://github.com/ridi-oss/sqlglot-go/issues/99)) ([be93bfc](https://github.com/ridi-oss/sqlglot-go/commit/be93bfced796aa0c5de48f2a3714bde68879897b))
+
 ## [0.34.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.33.0...v0.34.0) (2026-09-11)
 
 
