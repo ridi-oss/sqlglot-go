@@ -6,6 +6,7 @@ import (
 	sqlglot "github.com/ridi-oss/sqlglot-go"
 	"github.com/ridi-oss/sqlglot-go/dialects"
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
+	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
 func TestTrinoFunctionsAreExactPrestoSuperset(t *testing.T) {
@@ -43,6 +44,23 @@ func TestTrinoFunctionKinds(t *testing.T) {
 		}
 		if len(expression.FindAll(tc.kind)) != 1 {
 			t.Errorf("Trino %q did not parse to exactly one %v node", tc.sql, tc.kind)
+		}
+	}
+}
+
+func TestTrinoTokenizerDrift(t *testing.T) {
+	d := dialects.Trino()
+	ts, err := d.NewTokenizer().Tokenize("DECLARE LANGUAGE SQL SECURITY DEFINER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 5 || ts[0].TokenType != tokens.DECLARE || ts[2].Text != "SQL" || ts[3].Text != "SECURITY" {
+		t.Fatalf("unexpected tokens: %s", tokens.ReprTokens(ts))
+	}
+	for _, security := range []string{"DEFINER", "INVOKER"} {
+		sql := "CREATE OR REPLACE VIEW v SECURITY " + security + " AS SELECT id FROM t"
+		if got := dialectRoundTrip(t, "trino", sql); got != sql {
+			t.Errorf("got %s; want %s", got, sql)
 		}
 	}
 }

@@ -164,6 +164,7 @@ var idVarTokens = map[tokens.TokenType]bool{
 	tokens.CURRENT_ROLE:            true,
 	tokens.CURRENT_CATALOG:         true,
 	tokens.DEFAULT:                 true,
+	tokens.DECLARE:                 true,
 	tokens.DELETE:                  true,
 	tokens.DESC:                    true,
 	tokens.DESCRIBE:                true,
@@ -426,6 +427,7 @@ var tableAliasTokens = map[tokens.TokenType]bool{
 	tokens.CURRENT_ROLE:            true,
 	tokens.CURRENT_CATALOG:         true,
 	tokens.DEFAULT:                 true,
+	tokens.DECLARE:                 true,
 	tokens.DELETE:                  true,
 	tokens.DESC:                    true,
 	tokens.DESCRIBE:                true,
@@ -801,22 +803,25 @@ var columnFastBailTokens = map[tokens.TokenType]bool{
 
 var funcTokens = buildFuncTokens()
 var queryModifierTokens = map[tokens.TokenType]bool{
-	tokens.WHERE:         true,
-	tokens.GROUP_BY:      true,
-	tokens.HAVING:        true,
-	tokens.QUALIFY:       true,
-	tokens.WINDOW:        true,
-	tokens.ORDER_BY:      true,
-	tokens.LIMIT:         true,
-	tokens.FETCH:         true,
-	tokens.OFFSET:        true,
-	tokens.FOR:           true,
-	tokens.LOCK:          true,
-	tokens.CLUSTER_BY:    true,
-	tokens.DISTRIBUTE_BY: true,
-	tokens.SORT_BY:       true,
-	tokens.PREWHERE:      true,
-	tokens.CONNECT_BY:    true,
+	tokens.MATCH_RECOGNIZE: true,
+	tokens.TABLE_SAMPLE:    true,
+	tokens.USING:           true,
+	tokens.WHERE:           true,
+	tokens.GROUP_BY:        true,
+	tokens.HAVING:          true,
+	tokens.QUALIFY:         true,
+	tokens.WINDOW:          true,
+	tokens.ORDER_BY:        true,
+	tokens.LIMIT:           true,
+	tokens.FETCH:           true,
+	tokens.OFFSET:          true,
+	tokens.FOR:             true,
+	tokens.LOCK:            true,
+	tokens.CLUSTER_BY:      true,
+	tokens.DISTRIBUTE_BY:   true,
+	tokens.SORT_BY:         true,
+	tokens.PREWHERE:        true,
+	tokens.CONNECT_BY:      true,
 }
 var windowAliasTokens = buildWindowAliasTokens()
 var fetchTokens = buildFetchTokens()
@@ -1042,7 +1047,8 @@ var creatables = buildCreatables()
 
 // bracketsTokens mirrors parser.py's bracket-token set for this slice, except L_BRACE is
 // intentionally deferred with JSON/map operators.
-var bracketsTokens = map[tokens.TokenType]bool{tokens.L_BRACKET: true}
+// bracketsTokens ports BRACKETS (parser.py:866).
+var bracketsTokens = map[tokens.TokenType]bool{tokens.L_BRACKET: true, tokens.L_BRACE: true}
 
 // selectStartTokens mirrors parser.py:1698 SELECT_START_TOKENS.
 var selectStartTokens = map[tokens.TokenType]bool{tokens.L_PAREN: true, tokens.WITH: true, tokens.SELECT: true}

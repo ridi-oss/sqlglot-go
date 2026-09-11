@@ -1,5 +1,7 @@
 package expressions
 
+import "strings"
+
 // presto_nodes.go: builders for the Func-trait Kinds referenced by the Presto FUNCTIONS
 // overlay (dialects/presto.go), plus the UnicodeString primitive node. One-file-per-slice,
 // mirroring residual_tail.go. Each Kind's arg_types/traits/className rows live in kinds.go;
@@ -37,8 +39,58 @@ func Levenshtein(args Args) Expression { return newNode(KindLevenshtein, args) }
 // binary-returning MD5(x) used by Presto (distinct from the hex-string exp.MD5).
 func MD5Digest(args Args) Expression { return newNode(KindMD5Digest, args) }
 
-// SHA2 ports exp.SHA2 (expressions/string.py:562): SHA256/SHA512 via SHA2(x, length).
+// SHA2 ports exp.SHA2 (expressions/string.py:562): the hex-string SHA2(x, length).
 func SHA2(args Args) Expression { return newNode(KindSHA2, args) }
+
+// SHA2Digest ports exp.SHA2Digest (expressions/string.py:582): the binary-returning
+// SHA256/SHA512 digest used by Presto.
+func SHA2Digest(args Args) Expression { return newNode(KindSHA2Digest, args) }
+
+// DateTrunc ports exp.DateTrunc (expressions/temporal.py:165-186), including the constructor's
+// unit unabbreviation to an uppercase string literal.
+func DateTrunc(args Args) Expression {
+	if unit, ok := args["unit"].(Expression); ok && unit != nil {
+		switch unit.Kind() {
+		case KindColumn, KindLiteral, KindVar:
+			if unit.Kind() != KindColumn || len(unit.Parts()) == 1 {
+				name := strings.ToUpper(unit.Name())
+				if expanded := UnabbreviatedUnitName[name]; expanded != "" {
+					name = expanded
+				}
+				args["unit"] = LiteralString(name)
+			}
+		}
+	}
+	return newNode(KindDateTrunc, args)
+}
+
+// TimeUnitVar ports the TimeUnit constructor (expressions/core.py:2055-2066): a literal, var or
+// single-part column unit becomes an uppercase, unabbreviated Var; anything else passes through.
+func TimeUnitVar(unit Expression) Expression {
+	if unit == nil {
+		return nil
+	}
+	switch unit.Kind() {
+	case KindColumn:
+		if len(unit.Parts()) != 1 {
+			return unit
+		}
+	case KindLiteral, KindVar:
+	default:
+		return unit
+	}
+	name := unit.Name()
+	if expanded := UnabbreviatedUnitName[name]; expanded != "" {
+		name = expanded
+	}
+	return Var(Args{"this": strings.ToUpper(name)})
+}
+
+// UnabbreviatedUnitName mirrors TimeUnit.UNABBREVIATED_UNIT_NAME (expressions/core.py:2040-2051).
+var UnabbreviatedUnitName = map[string]string{
+	"D": "DAY", "H": "HOUR", "M": "MINUTE", "MS": "MILLISECOND", "NS": "NANOSECOND",
+	"Q": "QUARTER", "S": "SECOND", "US": "MICROSECOND", "W": "WEEK", "Y": "YEAR",
+}
 
 // StrToMap ports exp.StrToMap (expressions/string.py:203): SPLIT_TO_MAP(x, kd, vd).
 func StrToMap(args Args) Expression { return newNode(KindStrToMap, args) }
@@ -64,3 +116,12 @@ func CurrentTimestamp(args Args) Expression { return newNode(KindCurrentTimestam
 // (no TraitFunc), so it has no functionFallbackSQL path - the generator supplies a
 // dedicated dispatch method (mirrors National's `N'...'`).
 func UnicodeString(args Args) Expression { return newNode(KindUnicodeString, args) }
+func Version(args Args) Expression       { return newNode(KindVersion, args) }
+func RegexpReplace(args Args) Expression { return newNode(KindRegexpReplace, args) }
+func ParseJSON(args Args) Expression     { return newNode(KindParseJSON, args) }
+func MatchRecognize(args Args) Expression {
+	return newNode(KindMatchRecognize, args)
+}
+func MatchRecognizeMeasure(args Args) Expression {
+	return newNode(KindMatchRecognizeMeasure, args)
+}

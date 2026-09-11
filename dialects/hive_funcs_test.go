@@ -11,7 +11,7 @@ import (
 
 var hiveOverlayKeys = []string{
 	"BASE64", "COLLECT_LIST", "COLLECT_SET", "DATE_ADD", "DATE_FORMAT", "DATE_SUB",
-	"DATEDIFF", "DAY", "FIRST", "FIRST_VALUE", "FROM_UNIXTIME", "GET_JSON_OBJECT",
+	"DATEDIFF", "DAY", "FIRST", "FIRST_VALUE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "CURRENT_USER", "LOCALTIME", "LOCALTIMESTAMP", "FROM_UNIXTIME", "GET_JSON_OBJECT",
 	"LAST", "LAST_VALUE", "LOG", "MAP", "MONTH", "NAMED_STRUCT", "REGEXP_EXTRACT",
 	"REGEXP_EXTRACT_ALL", "SEQUENCE", "SIZE", "SPLIT", "STR_TO_MAP", "TO_DATE",
 	"TO_JSON", "TRUNC", "UNBASE64", "UNIX_TIMESTAMP", "YEAR",
@@ -253,17 +253,17 @@ func TestHiveRegexpAndTimeFormatShapes(t *testing.T) {
 	if dateFormat.Kind() != exp.KindTimeToStr || dateFormat.This() == nil || dateFormat.This().Kind() != exp.KindTimeStrToTime || dateFormat.This().This() == nil || dateFormat.This().This().Name() != "x" {
 		t.Fatalf("DATE_FORMAT should be TimeToStr(TimeStrToTime(x)):\n%s", dateFormat.ToS())
 	}
-	if format := hiveFunctionArg(t, dateFormat, "format"); format.Name() != "%Y-%m-%d %H:%M:%S" {
-		t.Fatalf("DATE_FORMAT converted format = %q, want %%Y-%%m-%%d %%H:%%M:%%S:\n%s", format.Name(), dateFormat.ToS())
+	if format := hiveFunctionArg(t, dateFormat, "format"); format.Name() != "%Y-%mstrict-%dstrict %Hstrict:%Mstrict:%Sstrict" {
+		t.Fatalf("DATE_FORMAT converted format = %q, want %%Y-%%mstrict-%%dstrict %%Hstrict:%%Mstrict:%%Sstrict:\n%s", format.Name(), dateFormat.ToS())
 	}
 
 	fromUnix := parseHiveFunction(t, "FROM_UNIXTIME(x)")
-	if fromUnix.Kind() != exp.KindUnixToStr || hiveFunctionArg(t, fromUnix, "format").Name() != "%Y-%m-%d %H:%M:%S" {
+	if fromUnix.Kind() != exp.KindUnixToStr || hiveFunctionArg(t, fromUnix, "format").Name() != "%Y-%mstrict-%dstrict %Hstrict:%Mstrict:%Sstrict" {
 		t.Fatalf("FROM_UNIXTIME should inject Hive's default time format:\n%s", fromUnix.ToS())
 	}
 
 	toDate := parseHiveFunction(t, "TO_DATE(x, 'yyyy-MM-dd')")
-	if toDate.Kind() != exp.KindTsOrDsToDate || toDate.Arg("safe") != true || hiveFunctionArg(t, toDate, "format").Name() != "%Y-%m-%d" {
+	if toDate.Kind() != exp.KindTsOrDsToDate || toDate.Arg("safe") != true || hiveFunctionArg(t, toDate, "format").Name() != "%Y-%mstrict-%dstrict" {
 		t.Fatalf("TO_DATE should be safe and convert its format:\n%s", toDate.ToS())
 	}
 }
@@ -296,12 +296,12 @@ func TestHiveUnixTimestampAndLogShapes(t *testing.T) {
 	if current.Kind() != exp.KindStrToUnix || current.This() == nil || current.This().Kind() != exp.KindCurrentTimestamp {
 		t.Fatalf("UNIX_TIMESTAMP() should use CurrentTimestamp:\n%s", current.ToS())
 	}
-	if format := hiveFunctionArg(t, current, "format"); format.Name() != "%Y-%m-%d %H:%M:%S" {
+	if format := hiveFunctionArg(t, current, "format"); format.Name() != "%Y-%mstrict-%dstrict %Hstrict:%Mstrict:%Sstrict" {
 		t.Fatalf("UNIX_TIMESTAMP() default format = %q:\n%s", format.Name(), current.ToS())
 	}
 
 	formatted := parseHiveFunction(t, "UNIX_TIMESTAMP(x, 'yyyy-MM-dd')")
-	if formatted.Kind() != exp.KindStrToUnix || formatted.This() == nil || formatted.This().Name() != "x" || hiveFunctionArg(t, formatted, "format").Name() != "%Y-%m-%d" {
+	if formatted.Kind() != exp.KindStrToUnix || formatted.This() == nil || formatted.This().Name() != "x" || hiveFunctionArg(t, formatted, "format").Name() != "%Y-%mstrict-%dstrict" {
 		t.Fatalf("UNIX_TIMESTAMP explicit format mismatch:\n%s", formatted.ToS())
 	}
 

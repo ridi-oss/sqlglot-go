@@ -37,19 +37,26 @@ func Hive() *Dialect {
 	// parsers/hive.py:70-120 FUNCTIONS overlay. The callbacks build the canonical expression
 	// Kinds directly because this port keeps the base registry and dialect overlays separate.
 	d.Functions = map[string]func([]exp.Expression) exp.Expression{
-		"BASE64":             exp.FromArgListFunc(exp.KindToBase64),
-		"COLLECT_LIST":       hiveBuildCollectList,
-		"COLLECT_SET":        exp.FromArgListFunc(exp.KindArrayUniqueAgg),
-		"DATE_ADD":           hiveBuildDateAdd,
-		"DATE_FORMAT":        hiveBuildDateFormat,
-		"DATE_SUB":           hiveBuildDateSub,
-		"DATEDIFF":           hiveBuildDateDiff,
-		"DAY":                hiveBuildDay,
-		"FIRST":              hiveBuildWithIgnoreNulls(exp.KindFirst),
-		"FIRST_VALUE":        hiveBuildWithIgnoreNulls(exp.KindFirstValue),
-		"FROM_UNIXTIME":      hiveBuildFromUnixTime,
-		"GET_JSON_OBJECT":    hiveBuildGetJSONObject,
-		"LAST":               hiveBuildWithIgnoreNulls(exp.KindLast),
+		"BASE64":          exp.FromArgListFunc(exp.KindToBase64),
+		"COLLECT_LIST":    hiveBuildCollectList,
+		"COLLECT_SET":     exp.FromArgListFunc(exp.KindArrayUniqueAgg),
+		"DATE_ADD":        hiveBuildDateAdd,
+		"DATE_FORMAT":     hiveBuildDateFormat,
+		"DATE_SUB":        hiveBuildDateSub,
+		"DATEDIFF":        hiveBuildDateDiff,
+		"DAY":             hiveBuildDay,
+		"FIRST":           hiveBuildWithIgnoreNulls(exp.KindFirst),
+		"FIRST_VALUE":     hiveBuildWithIgnoreNulls(exp.KindFirstValue),
+		"FROM_UNIXTIME":   hiveBuildFromUnixTime,
+		"GET_JSON_OBJECT": hiveBuildGetJSONObject,
+		"LAST":            hiveBuildWithIgnoreNulls(exp.KindLast),
+		// Func classes are registered by name upstream (parser.py:373), so the parenthesized
+		// niladic forms build the same nodes as the bare keywords.
+		"CURRENT_TIME":       exp.FromArgListFunc(exp.KindCurrentTime),
+		"CURRENT_TIMESTAMP":  exp.FromArgListFunc(exp.KindCurrentTimestamp),
+		"CURRENT_USER":       exp.FromArgListFunc(exp.KindCurrentUser),
+		"LOCALTIME":          exp.FromArgListFunc(exp.KindLocaltime),
+		"LOCALTIMESTAMP":     exp.FromArgListFunc(exp.KindLocaltimestamp),
 		"LAST_VALUE":         hiveBuildWithIgnoreNulls(exp.KindLastValue),
 		"LOG":                hiveBuildLogarithm(d),
 		"MAP":                hiveBuildVarMap,
@@ -284,44 +291,7 @@ func hiveBuildTimestampTrunc(args []exp.Expression) exp.Expression {
 	})
 }
 
-// hiveUnabbreviatedUnitName mirrors TimeUnit.UNABBREVIATED_UNIT_NAME (core.py:2023-2036).
-// Its raw-name lookup is intentionally case-sensitive; TimeUnit uppercases only after lookup.
-var hiveUnabbreviatedUnitName = map[string]string{
-	"D":  "DAY",
-	"H":  "HOUR",
-	"M":  "MINUTE",
-	"MS": "MILLISECOND",
-	"NS": "NANOSECOND",
-	"Q":  "QUARTER",
-	"S":  "SECOND",
-	"US": "MICROSECOND",
-	"W":  "WEEK",
-	"Y":  "YEAR",
-}
-
-func hiveTimeUnit(unit exp.Expression) exp.Expression {
-	if unit == nil {
-		return nil
-	}
-
-	var name string
-	switch unit.Kind() {
-	case exp.KindColumn:
-		if len(unit.Parts()) != 1 {
-			return unit
-		}
-		name = unit.Name()
-	case exp.KindLiteral, exp.KindVar:
-		name = unit.Name()
-	default:
-		return unit
-	}
-
-	if expanded := hiveUnabbreviatedUnitName[name]; expanded != "" {
-		name = expanded
-	}
-	return exp.Var(exp.Args{"this": strings.ToUpper(name)})
-}
+func hiveTimeUnit(unit exp.Expression) exp.Expression { return exp.TimeUnitVar(unit) }
 
 func hiveBuildDateFormat(args []exp.Expression) exp.Expression {
 	this := exp.New(exp.KindTimeStrToTime, exp.Args{"this": hiveSeqGet(args, 0)})
@@ -389,17 +359,17 @@ var hiveTimeMapping = map[string]string{
 	"yy":     "%y",
 	"MMMM":   "%B",
 	"MMM":    "%b",
-	"MM":     "%m",
+	"MM":     "%mstrict",
 	"M":      "%-m",
-	"dd":     "%d",
+	"dd":     "%dstrict",
 	"d":      "%-d",
-	"HH":     "%H",
+	"HH":     "%Hstrict",
 	"H":      "%-H",
-	"hh":     "%I",
+	"hh":     "%Istrict",
 	"h":      "%-I",
-	"mm":     "%M",
+	"mm":     "%Mstrict",
 	"m":      "%-M",
-	"ss":     "%S",
+	"ss":     "%Sstrict",
 	"s":      "%-S",
 	"SSSSSS": "%f",
 	"a":      "%p",
@@ -524,6 +494,9 @@ var hiveInverseTimeMapping = func() map[string]string {
 	// Later (longer, canonical) keys win over the single-letter aliases, matching dict order.
 	for _, k := range []string{"y", "Y", "YYYY", "yyyy", "YY", "yy", "MMMM", "MMM", "MM", "M", "dd", "d", "HH", "H", "hh", "h", "mm", "m", "ss", "s", "SSSSSS", "a", "DD", "D", "E", "EE", "EEE", "EEEE", "z", "Z"} {
 		inverse[hiveTimeMapping[k]] = k
+	}
+	for _, format := range []string{"m", "d", "H", "I", "M", "S"} {
+		inverse["%"+format] = inverse["%"+format+"strict"]
 	}
 	return inverse
 }()

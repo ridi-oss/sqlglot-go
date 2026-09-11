@@ -85,6 +85,7 @@ var FunctionByName = map[string]func([]Expression) Expression{
 	"STRUCT_EXTRACT":        genericFunction(KindStructExtract),
 	"STANDARD_HASH":         genericFunction(KindStandardHash),
 	"HEX":                   genericFunction(KindHex),
+	"UNHEX":                 genericFunction(KindUnhex),
 	"MD5":                   genericFunction(KindMD5),
 	"ST_POINT":              genericFunction(KindStPoint),
 	"ST_MAKEPOINT":          genericFunction(KindStPoint),
@@ -191,6 +192,9 @@ var FunctionByName = map[string]func([]Expression) Expression{
 	// parenthesized CURRENT_DATE() / CURRENT_DATE(<zone>) forms build a CurrentDate node too
 	// (currentdate_sql renders CURRENT_DATE without the empty parens an Anonymous call emits).
 	"CURRENT_DATE": genericFunction(KindCurrentDate),
+	"FIRST":        genericFunction(KindFirst),
+	"SHA2":         genericFunction(KindSHA2),
+	"LAST":         genericFunction(KindLast),
 }
 
 // buildMod ports build_mod (parser.py:121-129): MOD(x, y) -> exp.Mod, parenthesizing either

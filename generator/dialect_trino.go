@@ -15,6 +15,27 @@ func init() {
 		exp.KindLocationProperty: func(g *Generator, e exp.Expression) string { return "LOCATION=" + g.sqlKey(e, "this") },
 		exp.KindJSONExtract:      (*Generator).trinoJSONExtractSQL,
 		exp.KindArrayUniqueAgg:   func(g *Generator, e exp.Expression) string { return "ARRAY_AGG(DISTINCT " + g.sqlKey(e, "this") + ")" },
+		exp.KindDeclare: func(g *Generator, e exp.Expression) string {
+			replace := ""
+			if truthy(e.Arg("replace")) {
+				replace = "OR REPLACE "
+			}
+			return "DECLARE " + replace + g.expressions(exprsOptions{expression: e, flat: true})
+		},
+		// generator.py:6078-6090 with Trino's DECLARE_DEFAULT_ASSIGNMENT = "DEFAULT".
+		exp.KindDeclareItem: func(g *Generator, e exp.Expression) string {
+			sql := g.expressions(exprsOptions{expression: e, key: "this", flat: true})
+			if kind := asExpression(e.Arg("kind")); kind != nil {
+				if kind.Kind() == exp.KindSchema {
+					sql += " TABLE"
+				}
+				sql += " " + g.gen(kind)
+			}
+			if dflt := g.sqlKey(e, "default"); dflt != "" {
+				sql += " DEFAULT " + dflt
+			}
+			return sql
+		},
 		exp.KindStabilityProperty: func(_ *Generator, e exp.Expression) string {
 			if e.Name() == "IMMUTABLE" {
 				return "DETERMINISTIC"

@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"strings"
 	"testing"
 
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
@@ -170,11 +171,16 @@ func TestHiveDDLPropertyRegistrationIsIsolated(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			hive := parseOneDialect(t, tc.sql, "hive")
+			// Presto registers STORED (parser.py:1399) and structures it (parsers/presto.py overlay).
+			prestoStructures := strings.HasPrefix(tc.name, "stored")
 			if hive.Kind() != exp.KindCreate {
 				t.Fatalf("Hive DDL kind = %v, want Create (never Command):\n%s", hive.Kind(), hive.ToS())
 			}
 
 			for _, dialect := range dialects {
+				if prestoStructures && dialect.dialect == "presto" {
+					continue
+				}
 				t.Run(dialect.name, func(t *testing.T) {
 					command := parseOneDialect(t, tc.sql, dialect.dialect)
 					if command.Kind() != exp.KindCommand {

@@ -1,33 +1,3 @@
-{"dialect":"hive","category":"parse: Expecting )","sql":"SELECT ROW() OVER (DISTRIBUTE BY x SORT BY y)"}
-{"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"INSERT OVERWRITE DIRECTORY 'x' ROW FORMAT DELIMITED FIELDS TERMINATED BY '\u0001' COLLECTION ITEMS TERMINATED BY ',' MAP KEYS TERMINATED BY ':' LINES TERMINATED BY '' STORED AS TEXTFILE SELECT * FROM `a`.`b`"}
-{"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM my_table TIMESTAMP AS OF DATE_ADD(CURRENT_DATE, -1)"}
-{"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM my_table VERSION AS OF DATE_ADD(CURRENT_DATE, -1)"}
-{"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM x TABLESAMPLE (1 PERCENT) AS foo"}
-{"dialect":"hive","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM x.z TABLESAMPLE(10 PERCENT) y"}
-{"dialect":"hive","category":"parse: Required keyword","sql":"SELECT ${hiveconf:some_var}"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"DATE_FORMAT(x, '%Y-%m-%d %H:%i:%S')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"DATE_PARSE(x, '%Y-%m-%d %H:%i:%S')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"JSON '\"foo\"'"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"JSON_FORMAT(JSON '\"x\"')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"REGEXP_REPLACE('abcd', '[ab]')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'dd')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'hh')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'hh24')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'mi')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'mm')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'ss')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'yy')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"TO_CHAR(ts, 'yyyy')"}
-{"dialect":"presto","category":"gen: canonicalization","sql":"UNHEX(x)"}
-{"dialect":"presto","category":"gen: cast/type","sql":"SELECT CAST(JSON '[1,23,456]' AS ARRAY(INTEGER))"}
-{"dialect":"presto","category":"gen: cast/type","sql":"SELECT CAST(JSON '{\"k1\":1,\"k2\":23,\"k3\":456}' AS MAP(VARCHAR, INTEGER))"}
-{"dialect":"presto","category":"gen: ddl/properties","sql":"CREATE TABLE test STORED AS 'PARQUET' AS SELECT 1"}
-{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT\n  *\nFROM orders\nMATCH_RECOGNIZE (\n  PARTITION BY custkey\n  ORDER BY\n    orderdate\n  MEASURES\n    A.totalprice AS starting_price,\n    LAST(B.totalprice) AS bottom_price,\n    LAST(C.totalprice) AS top_price\n  ONE ROW PER MATCH\n  AFTER MATCH SKIP PAST LAST ROW\n  PATTERN (A B+ C+ D+)\n  DEFINE\n    B AS totalprice < PREV(totalprice),\n    C AS totalprice > PREV(totalprice) AND totalprice <= A.totalprice,\n    D AS totalprice > PREV(totalprice),\n    E AS MAX(foo) >= NEXT(bar)\n)"}
-{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM example.testdb.customer_orders FOR TIMESTAMP AS OF CAST('2022-03-23 09:59:29.803 Europe/Vienna' AS TIMESTAMP)"}
-{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM example.testdb.customer_orders FOR VERSION AS OF 8954597067493422955"}
-{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM foo FOR TIMESTAMP AS OF CAST('2020-01-01 00:00:00' AS TIMESTAMP) AS bar"}
-{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"U&'Hello winter #2603 !' UESCAPE '#'"}
-{"dialect":"presto","category":"parse: Invalid expression / Unexpected token","sql":"u&'Hello winter #2603 !' UESCAPE '#'"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION count_evens(n BIGINT) RETURNS BIGINT BEGIN DECLARE total BIGINT DEFAULT 0; DECLARE i BIGINT DEFAULT 0; WHILE i < n DO SET total = total + 1; IF i = 0 THEN SET total = total + 1; END IF; SET i = i + 1; END WHILE; RETURN total; END SELECT COUNT_EVENS(3)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION custom_sqrt(a INTEGER) RETURNS DOUBLE COMMENT 'Custom sqrt function' RETURNS NULL ON NULL INPUT NOT DETERMINISTIC LANGUAGE SQL SECURITY DEFINER WITH (weight=42, cost='low') RETURN a SELECT CUSTOM_SQRT(4)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION declare() RETURNS INTEGER RETURN 1 SELECT DECLARE()"}
@@ -76,4 +46,3 @@
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION test_repeat(a BIGINT) RETURNS BIGINT BEGIN REPEAT SET a = a + 1; UNTIL a >= 10 END REPEAT; RETURN a; END SELECT TEST_REPEAT(5)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION to_one_hundred(start_value BIGINT, step BIGINT) RETURNS BIGINT BEGIN DECLARE count BIGINT DEFAULT 0; DECLARE current BIGINT DEFAULT 0; SET current = start_value; abc: LOOP IF current >= 100 THEN LEAVE abc; END IF; SET count = count + 1; SET current = current + step; END LOOP; RETURN count; END SELECT TO_ONE_HUNDRED(0, 10)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION while_case(n BIGINT) RETURNS BIGINT BEGIN DECLARE i BIGINT DEFAULT 0; WHILE i < n DO CASE WHEN i = 0 THEN SET i = 1; ELSE SET i = i + 1; END CASE; END WHILE; RETURN i; END SELECT WHILE_CASE(3)"}
-{"dialect":"trino","category":"parse: Invalid expression / Unexpected token","sql":"SELECT * FROM tbl MATCH_RECOGNIZE (PARTITION BY id ORDER BY col MEASURES FIRST(col, 2) AS col1, LAST(col, 2) AS col2 PATTERN (B* A) DEFINE A AS col = 1)"}

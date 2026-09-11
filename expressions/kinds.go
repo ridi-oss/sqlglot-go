@@ -623,6 +623,7 @@ const (
 	KindLevenshtein      // string.py:74
 	KindMD5Digest        // string.py:540
 	KindSHA2             // string.py:562
+	KindSHA2Digest       // string.py:582-583
 	KindStrToMap         // string.py:203
 	KindTimeToUnix       // temporal.py:484
 	KindUnixToTime       // temporal.py:532
@@ -633,6 +634,15 @@ const (
 	// Condition (NOT a Func) - it has no functionFallbackSQL path, so the generator
 	// supplies a dedicated dispatch method (mirrors KindNational's `N'...'`).
 	KindUnicodeString // query.py:494
+	// KindVersion is exp.Version (query.py:1111-1123): a table's time-travel clause,
+	// `FOR TIMESTAMP|VERSION AS OF x` and friends. A plain Expression, no Func mixin.
+	KindVersion // query.py:1111
+	// MatchRecognize / MatchRecognizeMeasure (query.py:817-835): the MATCH_RECOGNIZE query
+	// modifier and its MEASURES items. Plain Expressions.
+	KindMatchRecognize        // query.py:824
+	KindMatchRecognizeMeasure // query.py:817
+	KindRegexpReplace         // string.py:468
+	KindParseJSON             // json.py:239
 	// trino cluster: minimal AST surface required by the Trino/Athena parser and
 	// generator deltas. These mirror functions.py:249-250,317-318,
 	// query.py:1961-1962,2062-2066, core.py:1596-1597, and array.py:146-147.
@@ -663,6 +673,7 @@ const (
 	KindRegexpExtract          // string.py:421-430
 	KindRegexpExtractAll       // string.py:433-441
 	KindTimestampTrunc         // temporal.py:190-191
+	KindDateTrunc              // temporal.py:165-166
 	KindUnixToStr              // temporal.py:528-529
 	KindTimeToStr              // temporal.py:476-477
 	KindStarMap                // array.py:331-332
@@ -1244,28 +1255,34 @@ var argTypes = map[Kind][]argSpec{
 	KindInOutColumnConstraint:        {{"input_", false}, {"output", false}, {"variadic", false}},
 	// presto cluster: arg_types mirrored 1:1 from the upstream classes (dict order drives
 	// FromArgList positional mapping). See expressions/presto_nodes.go for per-Kind citations.
-	KindAnyValue:         defaultArgTypes,                                                                                                                      // aggregate.py:17 (pass -> {"this": True})
-	KindApproxQuantile:   {{"this", true}, {"quantile", true}, {"accuracy", false}, {"weight", false}, {"error_tolerance", false}},                             // aggregate.py:234
-	KindArrayUniqueAgg:   defaultArgTypes,                                                                                                                      // aggregate.py:83 (pass)
-	KindDayOfWeekIso:     defaultArgTypes,                                                                                                                      // temporal.py:217 (pass)
-	KindDecode:           {{"this", true}, {"charset", true}, {"replace", false}},                                                                              // string.py:285
-	KindEncode:           {{"this", true}, {"charset", true}},                                                                                                  // string.py:289
-	KindJSONFormat:       {{"this", false}, {"options", false}, {"is_json", false}, {"to_json", false}},                                                        // json.py:145
-	KindLevenshtein:      {{"this", true}, {"expression", false}, {"ins_cost", false}, {"del_cost", false}, {"sub_cost", false}, {"max_dist", false}},          // string.py:74
-	KindMD5Digest:        {{"this", true}, {"expressions", false}},                                                                                             // string.py:540 (is_var_len_args)
-	KindSHA2:             {{"this", true}, {"length", false}},                                                                                                  // string.py:562
-	KindStrToMap:         {{"this", true}, {"pair_delim", false}, {"key_value_delim", false}, {"duplicate_resolution_callback", false}},                        // string.py:203
-	KindTimeToUnix:       defaultArgTypes,                                                                                                                      // temporal.py:484 (pass)
-	KindUnixToTime:       {{"this", true}, {"scale", false}, {"zone", false}, {"hours", false}, {"minutes", false}, {"format", false}, {"target_type", false}}, // temporal.py:532
-	KindUnhex:            {{"this", true}, {"expression", false}},                                                                                              // string.py:405
-	KindArraySlice:       {{"this", true}, {"start", true}, {"end", false}, {"step", false}, {"zero_based", false}},                                            // array.py:85
-	KindCurrentTimestamp: {{"this", false}, {"sysdate", false}},                                                                                                // temporal.py:37
-	KindCurrentUser:      {{"this", false}},                                                                                                                    // functions.py:309
-	KindCurrentRole:      {},                                                                                                                                   // functions.py:277 (empty arg_types)
-	KindSessionUser:      {},                                                                                                                                   // functions.py:325 (empty arg_types)
-	KindLocaltime:        {{"this", false}},                                                                                                                    // temporal.py:49
-	KindLocaltimestamp:   {{"this", false}},                                                                                                                    // temporal.py:53
-	KindUnicodeString:    {{"this", true}, {"escape", false}},                                                                                                  // query.py:494
+	KindAnyValue:              defaultArgTypes,                                                                                                             // aggregate.py:17 (pass -> {"this": True})
+	KindApproxQuantile:        {{"this", true}, {"quantile", true}, {"accuracy", false}, {"weight", false}, {"error_tolerance", false}},                    // aggregate.py:234
+	KindArrayUniqueAgg:        defaultArgTypes,                                                                                                             // aggregate.py:83 (pass)
+	KindDayOfWeekIso:          defaultArgTypes,                                                                                                             // temporal.py:217 (pass)
+	KindDecode:                {{"this", true}, {"charset", true}, {"replace", false}},                                                                     // string.py:285
+	KindEncode:                {{"this", true}, {"charset", true}},                                                                                         // string.py:289
+	KindJSONFormat:            {{"this", false}, {"options", false}, {"is_json", false}, {"to_json", false}},                                               // json.py:145
+	KindLevenshtein:           {{"this", true}, {"expression", false}, {"ins_cost", false}, {"del_cost", false}, {"sub_cost", false}, {"max_dist", false}}, // string.py:74
+	KindMD5Digest:             {{"this", true}, {"expressions", false}},                                                                                    // string.py:540 (is_var_len_args)
+	KindSHA2:                  {{"this", true}, {"length", false}},                                                                                         // string.py:562
+	KindSHA2Digest:            {{"this", true}, {"length", false}},
+	KindStrToMap:              {{"this", true}, {"pair_delim", false}, {"key_value_delim", false}, {"duplicate_resolution_callback", false}},                        // string.py:203
+	KindTimeToUnix:            defaultArgTypes,                                                                                                                      // temporal.py:484 (pass)
+	KindUnixToTime:            {{"this", true}, {"scale", false}, {"zone", false}, {"hours", false}, {"minutes", false}, {"format", false}, {"target_type", false}}, // temporal.py:532
+	KindUnhex:                 {{"this", true}, {"expression", false}},                                                                                              // string.py:405
+	KindArraySlice:            {{"this", true}, {"start", true}, {"end", false}, {"step", false}, {"zero_based", false}},                                            // array.py:85
+	KindCurrentTimestamp:      {{"this", false}, {"sysdate", false}},                                                                                                // temporal.py:37
+	KindCurrentUser:           {{"this", false}},                                                                                                                    // functions.py:309
+	KindCurrentRole:           {},                                                                                                                                   // functions.py:277 (empty arg_types)
+	KindSessionUser:           {},                                                                                                                                   // functions.py:325 (empty arg_types)
+	KindLocaltime:             {{"this", false}},                                                                                                                    // temporal.py:49
+	KindLocaltimestamp:        {{"this", false}},                                                                                                                    // temporal.py:53
+	KindUnicodeString:         {{"this", true}, {"escape", false}},
+	KindVersion:               {{"this", true}, {"kind", true}, {"expression", false}},
+	KindMatchRecognize:        {{"partition_by", false}, {"order", false}, {"measures", false}, {"rows", false}, {"after", false}, {"pattern", false}, {"define", false}, {"alias", false}},
+	KindMatchRecognizeMeasure: {{"this", true}, {"window_frame", false}},
+	KindRegexpReplace:         {{"this", true}, {"expression", true}, {"replacement", false}, {"position", false}, {"occurrence", false}, {"modifiers", false}, {"single_replace", false}},
+	KindParseJSON:             {{"this", true}, {"expression", false}, {"safe", false}},
 	// trino cluster: arg_types mirror the pinned declarations exactly. In particular,
 	// CurrentCatalog and CurrentVersion have genuinely empty arg maps, not optional `this`.
 	KindCurrentCatalog:           {},                                      // functions.py:249-250
@@ -1295,6 +1312,7 @@ var argTypes = map[Kind][]argSpec{
 	KindRegexpExtract:          {{"this", true}, {"expression", true}, {"position", false}, {"occurrence", false}, {"parameters", false}, {"group", false}, {"null_if_pos_overflow", false}},
 	KindRegexpExtractAll:       {{"this", true}, {"expression", true}, {"group", false}, {"parameters", false}, {"position", false}, {"occurrence", false}},
 	KindTimestampTrunc:         {{"this", true}, {"unit", true}, {"zone", false}, {"input_type_preserved", false}},
+	KindDateTrunc:              {{"unit", true}, {"this", true}, {"zone", false}, {"input_type_preserved", false}},
 	KindUnixToStr:              {{"this", true}, {"format", false}},
 	KindTimeToStr:              {{"this", true}, {"format", true}, {"culture", false}, {"zone", false}},
 	KindStarMap:                defaultArgTypes,
@@ -1542,10 +1560,13 @@ var traitsOf = map[Kind]Trait{
 	KindLevenshtein:      TraitCondition | TraitFunc,
 	KindMD5Digest:        TraitCondition | TraitFunc,
 	KindSHA2:             TraitCondition | TraitFunc,
+	KindSHA2Digest:       TraitCondition | TraitFunc,
 	KindStrToMap:         TraitCondition | TraitFunc,
 	KindTimeToUnix:       TraitCondition | TraitFunc,
 	KindUnixToTime:       TraitCondition | TraitFunc,
 	KindUnhex:            TraitCondition | TraitFunc,
+	KindRegexpReplace:    TraitCondition | TraitFunc,
+	KindParseJSON:        TraitCondition | TraitFunc,
 	KindArraySlice:       TraitCondition | TraitFunc,
 	KindCurrentTimestamp: TraitCondition | TraitFunc,
 	KindCurrentUser:      TraitCondition | TraitFunc,
@@ -1573,6 +1594,7 @@ var traitsOf = map[Kind]Trait{
 	KindRegexpExtract:    TraitCondition | TraitFunc,
 	KindRegexpExtractAll: TraitCondition | TraitFunc,
 	KindTimestampTrunc:   TraitCondition | TraitFunc,
+	KindDateTrunc:        TraitCondition | TraitFunc,
 	KindUnixToStr:        TraitCondition | TraitFunc,
 	KindTimeToStr:        TraitCondition | TraitFunc,
 	KindStarMap:          TraitCondition | TraitFunc,
@@ -2000,28 +2022,34 @@ var className = map[Kind]string{
 	KindWithOperator:                        "WithOperator",
 	KindInOutColumnConstraint:               "InOutColumnConstraint",
 	// presto cluster: class names match the upstream Presto FUNCTIONS canonical class.
-	KindAnyValue:         "AnyValue",
-	KindApproxQuantile:   "ApproxQuantile",
-	KindArrayUniqueAgg:   "ArrayUniqueAgg",
-	KindDayOfWeekIso:     "DayOfWeekIso",
-	KindDecode:           "Decode",
-	KindEncode:           "Encode",
-	KindJSONFormat:       "JSONFormat",
-	KindLevenshtein:      "Levenshtein",
-	KindMD5Digest:        "MD5Digest",
-	KindSHA2:             "SHA2",
-	KindStrToMap:         "StrToMap",
-	KindTimeToUnix:       "TimeToUnix",
-	KindUnixToTime:       "UnixToTime",
-	KindUnhex:            "Unhex",
-	KindArraySlice:       "ArraySlice",
-	KindCurrentTimestamp: "CurrentTimestamp",
-	KindCurrentUser:      "CurrentUser",
-	KindCurrentRole:      "CurrentRole",
-	KindSessionUser:      "SessionUser",
-	KindLocaltime:        "Localtime",
-	KindLocaltimestamp:   "Localtimestamp",
-	KindUnicodeString:    "UnicodeString",
+	KindAnyValue:              "AnyValue",
+	KindApproxQuantile:        "ApproxQuantile",
+	KindArrayUniqueAgg:        "ArrayUniqueAgg",
+	KindDayOfWeekIso:          "DayOfWeekIso",
+	KindDecode:                "Decode",
+	KindEncode:                "Encode",
+	KindJSONFormat:            "JSONFormat",
+	KindLevenshtein:           "Levenshtein",
+	KindMD5Digest:             "MD5Digest",
+	KindSHA2:                  "SHA2",
+	KindSHA2Digest:            "SHA2Digest",
+	KindStrToMap:              "StrToMap",
+	KindTimeToUnix:            "TimeToUnix",
+	KindUnixToTime:            "UnixToTime",
+	KindUnhex:                 "Unhex",
+	KindArraySlice:            "ArraySlice",
+	KindCurrentTimestamp:      "CurrentTimestamp",
+	KindCurrentUser:           "CurrentUser",
+	KindCurrentRole:           "CurrentRole",
+	KindSessionUser:           "SessionUser",
+	KindLocaltime:             "Localtime",
+	KindLocaltimestamp:        "Localtimestamp",
+	KindUnicodeString:         "UnicodeString",
+	KindVersion:               "Version",
+	KindMatchRecognize:        "MatchRecognize",
+	KindMatchRecognizeMeasure: "MatchRecognizeMeasure",
+	KindRegexpReplace:         "RegexpReplace",
+	KindParseJSON:             "ParseJSON",
 	// trino cluster: exact upstream PascalCase class names.
 	KindCurrentCatalog:           "CurrentCatalog",
 	KindCurrentVersion:           "CurrentVersion",
@@ -2049,6 +2077,7 @@ var className = map[Kind]string{
 	KindRegexpExtract:          "RegexpExtract",
 	KindRegexpExtractAll:       "RegexpExtractAll",
 	KindTimestampTrunc:         "TimestampTrunc",
+	KindDateTrunc:              "DateTrunc",
 	KindUnixToStr:              "UnixToStr",
 	KindTimeToStr:              "TimeToStr",
 	KindStarMap:                "StarMap",

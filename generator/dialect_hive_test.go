@@ -3,6 +3,7 @@ package generator_test
 import (
 	sqlglot "github.com/ridi-oss/sqlglot-go"
 	"github.com/ridi-oss/sqlglot-go/dialects"
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/generator"
 	"testing"
 )
@@ -158,6 +159,62 @@ func TestHiveCastRegexpIgnoreNullsStrToDate(t *testing.T) {
 		got, err := sqlglot.Generate(e, "hive", generator.Options{})
 		if err != nil || got != tc.want {
 			t.Errorf("%s: got %q (%v), want %q", tc.sql, got, err, tc.want)
+		}
+	}
+}
+
+func TestHiveStrictTimeFormats(t *testing.T) {
+	cases := []struct {
+		kind         exp.Kind
+		format, want string
+	}{
+		{exp.KindStrToUnix, "%Y-%m-%d %H:%M:%S", "UNIX_TIMESTAMP(x, 'yyyy-M-d H:m:s')"},
+		{exp.KindStrToUnix, "%Y%m%d", "UNIX_TIMESTAMP(x, 'yyyyMMdd')"},
+		{exp.KindStrToUnix, "%m1/%d", "UNIX_TIMESTAMP(x, 'MM1/d')"},
+		{exp.KindStrToUnix, "%mstrict/%dstrict", "UNIX_TIMESTAMP(x, 'MM/dd')"},
+		{exp.KindStrToUnix, "%%m/%d", "UNIX_TIMESTAMP(x, '%MM/d')"},
+		{exp.KindStrToTime, "%Y-%m-%d %H:%M:%S", "CAST(x AS TIMESTAMP)"},
+		{exp.KindStrToDate, "%Y-%m-%d", "CAST(x AS DATE)"},
+		{exp.KindTsOrDsToDate, "%Y-%m-%d", "TO_DATE(x)"},
+		{exp.KindStrToDate, "%Y-%-m-%-d", "CAST(FROM_UNIXTIME(UNIX_TIMESTAMP(x, 'yyyy-M-d')) AS DATE)"},
+		{exp.KindUnixToStr, "%Y-%m-%d %H:%M:%S", "FROM_UNIXTIME(x)"},
+		{exp.KindTimeToStr, "%m/%d", "DATE_FORMAT(x, 'MM/dd')"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			e := exp.New(tc.kind, exp.Args{"this": exp.Column_("x", nil, nil, nil, nil), "format": exp.LiteralString(tc.format)})
+			before := e.ToS()
+			got, err := sqlglot.Generate(e, "hive", generator.Options{})
+			if err != nil || got != tc.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			}
+			if e.ToS() != before {
+				t.Fatal("generation mutated the AST")
+			}
+		})
+	}
+}
+
+func TestHiveParameterGenerator(t *testing.T) {
+	for _, qualified := range []bool{false, true} {
+		for _, assignment := range []bool{false, true} {
+			parameter := exp.Parameter(exp.Args{"this": exp.Var(exp.Args{"this": "hiveconf"})})
+			want := "hiveconf"
+			if qualified {
+				parameter.Set("expression", exp.Var(exp.Args{"this": "some_var"}))
+				want += ":some_var"
+			}
+			e := parameter
+			if assignment {
+				e = exp.Set(exp.Args{"expressions": []exp.Expression{exp.SetItem(exp.Args{"this": exp.EQ(exp.Args{"this": parameter, "expression": exp.LiteralNumber("1")})})}})
+				want = "SET " + want + " = 1"
+			} else {
+				want = "${" + want + "}"
+			}
+			got, err := sqlglot.Generate(e, "hive", generator.Options{})
+			if err != nil || got != want {
+				t.Fatalf("got %q, %v; want %q", got, err, want)
+			}
 		}
 	}
 }

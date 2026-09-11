@@ -1364,6 +1364,16 @@ func (p *Parser) parseTable(schema bool, joins bool, aliasTokens map[tokens.Toke
 	// USE as the start of an index hint rather than t1's alias; base/Postgres keep them
 	// alias-eligible (matching upstream, where an unqualified `USE INDEX (...)` after a
 	// table is a MySQL-only construct).
+	if p.dialect.AliasPostVersion {
+		if v := p.parseVersion(); v != nil {
+			this.Set("version", v)
+		}
+	}
+	if p.dialect.AliasPostTablesample {
+		if s := p.parseTableSample(false); s != nil {
+			this.Set("sample", s)
+		}
+	}
 	mysqlIndexHint := p.dialect.Name == "mysql" && tableIndexHintTokens[p.curr.TokenType]
 	if p.curr.TokenType == tokens.ALIAS || (!mysqlIndexHint && !joinKinds[p.curr.TokenType] && !joinMethods[p.curr.TokenType] && !joinSides[p.curr.TokenType]) {
 		if alias := p.parseTableAlias(aliasTokens); alias != nil {
@@ -1384,6 +1394,11 @@ func (p *Parser) parseTable(schema bool, joins bool, aliasTokens map[tokens.Toke
 	if !p.dialect.AliasPostTablesample {
 		if s := p.parseTableSample(false); s != nil {
 			this.Set("sample", s)
+		}
+	}
+	if !p.dialect.AliasPostVersion {
+		if v := p.parseVersion(); v != nil {
+			this.Set("version", v)
 		}
 	}
 	if joins {
@@ -1462,6 +1477,53 @@ func (p *Parser) parseTablePart(schema bool) exp.Expression {
 	return p.parsePlaceholder()
 }
 
+// versionPhrases ports VERSION_PHRASES (parser.py:1738-1745); each phrase maps to Version.this.
+var versionPhrases = []struct {
+	phrase []string
+	this   string
+}{
+	{[]string{"FOR", "SYSTEM_TIME"}, "TIMESTAMP"},
+	{[]string{"FOR", "SYSTEM", "TIME"}, "TIMESTAMP"},
+	{[]string{"FOR", "TIMESTAMP"}, "TIMESTAMP"},
+	{[]string{"FOR", "VERSION"}, "VERSION"},
+	{[]string{"TIMESTAMP", "AS", "OF"}, "TIMESTAMP"},
+	{[]string{"VERSION", "AS", "OF"}, "VERSION"},
+}
+
+// parseVersion ports _parse_version (parser.py:5120-5146).
+func (p *Parser) parseVersion() exp.Expression {
+	this := ""
+	for _, candidate := range versionPhrases {
+		if p.matchTextSeq(candidate.phrase...) {
+			this = candidate.this
+			break
+		}
+	}
+	if this == "" {
+		return nil
+	}
+	var kind string
+	var expression exp.Expression
+	switch {
+	case p.matchSet(map[tokens.TokenType]bool{tokens.FROM: true, tokens.BETWEEN: true}):
+		kind = stringsUpper(p.prev.Text)
+		start := p.parseBitwise()
+		p.matchTexts(map[string]bool{"TO": true, "AND": true})
+		end := p.parseBitwise()
+		expression = p.expression(exp.Tuple(exp.Args{"expressions": []exp.Expression{start, end}}), nil, nil)
+	case p.matchTextSeq("CONTAINED", "IN"):
+		kind = "CONTAINED IN"
+		expression = p.expression(exp.Tuple(exp.Args{"expressions": p.parseWrappedCsv(p.parseBitwise)}), nil, nil)
+	case p.match(tokens.ALL):
+		kind = "ALL"
+	default:
+		p.matchTextSeq("AS", "OF")
+		kind = "AS OF"
+		expression = p.parseType(true, false)
+	}
+	return p.expression(exp.Version(exp.Args{"this": this, "kind": kind, "expression": expression}), nil, nil)
+}
+
 func (p *Parser) parseTableAlias(aliasTokensArg map[tokens.TokenType]bool) exp.Expression {
 	if p.canParseLimitOrOffset() {
 		return nil
@@ -1482,7 +1544,7 @@ func (p *Parser) parseTableAlias(aliasTokensArg map[tokens.TokenType]bool) exp.E
 	}
 	toks := aliasTokensArg
 	if toks == nil {
-		toks = tableAliasTokens
+		toks = p.tableAliasTokensFor()
 	}
 	alias := p.parseIdVar(anyToken, toks)
 	if alias == nil && p.dialect.StringTableIdentifiers {
@@ -2310,9 +2372,11 @@ func (p *Parser) parseType(parseInterval, fallbackToIdentifier bool) exp.Express
 			literal := this.Name()
 			this = p.parseColumnOps(this)
 
-			// TYPE_LITERAL_PARSERS (parser.py:1562-1564) maps only DType.JSON -> ParseJSON in
-			// the base parser; ParseJSON isn't modeled by this port yet (out of this parity
-			// slice's scope). ZONE_AWARE_TIMESTAMP_CONSTRUCTOR (parser.py:6186-6191) promotes
+			// TYPE_LITERAL_PARSERS (parser.py:1633-1635): `JSON '<literal>'` -> ParseJSON.
+			if exp.DataTypeIsType(dataType, false, exp.DTypeJSON) {
+				return p.expression(exp.ParseJSON(exp.Args{"this": this}), nil, nil)
+			}
+			// ZONE_AWARE_TIMESTAMP_CONSTRUCTOR (parser.py:6186-6191) promotes
 			// `TIMESTAMP '<zoned literal>'` -> TIMESTAMPTZ, gated on the Presto-only dialect
 			// flag; base/mysql/postgres leave it false, so this branch is a no-op for them.
 			if p.dialect.ZoneAwareTimestampConstructor && exp.DataTypeIsType(dataType, false, exp.DTypeTimestamp) && timeZoneRE.MatchString(literal) {
@@ -2374,7 +2438,11 @@ func init() {
 		return p.expression(exp.National(exp.Args{"this": token.Text}), &token, nil)
 	}
 	primaryParsers[tokens.UNICODE_STRING] = func(p *Parser, token tokens.Token) exp.Expression {
-		return p.expression(exp.UnicodeString(exp.Args{"this": token.Text}), &token, nil)
+		var escape exp.Expression
+		if p.matchTextSeq("UESCAPE") {
+			escape = p.parseString()
+		}
+		return p.expression(exp.UnicodeString(exp.Args{"this": token.Text, "escape": escape}), &token, nil)
 	}
 	primaryParsers[tokens.NUMBER] = func(p *Parser, token tokens.Token) exp.Expression {
 		return p.expression(exp.LiteralNumber(token.Text), &token, nil)
@@ -3121,6 +3189,23 @@ func (p *Parser) parseQueryParameter() exp.Expression {
 // parseParameter ports _parse_parameter (parser.py:8586-8588): the leading `@` is already
 // consumed; the following identifier/var becomes the parameter's `this` (mysql `@var1`).
 func (p *Parser) parseParameter() exp.Expression {
+	if p.dialect.Name == "hive" {
+		// parsers/hive.py:264-271: `${this[:expression]}`.
+		p.match(tokens.L_BRACE)
+		this := p.parseIdentifier()
+		if this == nil {
+			this = p.parsePrimaryOrVar()
+		}
+		var expression exp.Expression
+		if p.match(tokens.COLON) {
+			expression = p.parseIdentifier()
+			if expression == nil {
+				expression = p.parsePrimaryOrVar()
+			}
+		}
+		p.match(tokens.R_BRACE)
+		return p.expression(exp.Parameter(exp.Args{"this": this, "expression": expression}), nil, nil)
+	}
 	this := p.parseIdentifier()
 	if this == nil {
 		this = p.parsePrimaryOrVar()
@@ -3388,9 +3473,19 @@ func (p *Parser) parseSubquery(this exp.Expression, parseAlias bool) exp.Express
 	return p.expression(exp.Subquery(args), nil, nil)
 }
 
+// parseFunction ports _parse_function (parser.py:7147-7175), including the ODBC `{fn ...}`
+// wrapper.
 func (p *Parser) parseFunction(functions map[string]func([]exp.Expression) exp.Expression, anonymous bool, optionalParens bool, anyToken bool) exp.Expression {
-	// TODO(1d): parse ODBC {fn ...} wrapper syntax.
-	return p.parseFunctionCall(functions, anonymous, optionalParens, anyToken)
+	fnSyntax := false
+	if p.curr.TokenType == tokens.L_BRACE && p.next.IsValid() && stringsUpper(p.next.Text) == "FN" {
+		p.advance(2)
+		fnSyntax = true
+	}
+	fn := p.parseFunctionCall(functions, anonymous, optionalParens, anyToken)
+	if fnSyntax {
+		p.match(tokens.R_BRACE)
+	}
+	return fn
 }
 
 func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) exp.Expression, anonymous bool, optionalParens bool, anyToken bool) exp.Expression {
@@ -3976,7 +4071,122 @@ func (p *Parser) parseRespectOrIgnoreNulls(this exp.Expression) exp.Expression {
 }
 
 func (p *Parser) parsePartitionAndOrder() ([]exp.Expression, exp.Expression) {
+	if p.dialect.Name == "hive" {
+		// parsers/hive.py:252-262: DISTRIBUTE BY / SORT BY are window-spec synonyms.
+		partition := []exp.Expression{}
+		if p.matchSet(map[tokens.TokenType]bool{tokens.PARTITION_BY: true, tokens.DISTRIBUTE_BY: true}) {
+			partition = p.parseCsv(p.parseAssignment)
+		}
+		return partition, p.parseOrder(nil, p.match(tokens.SORT_BY))
+	}
 	return p.parsePartitionBy(), p.parseOrder(nil, false)
+}
+
+// parseMatchRecognizeMeasure ports _parse_match_recognize_measure (parser.py:4456-4462).
+func (p *Parser) parseMatchRecognizeMeasure() exp.Expression {
+	var windowFrame any = false
+	if p.matchTexts(map[string]bool{"FINAL": true, "RUNNING": true}) {
+		windowFrame = stringsUpper(p.prev.Text)
+	}
+	return p.expression(exp.MatchRecognizeMeasure(exp.Args{"window_frame": windowFrame, "this": p.parseExpression()}), nil, nil)
+}
+
+// parseMatchRecognize ports _parse_match_recognize (parser.py:4464-4557).
+func (p *Parser) parseMatchRecognize() exp.Expression {
+	if !p.match(tokens.MATCH_RECOGNIZE) {
+		return nil
+	}
+	p.matchLParen(nil)
+	partition := p.parsePartitionBy()
+	order := p.parseOrder(nil, false)
+	var measures []exp.Expression
+	if p.matchTextSeq("MEASURES") {
+		measures = p.parseCsv(p.parseMatchRecognizeMeasure)
+	}
+	var rows exp.Expression
+	if p.matchTextSeq("ONE", "ROW", "PER", "MATCH") {
+		rows = exp.Var(exp.Args{"this": "ONE ROW PER MATCH"})
+	} else if p.matchTextSeq("ALL", "ROWS", "PER", "MATCH") {
+		text := "ALL ROWS PER MATCH"
+		switch {
+		case p.matchTextSeq("SHOW", "EMPTY", "MATCHES"):
+			text += " SHOW EMPTY MATCHES"
+		case p.matchTextSeq("OMIT", "EMPTY", "MATCHES"):
+			text += " OMIT EMPTY MATCHES"
+		case p.matchTextSeq("WITH", "UNMATCHED", "ROWS"):
+			text += " WITH UNMATCHED ROWS"
+		}
+		rows = exp.Var(exp.Args{"this": text})
+	}
+	var after exp.Expression
+	if p.matchTextSeq("AFTER", "MATCH", "SKIP") {
+		text := "AFTER MATCH SKIP"
+		switch {
+		case p.matchTextSeq("PAST", "LAST", "ROW"):
+			text += " PAST LAST ROW"
+		case p.matchTextSeq("TO", "NEXT", "ROW"):
+			text += " TO NEXT ROW"
+		case p.matchTextSeq("TO", "FIRST"), p.matchTextSeq("TO", "LAST"):
+			direction := stringsUpper(p.prev.Text)
+			patternVar := p.advanceAny(false)
+			if patternVar == nil {
+				p.raiseError("Expecting pattern variable after AFTER MATCH SKIP TO " + direction)
+			}
+			text += " TO " + direction
+			if patternVar != nil {
+				text += " " + patternVar.Text
+			}
+		}
+		after = exp.Var(exp.Args{"this": text})
+	}
+	var pattern exp.Expression
+	if p.matchTextSeq("PATTERN") {
+		p.matchLParen(nil)
+		if !p.curr.IsValid() {
+			p.raiseError("Expecting )")
+		}
+		paren := 1
+		start := p.curr
+		end := p.prev
+		for p.curr.IsValid() && paren > 0 {
+			if p.curr.TokenType == tokens.L_PAREN {
+				paren++
+			}
+			if p.curr.TokenType == tokens.R_PAREN {
+				paren--
+			}
+			end = p.prev
+			p.advance()
+		}
+		if paren > 0 {
+			p.raiseError("Expecting )")
+		}
+		pattern = exp.Var(exp.Args{"this": p.findSQL(start, end)})
+	}
+	var define []exp.Expression
+	if p.matchTextSeq("DEFINE") {
+		define = p.parseCsv(p.parseNameAsExpression)
+	}
+	p.matchRParen(nil)
+	return p.expression(exp.MatchRecognize(exp.Args{
+		"partition_by": partition,
+		"order":        order,
+		"measures":     measures,
+		"rows":         rows,
+		"after":        after,
+		"pattern":      pattern,
+		"define":       define,
+		"alias":        p.parseTableAlias(nil),
+	}), nil, nil)
+}
+
+// parseNameAsExpression ports _parse_name_as_expression (parser.py:5641-5645).
+func (p *Parser) parseNameAsExpression() exp.Expression {
+	this := p.parseIdVar(true, nil)
+	if p.match(tokens.ALIAS) {
+		this = p.expression(exp.AliasNode(exp.Args{"alias": this, "this": p.parseDisjunction()}), nil, nil)
+	}
+	return this
 }
 
 func (p *Parser) parsePartitionBy() []exp.Expression {
@@ -4120,10 +4330,13 @@ func init() {
 		},
 	}
 	queryModifierParsers = map[tokens.TokenType]func(*Parser) (string, any){
-		tokens.WHERE:    func(p *Parser) (string, any) { return "where", p.parseWhere(false) },
-		tokens.GROUP_BY: func(p *Parser) (string, any) { return "group", p.parseGroup(false) },
-		tokens.HAVING:   func(p *Parser) (string, any) { return "having", p.parseHaving(false) },
-		tokens.QUALIFY:  func(p *Parser) (string, any) { return "qualify", p.parseQualify() },
+		tokens.MATCH_RECOGNIZE: func(p *Parser) (string, any) { return "match", p.parseMatchRecognize() },
+		tokens.TABLE_SAMPLE:    func(p *Parser) (string, any) { return "sample", p.parseTableSample(true) },
+		tokens.USING:           func(p *Parser) (string, any) { return "sample", p.parseTableSample(true) },
+		tokens.WHERE:           func(p *Parser) (string, any) { return "where", p.parseWhere(false) },
+		tokens.GROUP_BY:        func(p *Parser) (string, any) { return "group", p.parseGroup(false) },
+		tokens.HAVING:          func(p *Parser) (string, any) { return "having", p.parseHaving(false) },
+		tokens.QUALIFY:         func(p *Parser) (string, any) { return "qualify", p.parseQualify() },
 		tokens.CONNECT_BY: func(p *Parser) (string, any) {
 			p.match(tokens.CONNECT_BY)
 			return "connect", p.parseConnect(true)

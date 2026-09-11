@@ -236,9 +236,9 @@ const (
 	minPassMySQL    = 428
 	minPassPostgres = 468
 	minPassAthena   = 51
-	minPassTrino    = 66
-	minPassPresto   = 147
-	minPassHive     = 134
+	minPassTrino    = 67
+	minPassPresto   = 170
+	minPassHive     = 141
 )
 
 // Total floors catch dropped failing records that pass floors cannot detect.

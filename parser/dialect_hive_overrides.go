@@ -5,15 +5,7 @@ import (
 	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
-// Upstream Hive inherits the base PROPERTY_PARSERS and overrides SERDEPROPERTIES and USING at
-// /Users/sjcho/repos/sqlglot-go-hive/.reference/sqlglot-v30.12.0/sqlglot/parsers/hive.py:131-137.
-// This port instead composes the generator-safe shared subset with Hive-only parser callbacks for
-// the base entries at /Users/sjcho/repos/sqlglot-go-hive/.reference/sqlglot-v30.12.0/sqlglot/parser.py:
-// 1243,1268,1287,1310,1326,1328,1337.
-// This intentional temporary divergence preserves the no-generator slice's fail-closed invariant;
-// the callbacks can return to the shared registry only in a future paired parser+generator slice.
-// Hive's ALTER CHANGE, _parse_partition_and_order, _parse_parameter, _to_prop_eq, and
-// CURRENT_TIME-removal overrides remain out of scope.
+// parsers/hive.py supplies Hive function, property, and grammar overrides.
 func init() {
 	registerDialectParserOverrides("hive", hiveParserOverrideSet())
 	// Athena's Hive-routed statements (ledger athena-show-*, athena-rename-partition) — standalone
@@ -28,6 +20,8 @@ func init() {
 
 func hiveParserOverrideSet() dialectParserOverrideSet {
 	return dialectParserOverrideSet{
+		// parsers/hive.py:126-128: CURRENT_TIME is an ordinary identifier in Hive.
+		DisabledNoParenFunctions: map[tokens.TokenType]bool{tokens.CURRENT_TIME: true},
 		FunctionParsers: map[string]parserOverrideFunc{
 			"PERCENTILE": func(p *Parser) exp.Expression {
 				return p.parseHiveQuantileFunction(exp.KindQuantile)

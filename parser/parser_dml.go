@@ -68,6 +68,10 @@ func (p *Parser) parseInsert() exp.Expression {
 		this, setValues = p.parseInsertSetValues(this)
 	}
 	returning := p.parseReturning()
+	var stored exp.Expression
+	if p.matchTextSeq("STORED") {
+		stored = p.parseStored()
+	}
 	byName := p.matchTextSeq("BY", "NAME")
 	exists := p.parseExists(false)
 	// v30.17.0 (parser.py:3655-3661): REPLACE WHERE <cond> | REPLACE USING (cols); a bare
@@ -102,6 +106,7 @@ func (p *Parser) parseInsert() exp.Expression {
 		"alternative": alternative,
 		"is_function": isFunction,
 		"this":        this,
+		"stored":      stored,
 		"returning":   returning,
 		"by_name":     byName,
 		"exists":      exists,

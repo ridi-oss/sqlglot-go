@@ -3,13 +3,10 @@ package dialects
 import (
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/tokens"
+	"strings"
 )
 
-// Presto ports the Presto/Trino dialect (dialects/presto.py). This slice covers the parser +
-// tokenizer only (the class flags, the Tokenizer config, and the FUNCTIONS overlay) - the
-// generator TRANSFORMS/TYPE_MAPPING and typing.EXPRESSION_METADATA are deliberately out of
-// scope (see ROADMAP known-divergences), so structured functions whose canonical class-name
-// differs from the Presto spelling round-trip to that canonical name.
+// Presto ports dialects/presto.py and parsers/presto.py.
 func Presto() *Dialect {
 	d := Base()
 	d.Name = "presto"
@@ -94,15 +91,7 @@ func Presto() *Dialect {
 	// parsers/presto.py:61 ZONE_AWARE_TIMESTAMP_CONSTRUCTOR = True (read at parser.py:6186-6191).
 	d.ZoneAwareTimestampConstructor = true
 
-	// parsers/presto.py:74-135 FUNCTIONS overlay, ported 1:1 with the slice policy applied: the
-	// helper-dependent entries DATE_FORMAT/DATE_PARSE/DATE_TRUNC/TO_CHAR (need build_formatted_time
-	// + TIME_MAPPING / date_trunc_to_time) and REGEXP_EXTRACT/REGEXP_EXTRACT_ALL/REGEXP_REPLACE
-	// (need build_regexp_extract + REGEXP_EXTRACT_DEFAULT_GROUP; the injected default-group arg
-	// diverges round-trip) are deferred - they stay Anonymous and are intentionally NOT in this
-	// overlay (ROADMAP known-divergences). Everything else registers via exp.FromArgListFunc or a
-	// custom closure below. NOW -> CurrentTimestamp is registered here only for the parenthesized
-	// NOW() call form; it is deliberately NOT added to the parser's global no-paren-function map
-	// (bare NOW stays a lineage-safe column), so base floors are unaffected.
+	// parsers/presto.py:74-139.
 	d.Functions = map[string]func([]exp.Expression) exp.Expression{
 		"ARBITRARY":            exp.FromArgListFunc(exp.KindAnyValue),
 		"APPROX_DISTINCT":      exp.FromArgListFunc(exp.KindApproxDistinct),
@@ -113,6 +102,13 @@ func Presto() *Dialect {
 		"BITWISE_XOR":          prestoBinaryFromFunction(exp.KindBitwiseXor),
 		"CARDINALITY":          exp.FromArgListFunc(exp.KindArraySize),
 		"CONTAINS":             exp.FromArgListFunc(exp.KindArrayContains),
+		"DATE_FORMAT":          prestoBuildFormattedTime(exp.KindTimeToStr, false),
+		"DATE_PARSE":           prestoBuildFormattedTime(exp.KindStrToTime, false),
+		"TO_CHAR":              prestoBuildFormattedTime(exp.KindTimeToStr, true),
+		"DATE_TRUNC":           prestoBuildDateTrunc,
+		"REGEXP_EXTRACT":       prestoBuildRegexpExtract(exp.KindRegexpExtract),
+		"REGEXP_EXTRACT_ALL":   prestoBuildRegexpExtract(exp.KindRegexpExtractAll),
+		"REGEXP_REPLACE":       prestoBuildRegexpReplace,
 		"DATE_ADD":             prestoBuildDateAdd,
 		"DATE_DIFF":            prestoBuildDateDiff,
 		"DAY_OF_WEEK":          exp.FromArgListFunc(exp.KindDayOfWeekIso),
@@ -137,7 +133,14 @@ func Presto() *Dialect {
 		"MD5":                  exp.FromArgListFunc(exp.KindMD5Digest),
 		"SHA256":               prestoBuildSHA256,
 		"SHA512":               prestoBuildSHA512,
-		"WEEK":                 exp.FromArgListFunc(exp.KindWeekOfYear),
+		// Func classes are registered by name upstream (parser.py:373), so the parenthesized
+		// niladic forms build the same nodes as the bare keywords.
+		"CURRENT_TIME":      exp.FromArgListFunc(exp.KindCurrentTime),
+		"CURRENT_TIMESTAMP": exp.FromArgListFunc(exp.KindCurrentTimestamp),
+		"CURRENT_USER":      exp.FromArgListFunc(exp.KindCurrentUser),
+		"LOCALTIME":         exp.FromArgListFunc(exp.KindLocaltime),
+		"LOCALTIMESTAMP":    exp.FromArgListFunc(exp.KindLocaltimestamp),
+		"WEEK":              exp.FromArgListFunc(exp.KindWeekOfYear),
 	}
 
 	cfg := tokens.BaseConfig()
@@ -274,17 +277,17 @@ func prestoBuildJSONFormat(args []exp.Expression) exp.Expression {
 	})
 }
 
-// prestoBuildSHA256/prestoBuildSHA512 port SHA256/SHA512 -> SHA2(this, length=256|512)
-// (parsers/presto.py:132-133).
+// prestoBuildSHA256/prestoBuildSHA512 port SHA256/SHA512 -> SHA2Digest(this, length=256|512)
+// (parsers/presto.py:132-135).
 func prestoBuildSHA256(args []exp.Expression) exp.Expression {
-	return exp.New(exp.KindSHA2, exp.Args{
+	return exp.New(exp.KindSHA2Digest, exp.Args{
 		"this":   prestoSeqGet(args, 0),
 		"length": exp.LiteralNumber(256),
 	})
 }
 
 func prestoBuildSHA512(args []exp.Expression) exp.Expression {
-	return exp.New(exp.KindSHA2, exp.Args{
+	return exp.New(exp.KindSHA2Digest, exp.Args{
 		"this":   prestoSeqGet(args, 0),
 		"length": exp.LiteralNumber(512),
 	})
@@ -293,6 +296,15 @@ func prestoBuildSHA512(args []exp.Expression) exp.Expression {
 // prestoBuildDateAdd/prestoBuildDateDiff port the unit/expression/this argument reorder in
 // parsers/presto.py:85-90 (Presto spells DATE_ADD(unit, value, ts), sqlglot's DateAdd/DateDiff
 // carry {this, expression, unit}).
+// prestoBuildRegexpReplace ports parsers/presto.py:112-116 (replacement defaults to ”).
+func prestoBuildRegexpReplace(args []exp.Expression) exp.Expression {
+	replacement := prestoSeqGet(args, 2)
+	if replacement == nil {
+		replacement = exp.LiteralString("")
+	}
+	return exp.New(exp.KindRegexpReplace, exp.Args{"this": prestoSeqGet(args, 0), "expression": prestoSeqGet(args, 1), "replacement": replacement})
+}
+
 func prestoBuildDateAdd(args []exp.Expression) exp.Expression {
 	return exp.New(exp.KindDateAdd, exp.Args{
 		"this":       prestoSeqGet(args, 2),
@@ -343,4 +355,152 @@ func prestoBuildReplace(args []exp.Expression) exp.Expression {
 		"expression":  prestoSeqGet(args, 1),
 		"replacement": replacement,
 	})
+}
+
+var prestoTimeMapping = map[string]string{
+	"%M": "%B", "%c": "%-m", "%e": "%-d", "%h": "%I", "%i": "%M", "%s": "%S",
+	"%u": "%W", "%k": "%-H", "%l": "%-I", "%T": "%H:%M:%S", "%W": "%A",
+}
+
+var prestoTeradataTimeMapping = map[string]string{
+	"YY": "%y", "Y4": "%Y", "YYYY": "%Y", "M4": "%B", "M3": "%b", "M": "%-M", "MI": "%M",
+	"MM": "%m", "MMM": "%b", "MMMM": "%B", "D": "%-d", "DD": "%d", "D3": "%j", "DDD": "%j",
+	"H": "%-H", "HH": "%H", "HH24": "%H", "S": "%-S", "SS": "%S", "SSSSSS": "%f",
+	"E": "%a", "EE": "%a", "E3": "%a", "E4": "%A", "EEE": "%a", "EEEE": "%A",
+}
+
+type prestoTimeTrieNode struct {
+	children map[rune]*prestoTimeTrieNode
+	exists   bool
+}
+
+func prestoTimeTrie(mapping map[string]string) *prestoTimeTrieNode {
+	root := &prestoTimeTrieNode{children: map[rune]*prestoTimeTrieNode{}}
+	for pattern := range mapping {
+		current := root
+		for _, char := range pattern {
+			if current.children[char] == nil {
+				current.children[char] = &prestoTimeTrieNode{children: map[rune]*prestoTimeTrieNode{}}
+			}
+			current = current.children[char]
+		}
+		current.exists = true
+	}
+	return root
+}
+
+var prestoForwardTimeTrie = prestoTimeTrie(prestoTimeMapping)
+var prestoTeradataTimeTrie = prestoTimeTrie(prestoTeradataTimeMapping)
+var prestoInverseTimeMapping = func() map[string]string {
+	inverse := map[string]string{}
+	for key, value := range prestoTimeMapping {
+		inverse[value] = key
+	}
+	return inverse
+}()
+var prestoInverseTimeTrie = prestoTimeTrie(prestoInverseTimeMapping)
+
+// PrestoFormatTime ports Generator.format_time with Presto's inverse TIME_MAPPING.
+func PrestoFormatTime(format string) string {
+	converted, _ := prestoConvertTimeFormatWith(format, prestoInverseTimeMapping, prestoInverseTimeTrie)
+	return converted
+}
+
+const PrestoTimeFormat = "%Y-%m-%d %T"
+
+func prestoBuildFormattedTime(kind exp.Kind, teradata bool) func([]exp.Expression) exp.Expression {
+	return func(args []exp.Expression) exp.Expression {
+		format := prestoSeqGet(args, 1)
+		if format != nil && format.IsString() {
+			value := format.Name()
+			mapping, trie := prestoTimeMapping, prestoForwardTimeTrie
+			if teradata {
+				value = strings.ToUpper(value)
+				mapping, trie = prestoTeradataTimeMapping, prestoTeradataTimeTrie
+			}
+			converted, ok := prestoConvertTimeFormatWith(value, mapping, trie)
+			if !ok {
+				converted = "None"
+			}
+			format = exp.LiteralString(converted)
+		}
+		return exp.New(kind, exp.Args{"this": prestoSeqGet(args, 0), "format": format})
+	}
+}
+
+// prestoBuildDateTrunc ports date_trunc_to_time (dialects/dialect.py:1682-1688): a DATE-typed
+// cast argument builds DateTrunc, anything else TimestampTrunc.
+func prestoBuildDateTrunc(args []exp.Expression) exp.Expression {
+	unit := prestoSeqGet(args, 0)
+	this := prestoSeqGet(args, 1)
+	if this != nil && (this.Kind() == exp.KindCast || this.Kind() == exp.KindTryCast) && exp.DataTypeIsType(this, false, exp.DTypeDate) {
+		return exp.DateTrunc(exp.Args{"unit": unit, "this": this})
+	}
+	return exp.New(exp.KindTimestampTrunc, exp.Args{"this": this, "unit": exp.TimeUnitVar(unit)})
+}
+
+func prestoBuildRegexpExtract(kind exp.Kind) func([]exp.Expression) exp.Expression {
+	return func(args []exp.Expression) exp.Expression {
+		group := prestoSeqGet(args, 2)
+		if group == nil {
+			group = exp.LiteralNumber("0")
+		}
+		values := exp.Args{"this": prestoSeqGet(args, 0), "expression": prestoSeqGet(args, 1), "group": group, "parameters": prestoSeqGet(args, 3)}
+		if kind == exp.KindRegexpExtract {
+			values["null_if_pos_overflow"] = true
+		}
+		return exp.New(kind, values)
+	}
+}
+
+// time.py:10-62 preserves the longest completed format match.
+func prestoConvertTimeFormatWith(value string, mapping map[string]string, trie *prestoTimeTrieNode) (string, bool) {
+	if value == "" {
+		return "", false
+	}
+
+	characters := []rune(value)
+	start, end := 0, 1
+	current := trie
+	chunks := make([]string, 0, len(characters))
+	matchedSymbol := ""
+
+	for end <= len(characters) {
+		chars := string(characters[start:end])
+		next, found := current.children[characters[end-1]]
+		failed := !found
+		if failed {
+			if matchedSymbol != "" {
+				end--
+				chars = matchedSymbol
+				matchedSymbol = ""
+			} else {
+				chars = string(characters[start])
+				end = start + 1
+			}
+			start += len([]rune(chars))
+			chunks = append(chunks, chars)
+			current = trie
+		} else {
+			current = next
+			if current.exists {
+				matchedSymbol = chars
+			}
+		}
+
+		end++
+		if !failed && end > len(characters) {
+			chunks = append(chunks, chars)
+		}
+	}
+
+	var converted strings.Builder
+	for _, chunk := range chunks {
+		if replacement, ok := mapping[chunk]; ok {
+			converted.WriteString(replacement)
+		} else {
+			converted.WriteString(chunk)
+		}
+	}
+	return converted.String(), true
 }

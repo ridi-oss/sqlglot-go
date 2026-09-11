@@ -1,8 +1,11 @@
 package generator
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ridi-oss/sqlglot-go/dialects"
 	"github.com/ridi-oss/sqlglot-go/expressions"
@@ -24,6 +27,10 @@ func init() {
 		expressions.KindWithDataProperty:       propertyLocationUnsupported,
 	})
 	handlers := map[expressions.Kind]func(*Generator, expressions.Expression) string{
+		expressions.KindParameter: (*Generator).hiveParameterSQL,
+		expressions.KindVersion: func(g *Generator, e expressions.Expression) string {
+			return e.Name() + " " + e.Text("kind") + " " + g.sqlKey(e, "expression")
+		},
 		expressions.KindProperties: (*Generator).hivePropertiesSQL,
 		expressions.KindProperty: func(g *Generator, e expressions.Expression) string {
 			return g.gen(expressions.LiteralString(e.Name())) + "=" + g.sqlKey(e, "value")
@@ -162,7 +169,12 @@ func hiveFormatTimeLiteral(e expressions.Expression) any {
 	if format == nil || !format.IsString() {
 		return format
 	}
-	return expressions.LiteralString(dialects.HiveFormatTime(format.Name()))
+	name := format.Name()
+	switch e.Kind() {
+	case expressions.KindStrToTime, expressions.KindStrToDate, expressions.KindStrToUnix, expressions.KindTsOrDsToDate:
+		name = hiveLenientParseFormat(name)
+	}
+	return expressions.LiteralString(dialects.HiveFormatTime(name))
 }
 
 // hiveNonDefaultTimeFormat ports dialect.py:1622-1633 time_format("hive"): nil for TIME_FORMAT.
@@ -178,7 +190,7 @@ func hiveNonDefaultTimeFormat(e expressions.Expression) any {
 func hiveStrToTimeInner(g *Generator, e expressions.Expression) string {
 	this := g.sqlKey(e, "this")
 	if format, ok := hiveFormatTimeLiteral(e).(expressions.Expression); ok && format != nil {
-		if name := format.Name(); name != dialects.HiveTimeFormat && name != dialects.HiveDateFormat {
+		if !hiveIsCastTimeFormat(e, format.Name()) {
 			return "FROM_UNIXTIME(UNIX_TIMESTAMP(" + this + ", " + g.gen(format) + "))"
 		}
 	}
@@ -188,7 +200,7 @@ func hiveStrToTimeInner(g *Generator, e expressions.Expression) string {
 // hiveToDateSQL ports _to_date_sql (hive.py:211-219).
 func (g *Generator) hiveToDateSQL(e expressions.Expression) string {
 	if format, ok := hiveFormatTimeLiteral(e).(expressions.Expression); ok && format != nil {
-		if name := format.Name(); name != dialects.HiveTimeFormat && name != dialects.HiveDateFormat {
+		if !hiveIsCastTimeFormat(e, format.Name()) {
 			return g.funcCall("TO_DATE", []any{e.This(), format}, "(", ")", true)
 		}
 	}
@@ -346,4 +358,64 @@ func (g *Generator) hiveAddDateSQL(e expressions.Expression) string {
 		}
 	}
 	return g.funcCall(name, []any{e.This(), sql}, "(", ")", true)
+}
+
+// generators/hive.py:449-460 omits braces for SET assignments.
+func (g *Generator) hiveParameterSQL(e expressions.Expression) string {
+	this := g.sqlKey(e, "this")
+	if value := g.sqlKey(e, "expression"); value != "" {
+		this += ":" + value
+	}
+	if parent := e.Parent(); parent != nil && parent.Kind() == expressions.KindEQ {
+		if item := parent.Parent(); item != nil && item.Kind() == expressions.KindSetItem {
+			return this
+		}
+	}
+	return "${" + this + "}"
+}
+
+var hiveCanonicalTimeFormat = regexp.MustCompile(`%(?:[mdHIMS]strict|[-:].|.)`)
+
+// generators/hive.py:67-92 keeps adjacent numeric fields padded.
+func hiveLenientParseFormat(format string) string {
+	matches := hiveCanonicalTimeFormat.FindAllStringIndex(format, -1)
+	var result strings.Builder
+	end := 0
+	for i, match := range matches {
+		start, stop := match[0], match[1]
+		result.WriteString(format[end:start])
+		token := format[start:stop]
+		if len(token) == 2 && strings.ContainsRune("mdHIMS", rune(token[1])) {
+			leftAdjacent := i > 0 && matches[i-1][1] == start
+			rightAdjacent := i+1 < len(matches) && matches[i+1][0] == stop
+			if start > 0 {
+				r, _ := utf8.DecodeLastRuneInString(format[:start])
+				leftAdjacent = leftAdjacent || unicode.IsDigit(r)
+			}
+			if stop < len(format) {
+				r, _ := utf8.DecodeRuneInString(format[stop:])
+				rightAdjacent = rightAdjacent || unicode.IsDigit(r)
+			}
+			if !leftAdjacent && !rightAdjacent {
+				token = "%-" + token[1:]
+			}
+		}
+		result.WriteString(token)
+		end = stop
+	}
+	result.WriteString(format[end:])
+	return result.String()
+}
+
+func hiveIsCastTimeFormat(e expressions.Expression, format string) bool {
+	if format == dialects.HiveTimeFormat || format == dialects.HiveDateFormat {
+		return true
+	}
+	if format == "yyyy-M-d H:m:s" || format == "yyyy-M-d" {
+		if original := asExpression(e.Arg("format")); original != nil && original.IsString() {
+			padded := dialects.HiveFormatTime(original.Name())
+			return padded == dialects.HiveTimeFormat || padded == dialects.HiveDateFormat
+		}
+	}
+	return false
 }

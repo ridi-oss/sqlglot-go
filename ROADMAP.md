@@ -247,13 +247,15 @@ athena/trino/presto/hive wired into `corpus_test.go` with monotonic floors. The 
 - **B + C — DONE.** Presto/Trino/Hive generators + the Athena Hive/Trino generator router
   (`generator/dialect_dispatch.go` seam: per-dialect dispatch/type-mapping/property-location
   overlays walked through `trino → presto`, `athena-trino → trino`, `athena-hive → hive`).
-  Corpus (validate_identity + same-dialect validate_all writes): athena 51/51, presto 147/170,
-  hive 134/141, trino 66/115; every remaining gap is parser-side
+  Corpus (validate_identity + same-dialect validate_all writes): athena 51/51, presto 170/170,
+  hive 141/141, trino 67/115; every remaining gap is parser-side
   (MATCH_RECOGNIZE, `FOR TIMESTAMP|VERSION AS OF`, Trino inline `WITH FUNCTION` routines, Hive
   `INSERT OVERWRITE DIRECTORY`).
-- **D — parser drift vs v30.17**: Presto `LOCALTIME[STAMP]` niladics, `DATE_FORMAT`/`DATE_PARSE`/
-  `REGEXP_*`/`SHA256` nodes, Hive `CHANGE COLUMN`/`DISTRIBUTE BY`+`SORT BY` windows/`${hiveconf:x}`,
-  Trino `DECLARE`/`SQL SECURITY`. Trino inline `WITH FUNCTION` UDFs are deferred (Athena rejects them).
+- **D — DONE.** Parser drift vs v30.17: `FOR TIMESTAMP|VERSION AS OF` (Version node),
+  MATCH_RECOGNIZE, `U&'…' UESCAPE`, Presto formatted-time/regexp/`LOCALTIME[STAMP]`/`JSON '…'`
+  functions, Hive `${a:b}` parameters, brace structs, `DISTRIBUTE BY`/`SORT BY` windows, strict time
+  tokens, `INSERT … DIRECTORY … STORED AS`, Trino `DECLARE`/`SQL SECURITY`. The only remaining
+  corpus gap is Trino inline `WITH FUNCTION` routines (48 rows), deferred: Athena rejects them.
 
 ## Athena support (Presto/Trino/Hive parser chain), scoped to lineage — DONE
 

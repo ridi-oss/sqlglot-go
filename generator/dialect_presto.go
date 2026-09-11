@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"github.com/ridi-oss/sqlglot-go/dialects"
 	"strings"
 
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
@@ -9,8 +10,16 @@ import (
 // generators/presto.py:303; cross-dialect Select preprocessing is intentionally omitted.
 func init() {
 	table := map[exp.Kind]func(*Generator, exp.Expression) string{
-		exp.KindApproxQuantile: prestoCall("APPROX_PERCENTILE", "this", "weight", "quantile", "accuracy"),
-		exp.KindDateAdd:        (*Generator).prestoDateAddSQL,
+		exp.KindTimeToStr: (*Generator).prestoTimeToStrSQL,
+		exp.KindStrToTime: (*Generator).prestoStrToTimeSQL,
+		exp.KindStrToDate: func(g *Generator, e exp.Expression) string { return "CAST(" + g.prestoStrToTimeSQL(e) + " AS DATE)" },
+		exp.KindTimestampTrunc: func(g *Generator, e exp.Expression) string {
+			return g.funcCall("DATE_TRUNC", []any{prestoUnit(e), e.Arg("this")}, "(", ")", true)
+		},
+		exp.KindRegexpExtract:    (*Generator).prestoRegexpExtractSQL,
+		exp.KindRegexpExtractAll: (*Generator).prestoRegexpExtractSQL,
+		exp.KindApproxQuantile:   prestoCall("APPROX_PERCENTILE", "this", "weight", "quantile", "accuracy"),
+		exp.KindDateAdd:          (*Generator).prestoDateAddSQL,
 		exp.KindDateDiff: func(g *Generator, e exp.Expression) string {
 			return g.funcCall("DATE_DIFF", []any{prestoUnit(e), e.Arg("expression"), e.Arg("this")}, "(", ")", true)
 		},
@@ -36,7 +45,10 @@ func init() {
 		},
 		exp.KindSchema:             (*Generator).prestoSchemaSQL,
 		exp.KindFileFormatProperty: func(g *Generator, e exp.Expression) string { return "format=" + g.gen(exp.LiteralString(e.Name())) },
-		exp.KindSHA2:               (*Generator).prestoSHA2DigestSQL,
+		exp.KindSHA2Digest:         (*Generator).prestoSHA2DigestSQL,
+		exp.KindSHA2:               (*Generator).prestoSHA2SQL,
+		exp.KindFirst:              (*Generator).prestoFirstLastSQL,
+		exp.KindLast:               (*Generator).prestoFirstLastSQL,
 		exp.KindConcat:             (*Generator).prestoConcatSQL,
 		exp.KindCreate:             (*Generator).prestoCreateSQL,
 		exp.KindJSONFormat:         prestoCall("JSON_FORMAT", "this", "options"),
@@ -69,6 +81,8 @@ func init() {
 	} {
 		table[kind] = prestoRename(name)
 	}
+	// generators/presto.py:334-336; Localtime/Localtimestamp keep the base handlers, which
+	// preserve a precision argument (generator.py:6262-6268).
 	for kind, name := range map[exp.Kind]string{exp.KindCurrentTime: "CURRENT_TIME", exp.KindCurrentTimestamp: "CURRENT_TIMESTAMP", exp.KindCurrentUser: "CURRENT_USER"} {
 		table[kind] = func(_ *Generator, _ exp.Expression) string { return name }
 	}
@@ -298,8 +312,19 @@ func prestoIntegerTyped(e exp.Expression) bool {
 	return false
 }
 
-// generators/presto.py:34-46; the Go parser represents SHA2Digest with KindSHA2.
+// prestoSHA2DigestSQL ports _sha2_digest_sql (generators/presto.py:37-46).
 func (g *Generator) prestoSHA2DigestSQL(e exp.Expression) string {
+	length, this := g.prestoSHA2Args(e)
+	return g.funcCall("SHA"+length, []any{this}, "(", ")", true)
+}
+
+// prestoSHA2SQL ports sha2_sql (generators/presto.py:553-563): the hex-string form.
+func (g *Generator) prestoSHA2SQL(e exp.Expression) string {
+	length, this := g.prestoSHA2Args(e)
+	return g.funcCall("LOWER", []any{g.funcCall("TO_HEX", []any{g.funcCall("SHA"+length, []any{this}, "(", ")", true)}, "(", ")", true)}, "(", ")", true)
+}
+
+func (g *Generator) prestoSHA2Args(e exp.Expression) (string, any) {
 	length := e.Text("length")
 	if length == "" {
 		length = "256"
@@ -317,7 +342,16 @@ func (g *Generator) prestoSHA2DigestSQL(e exp.Expression) string {
 			}
 		}
 	}
-	return g.funcCall("SHA"+length, []any{this}, "(", ")", true)
+	return length, this
+}
+
+// prestoFirstLastSQL ports _first_last_sql (generators/presto.py:124-135): FIRST/LAST survive
+// only under MATCH_RECOGNIZE, elsewhere they become ARBITRARY.
+func (g *Generator) prestoFirstLastSQL(e exp.Expression) string {
+	if ancestor := e.FindAncestor(exp.KindMatchRecognize, exp.KindSelect); ancestor != nil && ancestor.Kind() == exp.KindMatchRecognize {
+		return g.functionFallbackSQL(e)
+	}
+	return g.funcCall("ARBITRARY", g.fallbackArgs(e), "(", ")", true)
 }
 
 // dialects/dialect.py:2059-2066.
@@ -330,4 +364,32 @@ func prestoUnit(e exp.Expression) exp.Expression {
 		return exp.LiteralString(strings.ToUpper(unit.Name()))
 	}
 	return unit
+}
+
+func prestoFormatTime(e exp.Expression) any {
+	format := asExpression(e.Arg("format"))
+	if format != nil && format.IsString() {
+		return exp.LiteralString(dialects.PrestoFormatTime(format.Name()))
+	}
+	return format
+}
+
+func (g *Generator) prestoTimeToStrSQL(e exp.Expression) string {
+	return g.funcCall("DATE_FORMAT", []any{e.Arg("this"), prestoFormatTime(e)}, "(", ")", true)
+}
+
+func (g *Generator) prestoStrToTimeSQL(e exp.Expression) string {
+	return g.funcCall("DATE_PARSE", []any{e.Arg("this"), prestoFormatTime(e)}, "(", ")", true)
+}
+
+func (g *Generator) prestoRegexpExtractSQL(e exp.Expression) string {
+	group := asExpression(e.Arg("group"))
+	if group != nil && group.Name() == "0" {
+		group = nil
+	}
+	name := "REGEXP_EXTRACT"
+	if e.Kind() == exp.KindRegexpExtractAll {
+		name = "REGEXP_EXTRACT_ALL"
+	}
+	return g.funcCall(name, []any{e.Arg("this"), e.Arg("expression"), group}, "(", ")", true)
 }

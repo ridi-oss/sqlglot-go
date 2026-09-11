@@ -26,8 +26,12 @@ type dialectParserOverrideSet struct {
 	StatementParsers        map[tokens.TokenType]parserOverrideFunc
 	NoParenFunctionParsers  map[string]parserOverrideFunc
 	NoParenFunctions        map[tokens.TokenType]func(exp.Args) exp.Expression
-	PropertyParsers         map[string]propertyParserFunc
-	TypeParser              typeParserOverrideFunc
+	// DisabledNoParenFunctions removes base NO_PAREN_FUNCTIONS entries (parsers/hive.py:126-128).
+	DisabledNoParenFunctions map[tokens.TokenType]bool
+	// AliasTokens adds to TABLE_ALIAS_TOKENS (parsers/presto.py:69-72).
+	AliasTokens     map[tokens.TokenType]bool
+	PropertyParsers map[string]propertyParserFunc
+	TypeParser      typeParserOverrideFunc
 }
 
 var dialectParserOverrides = map[string]dialectParserOverrideSet{}
@@ -163,8 +167,28 @@ func (p *Parser) noParenFunctionParserFor(name string) parserOverrideFunc {
 }
 
 func (p *Parser) noParenFunctionFor(tokenType tokens.TokenType) func(exp.Args) exp.Expression {
-	if build := dialectParserOverrides[p.parserOverrideKey()].NoParenFunctions[tokenType]; build != nil {
+	overrides := dialectParserOverrides[p.parserOverrideKey()]
+	if build := overrides.NoParenFunctions[tokenType]; build != nil {
 		return build
 	}
+	if overrides.DisabledNoParenFunctions[tokenType] {
+		return nil
+	}
 	return noParenFunctions[tokenType]
+}
+
+// tableAliasTokensFor is TABLE_ALIAS_TOKENS plus the dialect overlay's additions.
+func (p *Parser) tableAliasTokensFor() map[tokens.TokenType]bool {
+	extra := dialectParserOverrides[p.parserOverrideKey()].AliasTokens
+	if len(extra) == 0 {
+		return tableAliasTokens
+	}
+	merged := make(map[tokens.TokenType]bool, len(tableAliasTokens)+len(extra))
+	for tt := range tableAliasTokens {
+		merged[tt] = true
+	}
+	for tt := range extra {
+		merged[tt] = true
+	}
+	return merged
 }

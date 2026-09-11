@@ -22,6 +22,7 @@ var sqlNameOverrides = map[expressions.Kind]string{
 	expressions.KindJSONFormat:   "JSON_FORMAT",
 	expressions.KindMD5Digest:    "MD5_DIGEST",
 	expressions.KindSHA2:         "SHA2",
+	expressions.KindSHA2Digest:   "SHA2_DIGEST",
 	expressions.KindDayOfWeekIso: "DAYOFWEEK_ISO",
 }
 

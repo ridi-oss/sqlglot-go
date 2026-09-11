@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"strings"
 
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
@@ -584,7 +585,12 @@ func (p *Parser) parseString() exp.Expression {
 		return p.expression(exp.National(exp.Args{"this": p.prev.Text}), &p.prev, nil)
 	}
 	if p.match(tokens.UNICODE_STRING) {
-		return p.expression(exp.UnicodeString(exp.Args{"this": p.prev.Text}), &p.prev, nil)
+		token := p.prev
+		var escape exp.Expression
+		if p.matchTextSeq("UESCAPE") {
+			escape = p.parseString()
+		}
+		return p.expression(exp.UnicodeString(exp.Args{"this": token.Text, "escape": escape}), &token, nil)
 	}
 	return p.parsePlaceholder()
 }
@@ -611,14 +617,20 @@ func (p *Parser) parseVarOrString(upper bool) exp.Expression {
 }
 
 func (p *Parser) parseBracket(this exp.Expression) exp.Expression {
-	if !p.match(tokens.L_BRACKET) {
+	if !p.matchSet(map[tokens.TokenType]bool{tokens.L_BRACKET: true, tokens.L_BRACE: true}) {
 		return this
 	}
+	bracketKind := p.prev.TokenType
 	expressions := p.parseCsv(p.parseBracketKeyValue)
-	if !p.match(tokens.R_BRACKET) {
+	if bracketKind == tokens.L_BRACKET && !p.match(tokens.R_BRACKET) {
 		p.raiseError("Expected ]")
+	} else if bracketKind == tokens.L_BRACE && !p.match(tokens.R_BRACE) {
+		p.raiseError("Expected }")
 	}
-	if this == nil {
+	if bracketKind == tokens.L_BRACE {
+		// parser.py:7974-7978: `{...}` is a struct constructor (duckdb/hive).
+		this = p.expression(exp.New(exp.KindStruct, exp.Args{"expressions": p.kvToPropEQ(expressions)}), nil, nil)
+	} else if this == nil {
 		this = exp.Array(exp.Args{"expressions": expressions})
 	} else if stringsUpper(this.Name()) == "ARRAY" {
 		// _parse_bracket's ARRAY_CONSTRUCTORS swap (parser.py:7713-7721, table at :787-790): a
@@ -635,6 +647,44 @@ func (p *Parser) parseBracket(this exp.Expression) exp.Expression {
 	}
 	p.addComments(this)
 	return p.parseBracket(this)
+}
+
+// kvToPropEQ ports _kv_to_prop_eq (parser.py:7308-7333) with parse_map=False.
+func (p *Parser) kvToPropEQ(expressions []exp.Expression) []exp.Expression {
+	out := make([]exp.Expression, 0, len(expressions))
+	for index, e := range expressions {
+		switch e.Kind() {
+		case exp.KindAlias:
+			e = p.expression(exp.PropertyEQ(exp.Args{"this": e.Arg("alias"), "expression": e.This()}), nil, nil)
+		case exp.KindEQ, exp.KindSlice:
+			e = p.expression(exp.PropertyEQ(exp.Args{"this": exp.ToIdentifier(e.This().Name()), "expression": e.Arg("expression")}), nil, nil)
+		case exp.KindPropertyEQ:
+		default:
+			e = p.toPropEQ(e, index)
+		}
+		if e.Kind() == exp.KindPropertyEQ {
+			if this := e.This(); this != nil && this.Kind() == exp.KindColumn {
+				e.Set("this", this.This())
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// toPropEQ ports _to_prop_eq: base returns the expression (parser.py:7305-7306); Hive names
+// positional struct fields col<N> (parsers/hive.py:273-282).
+func (p *Parser) toPropEQ(e exp.Expression, index int) exp.Expression {
+	if p.dialect.Name != "hive" || e.IsStar() {
+		return e
+	}
+	var key exp.Expression
+	if e.Kind() == exp.KindColumn {
+		key = e.This()
+	} else {
+		key = exp.ToIdentifier(fmt.Sprintf("col%d", index+1))
+	}
+	return p.expression(exp.PropertyEQ(exp.Args{"this": key, "expression": e}), nil, nil)
 }
 
 // parseBracketKeyValue ports _parse_bracket_key_value (parser.py:7655-7657). The is_map

@@ -22,6 +22,8 @@ func Trino() *Dialect {
 
 	cfg := d.TokenizerConfig
 	cfg.Keywords["REFRESH"] = tokens.REFRESH
+	cfg.Keywords["DECLARE"] = tokens.DECLARE
+	delete(cfg.Keywords, "SQL SECURITY")
 	d.TokenizerConfig = tokens.CompileConfig(cfg)
 	return d
 }

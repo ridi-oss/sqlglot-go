@@ -1,13 +1,5 @@
 package dialects_test
 
-// Tests for the Presto per-dialect Dialect.Functions overlay (dialects/presto.go), ported 1:1
-// from parsers/presto.py:74-135 with the slice's deferral policy applied (see the presto.go
-// header comment + ROADMAP known-divergences). This slice ports the PARSER + TOKENIZER only; the
-// Presto generator TRANSFORMS/TYPE_MAPPING are out of scope, so structured functions whose
-// canonical class-name differs from the Presto spelling round-trip to the canonical name (the
-// same "transform" situation dialect_funcs_test.go already locks in for mysql MOD -> `%` and
-// postgres CHARACTER_LENGTH -> LENGTH). dialectRoundTrip is defined in dialect_funcs_test.go.
-
 import (
 	"testing"
 
@@ -22,19 +14,16 @@ var prestoOverlayKeys = []string{
 	"ARBITRARY", "APPROX_DISTINCT", "APPROX_PERCENTILE",
 	"BITWISE_AND", "BITWISE_NOT", "BITWISE_OR", "BITWISE_XOR",
 	"CARDINALITY", "CONTAINS", "DATE_ADD", "DATE_DIFF",
+	"DATE_FORMAT", "DATE_PARSE", "DATE_TRUNC", "TO_CHAR", "REGEXP_EXTRACT", "REGEXP_EXTRACT_ALL",
 	"DAY_OF_WEEK", "DOW", "DOY", "ELEMENT_AT", "FROM_HEX",
 	"FROM_UNIXTIME", "FROM_UTF8", "JSON_FORMAT", "LEVENSHTEIN_DISTANCE",
 	"NOW", "REPLACE", "ROW", "SEQUENCE", "SET_AGG", "SPLIT_TO_MAP",
 	"STRPOS", "SLICE", "TO_UNIXTIME", "TO_UTF8", "MD5", "SHA256", "SHA512", "WEEK",
+	"CURRENT_TIME", "CURRENT_TIMESTAMP", "CURRENT_USER", "LOCALTIME", "LOCALTIMESTAMP",
 }
 
-// prestoDeferredKeys are the FUNCTIONS entries deliberately left Anonymous this slice (they need
-// build_formatted_time / date_trunc_to_time / build_regexp_extract helpers not yet ported), so
-// they must NOT appear in the overlay.
-var prestoDeferredKeys = []string{
-	"DATE_FORMAT", "DATE_PARSE", "DATE_TRUNC", "TO_CHAR",
-	"REGEXP_EXTRACT", "REGEXP_EXTRACT_ALL", "REGEXP_REPLACE",
-}
+// REGEXP_REPLACE needs the missing RegexpReplace expression kind.
+var prestoDeferredKeys = []string{}
 
 // TestPrestoFunctionsOverlayKeys guards the exact key set of dialects.Presto().Functions: every
 // non-deferred entry is present, every deferred entry is absent, and none of them leaked into the
@@ -110,8 +99,8 @@ func TestPrestoFunctionsParseToKind(t *testing.T) {
 		{"SELECT TO_UNIXTIME(x)", exp.KindTimeToUnix},
 		{"SELECT TO_UTF8(x)", exp.KindEncode},
 		{"SELECT MD5(x)", exp.KindMD5Digest},
-		{"SELECT SHA256(x)", exp.KindSHA2},
-		{"SELECT SHA512(x)", exp.KindSHA2},
+		{"SELECT SHA256(x)", exp.KindSHA2Digest},
+		{"SELECT SHA512(x)", exp.KindSHA2Digest},
 		{"SELECT WEEK(x)", exp.KindWeekOfYear},
 	}
 	for _, tc := range cases {
@@ -170,33 +159,6 @@ func TestPrestoFunctionsRoundTrip(t *testing.T) {
 	for _, tc := range cases {
 		if got := dialectRoundTrip(t, "presto", tc.sql); got != tc.want {
 			t.Errorf("presto %q ->\n  got  %q\n  want %q", tc.sql, got, tc.want)
-		}
-	}
-}
-
-// TestPrestoDeferredFunctionsStayAnonymous confirms the deferred FUNCTIONS entries fall through to
-// Anonymous and round-trip verbatim (fail-closed until the missing helpers are ported).
-func TestPrestoDeferredFunctionsStayAnonymous(t *testing.T) {
-	cases := []string{
-		"SELECT DATE_FORMAT(x, '%Y')",
-		"SELECT DATE_PARSE(x, '%Y')",
-		"SELECT DATE_TRUNC('day', x)",
-		"SELECT TO_CHAR(x, 'y')",
-		"SELECT REGEXP_EXTRACT(x, y)",
-		"SELECT REGEXP_EXTRACT_ALL(x, y)",
-		"SELECT REGEXP_REPLACE(x, y, z)",
-	}
-	for _, sql := range cases {
-		expression, err := sqlglot.ParseOne(sql, "presto")
-		if err != nil {
-			t.Errorf("ParseOne(%q, presto): %v", sql, err)
-			continue
-		}
-		if len(expression.FindAll(exp.KindAnonymous)) == 0 {
-			t.Errorf("presto %q should stay Anonymous (deferred), but parsed to a structured node", sql)
-		}
-		if got := dialectRoundTrip(t, "presto", sql); got != sql {
-			t.Errorf("presto deferred %q should round-trip verbatim, got %q", sql, got)
 		}
 	}
 }
