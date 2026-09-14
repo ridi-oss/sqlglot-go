@@ -303,10 +303,11 @@ yield a root `Scope` (target + FROM/USING/JOIN sources), complete-or-none (a mal
 the root scope, never emits a partial one). The optimizer passes use a separate compatibility
 traversal reproducing upstream exactly. Tests `optimizer/scope_dml_test.go`.
 
-### 6.2 Projection + statement source spans
+### 6.2 Projection, statement + bind-parameter source spans
 Upstream discards token positions at parse time. The port stamps each SELECT projection (inside any
-`Alias`) with `meta["span"]` (rune offsets) and `meta["spanText"]` (verbatim text — `1 +    1` keeps
-its spacing), both-or-neither, via `parseSpanned`. Meta survives `Copy()`, never affects output/
+`Alias`) and every bind parameter (`Placeholder`/`Parameter`: `?`, `:name`, `$1`, `%(name)s`, `@var`,
+`${a:b}`) with `meta["span"]` (rune offsets) and `meta["spanText"]` (verbatim text — `1 +    1` keeps
+its spacing), both-or-neither, via the span helpers (`parseSpanned`/`spanned`). Meta survives `Copy()`, never affects output/
 `HashKey`/`Equal`; a rewrite that replaces the node drops it. Accessors in `expressions/span.go`.
 Every top-level statement `Parse` returns is stamped the same way (a multi-chunk statement — a
 procedure `BEGIN…END` body — spans all its chunks, inner semicolons included), so a batch consumer
@@ -315,8 +316,9 @@ rewrite. The span is the statement's token range: separators and comment text ou
 last token are not covered (the slice is exact, not exhaustive). A boundary token spliced from an
 activated MySQL executable comment widens to the `/*!NNNNN … */` delimiters — statement spans only
 — so the slice stays executable MySQL.
-Tests `expressions/span_test.go`, `parser/parser_span_test.go`, `optimizer/qualify_span_test.go`,
-`statement_span_test.go`.
+Bind-parameter spans let a consumer bind ordered parameters lexically; tree walk order is not lexical
+across CTEs, joins and WHERE. Tests `expressions/span_test.go`, `parser/parser_span_test.go`,
+`parser/placeholder_span_test.go`, `optimizer/qualify_span_test.go`, `statement_span_test.go`.
 
 ---
 

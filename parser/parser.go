@@ -3156,22 +3156,26 @@ func (p *Parser) parseStarOp(keywords ...string) []exp.Expression {
 // Postgres overrides both PLACEHOLDER (jdbc=True, so `?` round-trips as `?` even under
 // PARAMETER_TOKEN="%") and adds MOD ("%") -> parseQueryParameter for its pyformat/psycopg
 // `%s` / `%(name)s` placeholders (parsers/postgres.py:94-97).
+// parsePlaceholder ports _parse_placeholder. Every bind-parameter form (`?`, `:name`, `$1`,
+// `%(name)s`, `@var`, `${a:b}`) is stamped with its source span (DEVIATIONS.md §6.2) so a
+// consumer can bind ordered parameters lexically regardless of tree walk order.
 func (p *Parser) parsePlaceholder() exp.Expression {
+	start := p.curr
 	if p.match(tokens.PLACEHOLDER) {
 		if p.dialect.Name == "postgres" {
-			return p.expression(exp.Placeholder(exp.Args{"jdbc": true}), &p.prev, nil)
+			return p.spanned(p.expression(exp.Placeholder(exp.Args{"jdbc": true}), &p.prev, nil), start, p.prev)
 		}
-		return p.expression(exp.Placeholder(nil), &p.prev, nil)
+		return p.spanned(p.expression(exp.Placeholder(nil), &p.prev, nil), start, p.prev)
 	}
 	if p.match(tokens.PARAMETER) {
-		return p.parseParameter()
+		return p.spanned(p.parseParameter(), start, p.prev)
 	}
 	if p.dialect.Name == "postgres" && p.match(tokens.MOD) {
-		return p.parseQueryParameter()
+		return p.spanned(p.parseQueryParameter(), start, p.prev)
 	}
 	if p.match(tokens.COLON) {
 		if p.matchSet(idVarTokens) {
-			return p.expression(exp.Placeholder(exp.Args{"this": p.prev.Text}), &p.prev, nil)
+			return p.spanned(p.expression(exp.Placeholder(exp.Args{"this": p.prev.Text}), &p.prev, nil), start, p.prev)
 		}
 		p.retreat(p.index - 1)
 	}
