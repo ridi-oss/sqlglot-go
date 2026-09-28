@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.37.1](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.0...v0.37.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **parser:** PostgreSQL rejects UNNEST ... WITH OFFSET ([#108](https://github.com/ridi-oss/sqlglot-go/issues/108)) ([98bd9be](https://github.com/ridi-oss/sqlglot-go/commit/98bd9be80fbdc5607171a85c2a5e6e63b225d3e6))
+
 ## [0.37.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.36.1...v0.37.0) (2026-09-14)
 
 
