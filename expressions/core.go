@@ -949,11 +949,26 @@ func (n *Node) Selects() []Expression {
 			return this.Selects()
 		}
 	case KindValues, KindUnnest, KindLateral:
+		var columns []Expression
 		if alias, ok := asExpression(n.args["alias"]).(*Node); ok && alias != nil {
-			return alias.ExpressionsFor("columns")
+			columns = alias.ExpressionsFor("columns")
 		}
+		// Unnest.selects (array.py:277-282): the ordinal column follows the alias columns.
+		if n.kind == KindUnnest {
+			if offset := n.args["offset"]; truthy(offset) {
+				columns = append(append([]Expression(nil), columns...), unnestOffsetColumn(offset))
+			}
+		}
+		return columns
 	}
 	return nil
+}
+
+func unnestOffsetColumn(offset any) Expression {
+	if e := asExpression(offset); e != nil {
+		return e
+	}
+	return ToIdentifier("offset", false)
 }
 
 func (n *Node) NamedSelects() []string {
