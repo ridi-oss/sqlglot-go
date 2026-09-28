@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.37.2](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.1...v0.37.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* **optimizer:** UNNEST ordinality column resolves after the alias-column pop ([#110](https://github.com/ridi-oss/sqlglot-go/issues/110)) ([c8019a6](https://github.com/ridi-oss/sqlglot-go/commit/c8019a652ce1222089ab89e3dc20610cb785abf9))
+
 ## [0.37.1](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.0...v0.37.1) (2026-09-28)
 
 
