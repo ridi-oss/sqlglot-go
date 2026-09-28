@@ -168,6 +168,16 @@ splits the classifier stream on `;` and routes/re-tokenizes per statement, offse
 positions so spans stay exact. Single statements tokenize as upstream does, except the ledgered
 `athena-*` grammar extensions below, which need real tokens where upstream packs a raw tail.
 
+### 1.21 PostgreSQL rejects `UNNEST ... WITH OFFSET`
+
+Upstream's shared `_parse_unnest` (`parser.py:5209`) accepts BigQuery's `WITH OFFSET [AS n]` in every
+dialect and regenerates it as `WITH ORDINALITY` (folding the name into the alias columns, or dropping
+it when there is no alias). PostgreSQL only has
+`WITH ORDINALITY`, so under postgres the port raises a parse error. Other dialects unchanged. The
+AST cannot tell a parsed `WITH OFFSET` from `WITH ORDINALITY AS u(v, n)`, whose surplus alias column
+upstream pops into the same `Identifier` offset, so the check is parser-only. Test
+`parser/postgres_unnest_test.go`.
+
 ## Opt-in behavioral extensions beyond upstream
 
 Additive analysis features; default behavior and fixture output unchanged.

@@ -84,7 +84,16 @@ func (p *Parser) parseUnnest(withAlias bool) exp.Expression {
 	if withAlias {
 		alias = p.parseTableAlias(nil)
 	}
-	if offset == nil && p.matchPair(tokens.WITH, tokens.OFFSET, true) {
+	// parser.py:5205-5207: with WITH ORDINALITY, a surplus alias column names the ordinal.
+	if alias != nil && offset != nil {
+		if columns, _ := alias.Arg("columns").([]exp.Expression); len(expressions) < len(columns) {
+			offset = columns[len(columns)-1]
+			alias.Set("columns", columns[:len(columns)-1])
+		}
+	}
+	// divergence: PostgreSQL has no WITH OFFSET (BigQuery-only); upstream's shared grammar
+	// accepts it in every dialect. See DEVIATIONS §1.21.
+	if offset == nil && p.dialect.Name != "postgres" && p.matchPair(tokens.WITH, tokens.OFFSET, true) {
 		p.match(tokens.ALIAS)
 		offset = p.parseIdVar(false, nil)
 		if offset == nil {
