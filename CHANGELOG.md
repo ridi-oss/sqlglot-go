@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.37.3](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.2...v0.37.3) (2026-10-12)
+
+
+### Bug Fixes
+
+* **parser:** parse repeated ADD CONSTRAINT and COMMENT ... IS NULL ([#112](https://github.com/ridi-oss/sqlglot-go/issues/112)) ([9da4b6b](https://github.com/ridi-oss/sqlglot-go/commit/9da4b6bbf2a7b24708bb4b1dada9ea3a9a179fe4))
+
 ## [0.37.2](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.1...v0.37.2) (2026-09-28)
 
 
