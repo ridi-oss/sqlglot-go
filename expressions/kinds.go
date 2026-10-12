@@ -1139,7 +1139,7 @@ var argTypes = map[Kind][]argSpec{
 	// ddl cluster (see the Kind block comment above for the upstream class/line references).
 	KindProperties:                {{"expressions", true}},
 	KindUserDefinedFunction:       {{"this", true}, {"expressions", false}, {"wrapped", false}},
-	KindReturnsProperty:           {{"this", false}, {"is_table", false}, {"table", false}, {"null", false}},
+	KindReturnsProperty:           {{"this", false}, {"is_table", false}, {"table", false}, {"null", false}, {"setof", false}},
 	KindLanguageProperty:          {{"this", true}},
 	KindSqlSecurityProperty:       {{"this", false}},
 	KindCalledOnNullInputProperty: {},

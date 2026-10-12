@@ -1080,17 +1080,22 @@ func (p *Parser) parseStabilityProperty(name string) exp.Expression {
 	return p.expression(exp.StabilityProperty(exp.Args{"this": exp.LiteralString(name)}), nil, nil)
 }
 
-// parseReturnsProperty ports _parse_returns (parser.py:3394-3414), minus its `RETURNS
-// TABLE(...)` branch (parser.py:3397-3407, a BigQuery/DuckDB-oriented table-valued-function
-// signature - deferred, no target-gap SQL uses it: a bare TABLE token here is simply left
-// unconsumed, degrading the enclosing CREATE to a Command).
+// parseReturnsProperty ports _parse_returns (parser.py:3492-3512), minus its BigQuery
+// `RETURNS TABLE <…>` form.
 func (p *Parser) parseReturnsProperty() exp.Expression {
 	var value exp.Expression
-	var null any
-	if p.matchTextSeq("NULL", "ON", "NULL", "INPUT") {
+	var null, setof any
+	isTable := p.match(tokens.TABLE)
+	if isTable {
+		value = p.parseSchema(exp.Var(exp.Args{"this": "TABLE"}))
+	} else if p.matchTextSeq("NULL", "ON", "NULL", "INPUT") {
 		null = true
 	} else {
+		// divergence: PostgreSQL `RETURNS SETOF <type>`; upstream leaves SETOF unparsed (Command).
+		if p.dialect.Name == "postgres" && p.matchTextSeq("SETOF") {
+			setof = true
+		}
 		value = p.parseTypes(false, false, true, false)
 	}
-	return p.expression(exp.ReturnsProperty(exp.Args{"this": value, "is_table": false, "null": null}), nil, nil)
+	return p.expression(exp.ReturnsProperty(exp.Args{"this": value, "is_table": isTable, "null": null, "setof": setof}), nil, nil)
 }

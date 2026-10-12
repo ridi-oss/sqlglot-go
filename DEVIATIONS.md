@@ -252,6 +252,7 @@ reconciliation note); malformed/engine-invalid forms fail closed to `Command` or
 | `athena-rename-partition` | `ALTER TABLE t PARTITION (k = v) RENAME TO PARTITION (k = v)` → `Alter{actions:[AlterRename{this:Partition}]}` (upstream parse-errors) |
 | `alter-add-constraint-repeated` | `ALTER TABLE t ADD CONSTRAINT a …, ADD CONSTRAINT b …` → `Alter` with one `AddConstraint` per `ADD` (upstream's constraint CSV eats the `, ADD` comma and the statement degrades to `Command`); `ADD CONSTRAINT a …, CONSTRAINT b …` keeps both in one `AddConstraint` |
 | `pg-comment-is-null` | PG `COMMENT ON … IS NULL` (drops a comment) → `Comment{expression:Null}` (upstream parse-errors) |
+| `pg-returns-setof` | PG `RETURNS SETOF <type>` → `ReturnsProperty{this:DataType, setof:true}` (an added `setof` arg; upstream leaves `SETOF` unparsed and the CREATE degrades to `Command`) |
 | `mysql-create-user`, `mysql-create-role`, `mysql-alter-user`, `mysql-drop-user`, `mysql-drop-role` | account DDL → structured `Create`/`Alter`/`Drop` root with `kind:"USER"\|"ROLE"`; body kept verbatim in a `Command` child |
 
 Cross-cutting rules for the SET/SHOW family:
