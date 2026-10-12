@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.37.4](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.3...v0.37.4) (2026-10-12)
+
+
+### Bug Fixes
+
+* **parser:** parse RETURNS TABLE (...) and PostgreSQL RETURNS SETOF ([#114](https://github.com/ridi-oss/sqlglot-go/issues/114)) ([e836199](https://github.com/ridi-oss/sqlglot-go/commit/e836199b77563f6467819202db953b6fee6fb023))
+
 ## [0.37.3](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.2...v0.37.3) (2026-10-12)
 
 
