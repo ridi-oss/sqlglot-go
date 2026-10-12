@@ -76,6 +76,9 @@ func (g *Generator) returnsPropertySQL(e expressions.Expression) string {
 	if boolValue(e.Arg("null")) {
 		return "RETURNS NULL ON NULL INPUT"
 	}
+	if boolValue(e.Arg("setof")) {
+		return "RETURNS SETOF " + g.sqlKey(e, "this")
+	}
 	return "RETURNS " + g.sqlKey(e, "this")
 }
 
