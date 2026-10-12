@@ -250,6 +250,8 @@ reconciliation note); malformed/engine-invalid forms fail closed to `Command` or
 | `athena-explain` | Athena `EXPLAIN [ANALYZE] [(FORMAT\|TYPE …)] stmt` per the Athena docs (ANALYZE allows only FORMAT TEXT\|JSON; targets SELECT, CTAS, INSERT) → `Describe{kind:"EXPLAIN"}` (same shape as `pg-explain`); inner statement fully parsed |
 | `athena-unload` | `UNLOAD (query) TO 's3://…' WITH (format = …, …)` → `Unload{this:Subquery, files, params}` (a dedicated Kind so athena/trino `COPY` keeps upstream's rendering); documented properties only, `format` required and validated, inner query fully parsed |
 | `athena-rename-partition` | `ALTER TABLE t PARTITION (k = v) RENAME TO PARTITION (k = v)` → `Alter{actions:[AlterRename{this:Partition}]}` (upstream parse-errors) |
+| `alter-add-constraint-repeated` | `ALTER TABLE t ADD CONSTRAINT a …, ADD CONSTRAINT b …` → `Alter` with one `AddConstraint` per `ADD` (upstream's constraint CSV eats the `, ADD` comma and the statement degrades to `Command`); `ADD CONSTRAINT a …, CONSTRAINT b …` keeps both in one `AddConstraint` |
+| `pg-comment-is-null` | PG `COMMENT ON … IS NULL` (drops a comment) → `Comment{expression:Null}` (upstream parse-errors) |
 | `mysql-create-user`, `mysql-create-role`, `mysql-alter-user`, `mysql-drop-user`, `mysql-drop-role` | account DDL → structured `Create`/`Alter`/`Drop` root with `kind:"USER"\|"ROLE"`; body kept verbatim in a `Command` child |
 
 Cross-cutting rules for the SET/SHOW family:

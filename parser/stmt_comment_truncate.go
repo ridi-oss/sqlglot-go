@@ -61,6 +61,10 @@ func (p *Parser) parseComment() exp.Expression {
 	// RawString parsers, unported here). The Command re-emits the original source, so
 	// identity cases (e.g. the base N'...' form) still round-trip.
 	expression := p.parseString()
+	// divergence: `IS NULL` drops a PostgreSQL comment; upstream (parser.py:2305) leaves it a parse error.
+	if expression == nil && p.match(tokens.NULL) {
+		expression = exp.Null()
+	}
 	if expression == nil {
 		return p.parseAsCommand(start)
 	}
