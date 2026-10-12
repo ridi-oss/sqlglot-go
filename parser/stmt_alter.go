@@ -231,7 +231,7 @@ func (p *Parser) parseAddAlteration() exp.Expression {
 	p.matchTextSeq("ADD")
 
 	if p.matchSet(addConstraintTokens, false) {
-		return p.expression(exp.AddConstraint(exp.Args{"expressions": p.parseCsv(p.parseConstraint)}), nil, nil)
+		return p.expression(exp.AddConstraint(exp.Args{"expressions": p.parseAddConstraints()}), nil, nil)
 	}
 
 	if columnDef := p.parseAddColumn(); columnDef != nil && columnDef.Kind() == exp.KindColumnDef {
@@ -255,6 +255,25 @@ func (p *Parser) parseAddAlteration() exp.Expression {
 	}
 
 	return nil
+}
+
+// parseAddConstraints is parseCsv(parseConstraint) that leaves a `, ADD` to the outer action list.
+// divergence: upstream (parser.py:9032) consumes that comma, so `ADD CONSTRAINT a …, ADD CONSTRAINT b …`
+// (valid PostgreSQL and MySQL) leaves `ADD …` unparsed and the ALTER degrades to Command.
+func (p *Parser) parseAddConstraints() []exp.Expression {
+	items := []exp.Expression{}
+	for {
+		if c := p.parseConstraint(); c != nil {
+			items = append(items, c)
+		}
+		if p.curr.TokenType != tokens.COMMA || stringsUpper(p.next.Text) == "ADD" {
+			return items
+		}
+		p.advance()
+		if len(items) > 0 {
+			p.addComments(items[len(items)-1])
+		}
+	}
 }
 
 // parseAlterTableAdd ports _parse_alter_table_add (parser.py:8752-8789).
