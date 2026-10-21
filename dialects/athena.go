@@ -109,7 +109,9 @@ func newAthenaTokenizer() *tokens.Tokenizer {
 				}
 			}
 			if hive {
-				result = append(result, tokens.NewToken(tokens.HIVE_TOKEN_STREAM, ""))
+				marker := tokens.NewToken(tokens.HIVE_TOKEN_STREAM, "")
+				marker.Synthetic = true
+				result = append(result, marker)
 			}
 			result = append(result, routed...)
 			start = end + 1

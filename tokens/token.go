@@ -28,6 +28,11 @@ type Token struct {
 	// executable MySQL (`SELECT 1 /*!40101 + 2` has no closing `*/`).
 	WrapStart int
 	WrapEnd   int
+	// Keyword is set iff TokenType came from the Keywords table of the tokenizer that scanned this
+	// token (Hive or Trino under Athena); that table also holds operators such as `::` and `<=`.
+	Keyword bool
+	// Synthetic marks a token with no source text (Athena's HIVE_TOKEN_STREAM); its span is meaningless.
+	Synthetic bool
 }
 
 var SentinelNone = Token{TokenType: SENTINEL}
