@@ -333,6 +333,16 @@ Bind-parameter spans let a consumer bind ordered parameters lexically; tree walk
 across CTEs, joins and WHERE. Tests `expressions/span_test.go`, `parser/parser_span_test.go`,
 `parser/placeholder_span_test.go`, `optimizer/qualify_span_test.go`, `statement_span_test.go`.
 
+### 6.3 `Token.Keyword`
+Upstream tokens carry no record of where their type came from. `Token.Keyword` is set when the
+type was looked up in the scanning tokenizer's `Keywords` table — under Athena that is the Hive or
+Trino table the statement was routed to — so a token-only consumer can tell keywords from
+identifiers without re-deriving the routing. Operators in that table (`::`, `<=`, `->`) are flagged
+too. Quoted identifiers, strings, and a word after a
+`PARAMETER` are never keywords. `Token.Synthetic` marks the one token with no source text,
+Athena's `HIVE_TOKEN_STREAM` routing marker, so such a consumer can skip it without naming Hive.
+Tests `tokens/tokens_test.go`, `dialects/athena_test.go`.
+
 ---
 
 ## 7. Qualifier arg renamed `db` → `schema`

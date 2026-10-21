@@ -218,3 +218,13 @@ func sameStrings(a, b []string) bool {
 	}
 	return true
 }
+
+func TestKeywordFlag(t *testing.T) {
+	got := mustTokenize(t, NewTokenizer(), `SELECT a, "select", 'from', group_x FROM t GROUP BY a`)
+	want := map[string]bool{"SELECT": true, "a": false, "select": false, "from": false, "group_x": false, "FROM": true, "t": false, "GROUP BY": true, ",": false}
+	for _, tok := range got {
+		if w, ok := want[tok.Text]; ok && tok.Keyword != w {
+			t.Errorf("%s %q: Keyword = %v, want %v", tok.TokenType, tok.Text, tok.Keyword, w)
+		}
+	}
+}

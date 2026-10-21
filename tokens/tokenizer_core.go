@@ -338,7 +338,8 @@ func (c *TokenizerCore) scanKeywords() {
 			if prevSpace || singleToken || char == 0 {
 				c.advance(size-1, false)
 				upperWord := strings.ToUpper(word)
-				c.add(c.keywords[upperWord], upperWord)
+				tokenType, ok := c.keywords[upperWord]
+				c.addKeyword(tokenType, ok, upperWord)
 				return
 			}
 		}
@@ -726,11 +727,19 @@ func (c *TokenizerCore) scanVar() {
 		c.advance(1, true)
 	}
 
-	tokenType := c.keywords[strings.ToUpper(c.text())]
-	if tokenType == 0 || (len(c.tokens) > 0 && c.tokens[len(c.tokens)-1].TokenType == PARAMETER) {
-		tokenType = VAR
+	tokenType, ok := c.keywords[strings.ToUpper(c.text())]
+	if !ok || tokenType == 0 || (len(c.tokens) > 0 && c.tokens[len(c.tokens)-1].TokenType == PARAMETER) {
+		tokenType, ok = VAR, false
 	}
-	c.add(tokenType)
+	c.addKeyword(tokenType, ok)
+}
+
+// addKeyword is add that marks the new token as a Keywords-table match. The index is taken
+// before add because a command keyword appends its raw tail as a second token.
+func (c *TokenizerCore) addKeyword(tokenType TokenType, keyword bool, text ...string) {
+	i := len(c.tokens)
+	c.add(tokenType, text...)
+	c.tokens[i].Keyword = keyword
 }
 
 func (c *TokenizerCore) extractString(delimiter string, escapes map[rune]bool, rawString bool, raiseUnmatched bool) string {

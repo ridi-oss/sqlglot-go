@@ -322,3 +322,20 @@ func TestAthenaBoundaryDisagreementsAndHintComments(t *testing.T) {
 		t.Fatalf("hint comment payload changed:\ngot  %s\nwant %s", tokens.ReprTokens(got), tokens.ReprTokens(want))
 	}
 }
+
+func TestAthenaKeywordFlagFollowsRoutedEngine(t *testing.T) {
+	got := athenaTokens(t, "ALTER TABLE t SET SERDEPROPERTIES ('a' = 'b'); SELECT serdeproperties, ipaddress FROM t")
+	var flags []string
+	for _, tok := range got {
+		if tok.Synthetic != (tok.TokenType == tokens.HIVE_TOKEN_STREAM) {
+			t.Errorf("%s %q: Synthetic = %v", tok.TokenType, tok.Text, tok.Synthetic)
+		}
+		if tok.Text == "SERDEPROPERTIES" || tok.Text == "serdeproperties" || tok.Text == "ipaddress" {
+			flags = append(flags, tok.Text+"="+map[bool]string{true: "kw", false: "word"}[tok.Keyword])
+		}
+	}
+	want := []string{"SERDEPROPERTIES=kw", "serdeproperties=word", "ipaddress=kw"}
+	if !reflect.DeepEqual(flags, want) {
+		t.Fatalf("flags = %v, want %v", flags, want)
+	}
+}
