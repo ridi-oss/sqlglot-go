@@ -18,6 +18,13 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.38.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.4...v0.38.0) (2026-10-21)
+
+
+### Features
+
+* **tokens:** flag keyword and synthetic tokens ([#116](https://github.com/ridi-oss/sqlglot-go/issues/116)) ([024f70d](https://github.com/ridi-oss/sqlglot-go/commit/024f70d51828fb61f1dcf27df98f21c55701ace8))
+
 ## [0.37.4](https://github.com/ridi-oss/sqlglot-go/compare/v0.37.3...v0.37.4) (2026-10-12)
 
 
