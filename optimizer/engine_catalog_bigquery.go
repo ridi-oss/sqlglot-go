@@ -27,7 +27,9 @@ func bigqueryTempFunctions(expression exp.Expression) map[string]bool {
 			continue
 		}
 		if udf := create.This(); udf != nil {
-			if target := udf.This(); target != nil && target.Kind() == exp.KindTable && target.Arg("schema") == nil {
+			// BigQuery rejects a qualified temp function name, so a schema here only comes from
+			// Qualify stamping the default dataset.
+			if target := udf.This(); target != nil && target.Kind() == exp.KindTable {
 				names[target.Name()] = true
 			}
 		}

@@ -306,19 +306,21 @@ func prestoBuildRegexpReplace(args []exp.Expression) exp.Expression {
 }
 
 func prestoBuildDateAdd(args []exp.Expression) exp.Expression {
-	return exp.New(exp.KindDateAdd, exp.Args{
+	unit := prestoSeqGet(args, 0)
+	return withColumnUnit(exp.New(exp.KindDateAdd, exp.Args{
 		"this":       prestoSeqGet(args, 2),
 		"expression": prestoSeqGet(args, 1),
-		"unit":       prestoSeqGet(args, 0),
-	})
+		"unit":       unit,
+	}), unit)
 }
 
 func prestoBuildDateDiff(args []exp.Expression) exp.Expression {
-	return exp.New(exp.KindDateDiff, exp.Args{
+	unit := prestoSeqGet(args, 0)
+	return withColumnUnit(exp.New(exp.KindDateDiff, exp.Args{
 		"this":       prestoSeqGet(args, 2),
 		"expression": prestoSeqGet(args, 1),
-		"unit":       prestoSeqGet(args, 0),
-	})
+		"unit":       unit,
+	}), unit)
 }
 
 // prestoBuildElementAt ports ELEMENT_AT -> Bracket(this, [expr], offset=1, safe=True)
@@ -434,9 +436,18 @@ func prestoBuildDateTrunc(args []exp.Expression) exp.Expression {
 	unit := prestoSeqGet(args, 0)
 	this := prestoSeqGet(args, 1)
 	if this != nil && (this.Kind() == exp.KindCast || this.Kind() == exp.KindTryCast) && exp.DataTypeIsType(this, false, exp.DTypeDate) {
-		return exp.DateTrunc(exp.Args{"unit": unit, "this": this})
+		return withColumnUnit(exp.DateTrunc(exp.Args{"unit": unit, "this": this}), unit)
 	}
-	return exp.New(exp.KindTimestampTrunc, exp.Args{"this": this, "unit": exp.TimeUnitVar(unit)})
+	return withColumnUnit(exp.New(exp.KindTimestampTrunc, exp.Args{"this": this, "unit": unit}), unit)
+}
+
+// withColumnUnit keeps a column unit as the column: the unit argument is a string, so a bare `day`
+// is a column read, not a keyword (DEVIATIONS §1.26).
+func withColumnUnit(node exp.Expression, unit exp.Expression) exp.Expression {
+	if unit != nil && unit.Kind() == exp.KindColumn {
+		node.Set("unit", unit)
+	}
+	return node
 }
 
 func prestoBuildRegexpExtract(kind exp.Kind) func([]exp.Expression) exp.Expression {

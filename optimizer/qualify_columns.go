@@ -722,7 +722,7 @@ func convertColumnsToDots(scope *Scope, resolver *Resolver) {
 				}
 				root = parts[0]
 				parts = parts[1:]
-			} else if table := resolver.GetTable(root.Name()); table != nil {
+			} else if table := resolver.getTableAt(root.Name(), column); table != nil {
 				columnTableExpression = table
 			} else {
 				continue
@@ -780,7 +780,7 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 	for _, pivot := range scope.Pivots() {
 		for _, column := range pivot.FindAll(exp.KindColumn) {
 			if column.Text("table") == "" && resolver.AllColumns()[column.Name()] {
-				if table := resolver.GetTable(column.Name()); table != nil {
+				if table := resolver.getTableAt(column.Name(), column); table != nil {
 					column.Set("table", table)
 				}
 			}

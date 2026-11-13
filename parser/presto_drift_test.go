@@ -21,7 +21,9 @@ func TestPrestoParserDrift(t *testing.T) {
 		{"SELECT DATE_TRUNC('day', CAST(x AS DATE))", "SELECT DATE_TRUNC('DAY', CAST(x AS DATE))", exp.KindDateTrunc, "unit", "DAY"},
 		{"SELECT DATE_TRUNC('Q', x)", "SELECT DATE_TRUNC('QUARTER', x)", exp.KindTimestampTrunc, "unit", "QUARTER"},
 		{"SELECT DATE_TRUNC('q', x)", "SELECT DATE_TRUNC('Q', x)", exp.KindTimestampTrunc, "unit", "Q"},
-		{"SELECT DATE_TRUNC(u, x)", "SELECT DATE_TRUNC('U', x)", exp.KindTimestampTrunc, "unit", "U"},
+		// divergence (DEVIATIONS §1.26): upstream turns column u into unit 'U'; a non-date-part
+		// column stays a column so its read is kept.
+		{"SELECT DATE_TRUNC(u, x)", "SELECT DATE_TRUNC(u, x)", exp.KindTimestampTrunc, "unit", "u"},
 		{"SELECT DATE_FORMAT(x, f)", "SELECT DATE_FORMAT(x, f)", exp.KindTimeToStr, "", ""},
 		{"SELECT DATE_FORMAT(x, '')", "SELECT DATE_FORMAT(x, 'None')", exp.KindTimeToStr, "format", "None"},
 		{"SELECT DATE_TRUNC('day', x)", "SELECT DATE_TRUNC('DAY', x)", exp.KindTimestampTrunc, "unit", "DAY"},

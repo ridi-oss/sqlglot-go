@@ -22,6 +22,8 @@ func hiveParserOverrideSet() dialectParserOverrideSet {
 	return dialectParserOverrideSet{
 		// parsers/hive.py:126-128: CURRENT_TIME is an ordinary identifier in Hive.
 		DisabledNoParenFunctions: map[tokens.TokenType]bool{tokens.CURRENT_TIME: true},
+		// divergence: Hive has no builtin NORMALIZE, so NORMALIZE(a, b) is a UDF and b a column.
+		DisabledFunctionParsers: map[string]bool{"NORMALIZE": true},
 		FunctionParsers: map[string]parserOverrideFunc{
 			"PERCENTILE": func(p *Parser) exp.Expression {
 				return p.parseHiveQuantileFunction(exp.KindQuantile)

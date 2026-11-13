@@ -153,7 +153,12 @@ func (p *Parser) parseDatePart() exp.Expression {
 	part := p.parseType(true, false)
 	p.match(tokens.COMMA)
 	value := p.parseBitwise()
-	if part != nil && (part.Kind() == exp.KindColumn || part.Kind() == exp.KindLiteral) {
+	// divergence (DEVIATIONS §1.26): date_part takes text, so a column part is a column read; keep
+	// the call (EXTRACT would read it as a field name). Upstream turns it into a field keyword.
+	if part != nil && part.Kind() == exp.KindColumn && value != nil {
+		return p.expression(exp.Anonymous(exp.Args{"this": "DATE_PART", "expressions": []exp.Expression{part, value}}), nil, nil)
+	}
+	if part != nil && part.Kind() == exp.KindLiteral {
 		part = exp.Var(exp.Args{"this": part.Name()})
 	}
 	return p.expression(exp.Extract(exp.Args{"this": part, "expression": value}), nil, nil)

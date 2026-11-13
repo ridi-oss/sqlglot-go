@@ -249,10 +249,6 @@ func (p *Parser) implicitUnnestsToExplicit(this exp.Expression) exp.Expression {
 		if isNamePath(table) && side != "RIGHT" && side != "FULL" {
 			if parts := table.Parts(); len(parts) > 1 && refs[strings.ToLower(parts[0].Name())] {
 				rangeVariableUnnest(table)
-				// An unaliased path's implicit alias is its last name, as upstream keeps it.
-				if table.Arg("alias") == nil {
-					refs[strings.ToLower(parts[len(parts)-1].Name())] = true
-				}
 				table = join.This()
 			}
 		}
@@ -323,9 +319,16 @@ func (p *Parser) bigqueryParseBracket(this exp.Expression) exp.Expression {
 
 // isNamePath reports whether a FROM table is a plain, unbackticked name path such as u.tags.
 func isNamePath(table exp.Expression) bool {
-	this := table.This()
-	return table.Kind() == exp.KindTable && this != nil && this.Kind() == exp.KindIdentifier &&
-		table.MetaGet("quoted_table") == nil
+	if table.Kind() != exp.KindTable || table.This() == nil || table.MetaGet("quoted_table") != nil {
+		return false
+	}
+	// A path longer than three names keeps the rest in a Dot under this.
+	for _, part := range table.Parts() {
+		if part.Kind() != exp.KindIdentifier {
+			return false
+		}
+	}
+	return true
 }
 
 // rangeVariableUnnest replaces `FROM u.s.arr [AS a]` with `UNNEST(u.s.arr) [AS a]`, where u is a
@@ -341,10 +344,16 @@ func rangeVariableUnnest(table exp.Expression) {
 		}
 		column = exp.DotBuild(chain)
 	}
-	unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{column}})
-	if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias {
-		unnest.Set("alias", exp.TableAlias(exp.Args{"columns": []exp.Expression{alias.This()}}))
+	// An unaliased path's implicit alias is its last name (BigQuery "Implicit aliases"); upstream
+	// drops it, so `JOIN u.tags` then `SELECT tags` bound the array, not the element.
+	aliasName := parts[len(parts)-1].Copy()
+	if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias && alias.This() != nil {
+		aliasName = alias.This()
 	}
+	unnest := exp.Unnest(exp.Args{
+		"expressions": []exp.Expression{column},
+		"alias":       exp.TableAlias(exp.Args{"columns": []exp.Expression{aliasName}}),
+	})
 	table.Replace(unnest)
 }
 
@@ -357,13 +366,9 @@ func bigqueryCorrelatedUnnests(statement exp.Expression) {
 		return
 	}
 	for _, table := range statement.FindAll(exp.KindTable) {
-		this := table.This()
 		parent := table.Parent()
-		if this == nil || this.Kind() != exp.KindIdentifier || table.Arg("schema") == nil || parent == nil {
-			continue
-		}
 		// A backticked path `o.arr` names a table, unlike `o`.`arr` (generators/bigquery.py:614-627).
-		if table.MetaGet("quoted_table") != nil {
+		if !isNamePath(table) || table.Arg("schema") == nil || parent == nil {
 			continue
 		}
 		if parent.Kind() != exp.KindFrom && parent.Kind() != exp.KindJoin {
@@ -381,10 +386,35 @@ func bigqueryCorrelatedUnnests(statement exp.Expression) {
 	}
 }
 
-// enclosingSourceNames collects the lowercase alias-or-names of the sources of every query that
-// encloses sel: FROM/JOIN of a SELECT, the target and FROM/USING of UPDATE, DELETE and MERGE. It
-// stops at a CTE boundary (a CTE body cannot correlate) and at a derived table in a FROM clause,
-// which sees neither that FROM's other sources nor anything further out.
+// isArgOf reports whether child is n's value, or an element of n's list, for one of keys.
+func isArgOf(n, child exp.Expression, keys ...string) bool {
+	for _, key := range keys {
+		switch v := n.Arg(key).(type) {
+		case exp.Expression:
+			if v == child {
+				return true
+			}
+		case []exp.Expression:
+			for _, e := range v {
+				if e == child {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// enclosingSourceNames collects the lowercase range-variable names visible from sel's FROM through
+// enclosing queries, following BigQuery's scoping by the clause each step comes up through:
+//   - SELECT: a subquery or table function in FROM/JOIN sees none of that FROM's items; an UNNEST
+//     sees the items before it; a JOIN's ON sees the items up to and
+//     including that join; any other clause sees all items.
+//   - UPDATE/DELETE: SET/WHERE see the target and its FROM/USING items and joins.
+//   - MERGE: the USING source sees neither side; ON and WHEN MATCHED see both; WHEN NOT MATCHED
+//     [BY TARGET] sees the source; WHEN NOT MATCHED BY SOURCE sees the target.
+//
+// The walk stops at a CTE (a CTE body cannot correlate).
 func enclosingSourceNames(sel exp.Expression) map[string]bool {
 	names := map[string]bool{}
 	var add func(source exp.Expression)
@@ -413,35 +443,79 @@ func enclosingSourceNames(sel exp.Expression) map[string]bool {
 			add(join.This())
 		}
 	}
-	derived := false
-	for prev, n := sel, sel.Parent(); n != nil && n.Kind() != exp.KindCTE; prev, n = n, n.Parent() {
-		switch n.Kind() {
-		case exp.KindFrom, exp.KindJoin:
-			// Only the source itself is derived; a subquery in a JOIN's ON may correlate.
-			derived = n.This() == prev
-			continue
-		case exp.KindSelect, exp.KindUpdate, exp.KindDelete, exp.KindMerge:
-		default:
-			continue
-		}
-		if derived {
-			// A derived table cannot correlate past the query whose FROM holds it.
-			return names
-		}
-		add(asExpr(n.Arg("this")))
-		add(asExpr(n.Arg("from_")))
-		switch using := n.Arg("using").(type) {
+	addList := func(v any) {
+		switch x := v.(type) {
 		case exp.Expression:
-			add(using)
+			add(x)
 		case []exp.Expression:
-			for _, u := range using {
-				add(u)
+			for _, e := range x {
+				add(e)
 			}
 		}
-		joins, _ := n.Arg("joins").([]exp.Expression)
-		for _, join := range joins {
-			add(join.This())
+	}
+	// child is n's direct child on the path from sel; grand is child's child on that path.
+	var child, grand exp.Expression = sel, nil
+	for n := sel.Parent(); n != nil && n.Kind() != exp.KindCTE; n = n.Parent() {
+		switch n.Kind() {
+		case exp.KindSelect:
+			from := asExpr(n.Arg("from_"))
+			joins, _ := n.Arg("joins").([]exp.Expression)
+			switch {
+			case child == from:
+				// The first FROM item has no items before it.
+			case child.Kind() == exp.KindJoin && child.Parent() == n:
+				k := 0
+				for k < len(joins) && joins[k] != child {
+					k++
+				}
+				item := child.This()
+				if grand == item && item.Kind() != exp.KindUnnest {
+					// A derived table or a table function sees none of this FROM's items; only an
+					// UNNEST correlates with the items before it.
+				} else {
+					last := k
+					if grand != item {
+						last = k + 1 // the ON also sees the join's own item
+					}
+					add(from)
+					for _, join := range joins[:min(last, len(joins))] {
+						add(join.This())
+					}
+				}
+			default:
+				add(from)
+				for _, join := range joins {
+					add(join.This())
+				}
+			}
+		case exp.KindUpdate, exp.KindDelete:
+			if isArgOf(n, child, "this", "from_", "using", "joins", "tables") {
+				break // a source item does not see the target
+			}
+			add(asExpr(n.Arg("this")))
+			add(asExpr(n.Arg("from_")))
+			addList(n.Arg("using"))
+			addList(n.Arg("joins"))
+			addList(n.Arg("tables")) // BigQuery `DELETE ds.t AS t WHERE ...` keeps its target here
+		case exp.KindMerge:
+			target, source := asExpr(n.Arg("this")), asExpr(n.Arg("using"))
+			switch {
+			case child == source || child == target:
+			case child == asExpr(n.Arg("whens")):
+				// grand is the When the path comes through.
+				matched, bySource := truthyArg(grand.Arg("matched")), truthyArg(grand.Arg("source"))
+				if matched || bySource {
+					add(target)
+				}
+				if matched || !bySource {
+					add(source)
+				}
+			default:
+				add(target)
+				add(source)
+			}
 		}
+		grand, child = child, n
 	}
 	return names
 }

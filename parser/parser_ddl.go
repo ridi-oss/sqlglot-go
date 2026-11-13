@@ -951,6 +951,9 @@ func init() {
 		},
 	})
 	registerDialectParserOverrides("mysql", dialectParserOverrideSet{
+		// divergence: MySQL has no builtin NORMALIZE, so NORMALIZE(a, b) is a stored function and b
+		// a column; upstream's base parser reads b as a keyword and loses the read.
+		DisabledFunctionParsers: map[string]bool{"NORMALIZE": true},
 		// GROUP_CONCAT: MySQL FUNCTION_PARSERS entry (parsers/mysql.py:156); see
 		// parseGroupConcat in dialect_mysql_overrides.go.
 		FunctionParsers: map[string]parserOverrideFunc{

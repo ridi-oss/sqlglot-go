@@ -296,8 +296,11 @@ func bigqueryFunctions() map[string]func([]exp.Expression) exp.Expression {
 			}
 			return exp.FromArgList(exp.KindTimeFromParts, args)
 		},
-		"TIME_ADD": bigqueryDateDeltaWithInterval(exp.KindTimeAdd),
-		"TIME_SUB": bigqueryDateDeltaWithInterval(exp.KindTimeSub),
+		"TIME_DIFF":      fromArgList(exp.KindTimeDiff),
+		"TIME_TRUNC":     fromArgList(exp.KindTimeTrunc),
+		"TIMESTAMP_DIFF": fromArgList(exp.KindTimestampDiff),
+		"TIME_ADD":       bigqueryDateDeltaWithInterval(exp.KindTimeAdd),
+		"TIME_SUB":       bigqueryDateDeltaWithInterval(exp.KindTimeSub),
 		"TIMESTAMP": func(args []exp.Expression) exp.Expression {
 			e := exp.FromArgList(exp.KindTimestamp, args)
 			e.Set("with_tz", true)

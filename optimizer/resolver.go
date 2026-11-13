@@ -22,8 +22,10 @@ type Resolver struct {
 	sourceColumns      map[string][]string
 	sourceColumnsOrder []string
 	unambiguousColumns map[string]string
-	allColumns         map[string]bool
-	inferSchema        bool
+	// unambiguousNoShadow is unambiguousColumns without UNNEST-alias shadowing.
+	unambiguousNoShadow map[string]string
+	allColumns          map[string]bool
+	inferSchema         bool
 
 	getSourceColumnsCache map[sourceColumnsKey][]string
 }
@@ -46,6 +48,12 @@ func NewResolver(scope *Scope, s schema.Schema, inferSchema bool) *Resolver {
 }
 
 func (r *Resolver) GetTable(column any) exp.Expression {
+	columnExpr, _ := column.(exp.Expression)
+	return r.getTableAt(column, columnExpr)
+}
+
+// getTableAt resolves column as GetTable does; at is the node whose position decides shadowing.
+func (r *Resolver) getTableAt(column any, at exp.Expression) exp.Expression {
 	columnName := ""
 	if s, ok := column.(string); ok {
 		columnName = s
@@ -53,13 +61,17 @@ func (r *Resolver) GetTable(column any) exp.Expression {
 		columnName = expression.Name()
 	}
 
-	tableName := r.getTableNameFromSources(columnName, nil, nil)
+	columnExpr, _ := column.(exp.Expression)
+	isColumn := columnExpr != nil && columnExpr.Kind() == exp.KindColumn
+	// divergence (DEVIATIONS §1.25): upstream's UNNEST-alias shadowing (resolver.py:326-353) can bind
+	// a column in an ON or a FROM item to an UNNEST joined after it, losing the earlier column's read.
+	// There no shadowing applies: an ambiguous name fails.
+	shadow := at == nil || r.dialect == nil || !r.dialect.UnnestColumnOnly || !r.inJoinOrFromItem(at)
+	tableName := r.getTableNameFromSources(columnName, nil, nil, shadow)
 
-	if tableName == "" {
-		if columnExpr, ok := column.(exp.Expression); ok && columnExpr != nil && columnExpr.Kind() == exp.KindColumn {
-			if joinContext := r.getColumnJoinContext(columnExpr); joinContext != nil {
-				tableName = r.getTableNameFromJoinContextRecover(columnName, joinContext)
-			}
+	if tableName == "" && isColumn {
+		if joinContext := r.getColumnJoinContext(columnExpr); joinContext != nil {
+			tableName = r.getTableNameFromJoinContextRecover(columnName, joinContext, shadow)
 		}
 	}
 
@@ -285,14 +297,20 @@ func (r *Resolver) getAllSourceColumns() map[string][]string {
 	return r.sourceColumns
 }
 
-func (r *Resolver) getTableNameFromSources(columnName string, sourceColumns map[string][]string, order []string) string {
+func (r *Resolver) getTableNameFromSources(columnName string, sourceColumns map[string][]string, order []string, shadow bool) string {
 	if sourceColumns == nil {
+		if !shadow {
+			if r.unambiguousNoShadow == nil {
+				r.unambiguousNoShadow = r.getUnambiguousColumns(r.getAllSourceColumns(), r.sourceColumnsOrder, false)
+			}
+			return r.unambiguousNoShadow[columnName]
+		}
 		if r.unambiguousColumns == nil {
-			r.unambiguousColumns = r.getUnambiguousColumns(r.getAllSourceColumns(), r.sourceColumnsOrder)
+			r.unambiguousColumns = r.getUnambiguousColumns(r.getAllSourceColumns(), r.sourceColumnsOrder, true)
 		}
 		return r.unambiguousColumns[columnName]
 	}
-	return r.getUnambiguousColumns(sourceColumns, order)[columnName]
+	return r.getUnambiguousColumns(sourceColumns, order, shadow)[columnName]
 }
 
 func (r *Resolver) getTableNameFromSourcesRecover(columnName string, sourceColumns map[string][]string, order []string) (tableName string) {
@@ -305,10 +323,10 @@ func (r *Resolver) getTableNameFromSourcesRecover(columnName string, sourceColum
 			panic(recovered)
 		}
 	}()
-	return r.getTableNameFromSources(columnName, sourceColumns, order)
+	return r.getTableNameFromSources(columnName, sourceColumns, order, true)
 }
 
-func (r *Resolver) getTableNameFromJoinContextRecover(columnName string, joinContext exp.Expression) (tableName string) {
+func (r *Resolver) getTableNameFromJoinContextRecover(columnName string, joinContext exp.Expression, shadow bool) (tableName string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			if _, ok := recovered.(*sqlerrors.OptimizeError); ok {
@@ -319,7 +337,7 @@ func (r *Resolver) getTableNameFromJoinContextRecover(columnName string, joinCon
 		}
 	}()
 	available, order := r.getAvailableSourceColumns(joinContext)
-	return r.getTableNameFromSources(columnName, available, order)
+	return r.getTableNameFromSources(columnName, available, order, shadow)
 }
 
 func (r *Resolver) getColumnJoinContext(column exp.Expression) exp.Expression {
@@ -363,7 +381,7 @@ func (r *Resolver) getAvailableSourceColumns(joinAncestor exp.Expression) (map[s
 	return availableSources, order
 }
 
-func (r *Resolver) getUnambiguousColumns(sourceColumns map[string][]string, order []string) map[string]string {
+func (r *Resolver) getUnambiguousColumns(sourceColumns map[string][]string, order []string, shadow bool) map[string]string {
 	if len(sourceColumns) == 0 {
 		return map[string]string{}
 	}
@@ -390,7 +408,25 @@ func (r *Resolver) getUnambiguousColumns(sourceColumns map[string][]string, orde
 		return out
 	}
 
-	// TODO(slice 4c): UNNEST_COLUMN_ONLY original-alias shadowing.
+	// resolver.py:326-339: with UNNEST_COLUMN_ONLY an UNNEST alias shadows a same-named column
+	// of another source.
+	unnestOriginalAliases := map[string]string{}
+	if shadow && r.dialect != nil && r.dialect.UnnestColumnOnly {
+		for sourceName, source := range r.scope.Sources {
+			scope, ok := source.(*Scope)
+			if !ok || scope.Expression == nil || scope.Expression.Kind() != exp.KindUnnest {
+				continue
+			}
+			if columns := scope.Expression.AliasColumnNames(); len(columns) > 0 {
+				// Two UNNESTs with one alias stay ambiguous (Go map order is random).
+				if _, seen := unnestOriginalAliases[columns[0]]; seen {
+					unnestOriginalAliases[columns[0]] = ""
+				} else {
+					unnestOriginalAliases[columns[0]] = sourceName
+				}
+			}
+		}
+	}
 	unambiguousColumns := map[string]string{}
 	allColumns := map[string]bool{}
 	for _, column := range firstColumns {
@@ -411,6 +447,10 @@ func (r *Resolver) getUnambiguousColumns(sourceColumns map[string][]string, orde
 			allColumns[column] = true
 		}
 		for column := range ambiguous {
+			if source := unnestOriginalAliases[column]; source != "" {
+				unambiguousColumns[column] = source
+				continue
+			}
 			delete(unambiguousColumns, column)
 		}
 		for column := range unique {
@@ -602,4 +642,15 @@ func literalType(e exp.Expression) exp.Expression {
 		return exp.DataType(exp.Args{"this": exp.DTypeStruct, "expressions": fields, "nested": true})
 	}
 	return nil
+}
+
+// inJoinOrFromItem reports whether node reaches this scope's query through its JOIN or FROM clause
+// (a correlated subquery's column included).
+func (r *Resolver) inJoinOrFromItem(node exp.Expression) bool {
+	for n := node; n.Parent() != nil; n = n.Parent() {
+		if n.Parent() == r.scope.Expression {
+			return n.Kind() == exp.KindJoin || n.Kind() == exp.KindFrom
+		}
+	}
+	return false
 }

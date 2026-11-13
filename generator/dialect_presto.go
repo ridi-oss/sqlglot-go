@@ -365,6 +365,9 @@ func prestoUnit(e exp.Expression) exp.Expression {
 	if unit.Kind() == exp.KindLiteral || unit.Kind() == exp.KindVar {
 		return exp.LiteralString(strings.ToUpper(unit.Name()))
 	}
+	if unit.Kind() == exp.KindWeekStart {
+		return exp.LiteralString("WEEK")
+	}
 	return unit
 }
 

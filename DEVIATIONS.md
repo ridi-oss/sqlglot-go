@@ -213,7 +213,7 @@ Tests `bigquery_test.go`, the BigQuery cases of `qualify_columns.sql`.
 
 ### 1.24 BigQuery pseudo-columns exclude `_DBT_MAX_PARTITION`
 
-Upstream bug: `PSEUDOCOLUMNS` (`dialects/bigquery.py:89-95`) includes `_DBT_MAX_PARTITION`, a dbt
+Upstream bug: `PSEUDOCOLUMNS` (`dialects/bigquery.py:104-110`) includes `_DBT_MAX_PARTITION`, a dbt
 template variable, not a reserved name (BigQuery's reserved column prefixes are `_TABLE_`,
 `_FILE_`, `_PARTITION`, `_ROW_TIMESTAMP`, `__ROOT__`, `_COLIDENTIFIER` and `_CHANGE_*`). A real column with that name becomes a
 `Pseudocolumn` with no source table, so its read is lost from lineage. Fixed: it is an ordinary
@@ -221,23 +221,58 @@ Column. The other four (`_PARTITIONTIME`, `_PARTITIONDATE`, `_TABLE_SUFFIX`, `_F
 reserved prefixes, so no user column can have them. Test `bigquery_test.go`
 (`TestBigQueryDbtMaxPartitionIsAColumn`).
 
-### 1.25 BigQuery correlated implicit UNNEST
+### 1.25 BigQuery implicit UNNEST of range-variable paths
 
-Upstream bug: BigQuery resolves the first name of a FROM path against the range variables in scope,
-including those of enclosing queries, before datasets. Upstream (`parser.py:4305-4330`) checks only
-the sources of the same SELECT, and there skips joins with ON. So in
-`SELECT (SELECT ... FROM u.tags) FROM Sales.Users AS u` and in
-`FROM Sales.Users AS u JOIN u.tags AS t ON TRUE` it reads `u.tags` as table `tags` in dataset `u`,
-and the read of `Users.tags` is lost.
+Upstream bugs: BigQuery resolves the first name of a FROM path against the range variables in scope,
+including those of enclosing queries, before datasets; an unaliased path's implicit alias is its last
+name. Upstream (`parser.py:4305-4330`) converts a path to UNNEST only when its first name is an
+earlier source of the same SELECT, skips joins with ON, compares case-kept table names, reads
+`u.s.arr` as schema `u`, table `s`, and drops the implicit alias. So
+`SELECT (SELECT ... FROM u.tags) FROM Sales.Users AS u`, `FROM Sales.Users AS u JOIN u.tags ON TRUE`
+and `FROM Sales.Users JOIN users.tags` read `u.tags` as table `tags` in dataset `u`, losing the read
+of `Users.tags`, and `FROM t JOIN t.tags ... SELECT tags` binds the array, not the element.
 
-Fixed: such a path becomes `UNNEST(u.tags)` when `u` (case-insensitive) is an earlier source of the
-same SELECT (any join with or without ON, except the right side of a RIGHT or FULL join, which
-cannot see the left), compared case-insensitively (upstream compares case-kept table names, so
-`FROM Sales.Users JOIN users.tags` missed), or a source of an enclosing query: SELECT FROM/JOIN, UPDATE/DELETE/MERGE targets and their joins, and UNNEST aliases.
-`u.s.arr` reads column `s` of `u`, then field `arr`. It does not apply inside a CTE body, inside a
-derived table in a FROM (which sees neither that FROM's other sources nor anything further out), or
-to a backticked `` `u.tags` ``, which BigQuery reads as a table. Test `bigquery_test.go`
-(`TestBigQueryCorrelatedImplicitUnnest`).
+Fixed: a plain name path (any length, not backticked, not a function) becomes
+`UNNEST(u.s.arr) AS arr`, reading column `s` of `u` then field `arr`, with the alias as written or the
+implicit last name, when `u` (case-insensitive) is a range variable visible at that point:
+- same SELECT: an earlier FROM item, including an UNNEST alias and a converted path's alias; not on
+  the right side of a RIGHT or FULL join, which cannot see the left;
+- enclosing SELECT: a subquery or table function in FROM/JOIN sees no item of that FROM; an UNNEST
+  sees the items before it; a JOIN's ON sees the items up to that join; other
+  clauses see all items;
+- UPDATE/DELETE: SET/WHERE see the target (including `DELETE ds.t AS t WHERE ...`) and its
+  FROM/USING items and joins; a FROM/USING/join item itself does not see the target;
+- MERGE: the USING source sees neither side; ON and WHEN MATCHED see both; WHEN NOT MATCHED
+  [BY TARGET] sees the source; WHEN NOT MATCHED BY SOURCE sees the target;
+- nothing crosses into a CTE body.
+
+The resolver also ports upstream's UNNEST-alias shadowing (`resolver.py:326-353`): an UNNEST alias
+wins over a same-named column of another source. Upstream bug, fixed: it applies the shadowing in a
+JOIN's ON and in FROM items too, binding such a column (or a correlated subquery's column there) to
+an UNNEST joined later and losing the read of the earlier column; here no shadowing applies to a
+column that reaches the resolving query through that query's own JOIN or FROM clause, so a name two
+sources have is ambiguous there and fails; a subquery in the SELECT list or WHERE still sees the
+UNNEST alias win. Two UNNESTs with one alias stay ambiguous. Tests `bigquery_test.go`
+(`TestBigQueryCorrelatedImplicitUnnest`, `TestBigQueryRangeVariablePathShape`,
+`TestBigQueryImplicitUnnestAlias`, `TestBigQueryOnNeverShadowedByUnnest`).
+
+### 1.26 Date-unit and NORMALIZE arguments of user functions stay columns
+
+Upstream bug: `TimeUnit.__init__` turns any one-part column `unit` argument into a keyword, and the
+base parser reads `NORMALIZE(a, b)`'s `b` as a keyword. In MySQL and Hive, which have no builtin
+`NORMALIZE`, `TIME_DIFF`, `TIME_TRUNC`, `DATETIME_*` or `LAST_DAY(x, unit)`, such a call is a user
+function, so a real column argument (`NORMALIZE(a, secret)`) drops out of lineage. Fixed (including BigQuery `DATE_TRUNC` and Presto/Trino/Athena
+`DATE_TRUNC(unit, ts)`, where Trino accepts a column holding the unit, and Hive `TRUNC(ts, unit)`): a bare column becomes a unit
+only when it is unquoted and names a date part (`HOUR`, `DAY`, `WEEK`, ...; anything else,
+including `"day"`, stays a column and must resolve; abbreviations such as `d` do not count; in
+Presto/Trino/Athena `DATE_TRUNC`, `DATE_ADD`, `DATE_DIFF`, Hive `TRUNC` and Postgres `DATE_PART`,
+whose unit is a string, a column never becomes a unit; `DATE_PART` with a column part stays a
+`DATE_PART` call, since `EXTRACT` would read the name as a field); `TIME_DIFF`, `TIME_TRUNC`,
+`TIMESTAMP_DIFF`, `DATETIME_*`, `TIME_ADD/SUB`, `TIMESTAMP_ADD/SUB`, `LAST_DAY` and `DATE_SUB` are
+typed functions only for BigQuery (elsewhere plain calls, as before the BigQuery port), and
+`TIMESTAMPDIFF` only for MySQL; MySQL and
+Hive do not use the NORMALIZE keyword parser. Tests `bigquery_test.go`
+(`TestUDFArgumentsStayColumns`, `TestAthenaDateTruncColumnUnit`).
 
 ## Opt-in behavioral extensions beyond upstream
 

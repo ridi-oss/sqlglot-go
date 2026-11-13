@@ -2294,6 +2294,9 @@ func unitToStrValue(unit expressions.Expression) expressions.Expression {
 	if unit == nil {
 		return expressions.LiteralString("DAY")
 	}
+	if unit.Kind() == expressions.KindWeekStart {
+		return expressions.LiteralString("WEEK")
+	}
 	if unit.Kind() == expressions.KindPlaceholder || (unit.Kind() != expressions.KindVar && unit.Kind() != expressions.KindLiteral) {
 		return unit
 	}

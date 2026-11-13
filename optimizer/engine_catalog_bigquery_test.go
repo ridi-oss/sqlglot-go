@@ -159,3 +159,24 @@ func TestBigQueryTempFunctionCase(t *testing.T) {
 		}
 	}
 }
+
+// A temp UDF is still recognized after Qualify stamps the default dataset on it.
+func TestBigQueryTempFunctionThroughQualify(t *testing.T) {
+	statements, err := sqlglot.Parse("CREATE TEMP FUNCTION MyF(x STRING) AS (x); SELECT MyF(e) FROM Users", "bigquery,opaque_functions=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := exp.New(exp.KindBlock, exp.Args{"expressions": statements})
+	opts := optimizer.DefaultQualifyOpts()
+	opts.Dialect = "bigquery,opaque_functions=true"
+	opts.DefaultSchema = "Sales"
+	opts.Catalog = "p"
+	opts.QualifyColumns = false
+	opts.ValidateQualifyColumns = false
+	opts.EngineCatalog = bigqueryEngineCatalog()
+	opts.CallReport = map[exp.Expression]optimizer.ResolvedCall{}
+	q := optimizer.Qualify(root, opts)
+	if got := opts.CallReport[q.Find(exp.KindAnonymous)]; got != (optimizer.ResolvedCall{Kind: optimizer.CallUDF, Identity: "MyF"}) {
+		t.Errorf("got %+v", got)
+	}
+}

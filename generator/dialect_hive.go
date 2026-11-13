@@ -141,7 +141,7 @@ func init() {
 		expressions.KindArraySize:         hiveCall("SIZE", "this"),
 		expressions.KindStrToMap:          hiveCall("STR_TO_MAP", "this", "pair_delim", "key_value_delim"),
 		expressions.KindTimestampTrunc: func(g *Generator, e expressions.Expression) string {
-			return g.funcCall("TRUNC", []any{e.This(), expressions.LiteralString(e.Text("unit"))}, "(", ")", true)
+			return g.funcCall("TRUNC", []any{e.This(), unitToStr(e)}, "(", ")", true)
 		},
 	}
 	for k, name := range map[expressions.Kind]string{expressions.KindAnyValue: "FIRST", expressions.KindFromBase64: "UNBASE64", expressions.KindToBase64: "BASE64", expressions.KindJSONFormat: "TO_JSON", expressions.KindQuantile: "PERCENTILE", expressions.KindApproxQuantile: "PERCENTILE_APPROX", expressions.KindRegexpSplit: "SPLIT", expressions.KindArrayUniqueAgg: "COLLECT_SET", expressions.KindTimeStrToDate: "TO_DATE", expressions.KindTimeStrToUnix: "UNIX_TIMESTAMP", expressions.KindTimeToUnix: "UNIX_TIMESTAMP", expressions.KindWeekOfYear: "WEEKOFYEAR", expressions.KindDayOfMonth: "DAYOFMONTH", expressions.KindDayOfWeek: "DAYOFWEEK", expressions.KindUnnest: "EXPLODE", expressions.KindStarMap: "MAP"} {

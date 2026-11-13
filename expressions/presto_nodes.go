@@ -52,7 +52,8 @@ func DateTrunc(args Args) Expression {
 	if unit, ok := args["unit"].(Expression); ok && unit != nil {
 		switch unit.Kind() {
 		case KindColumn, KindLiteral, KindVar:
-			if unit.Kind() != KindColumn || len(unit.Parts()) == 1 {
+			// A column becomes a unit only when it names a date part (DEVIATIONS §1.26).
+			if unit.Kind() != KindColumn || isDatePartColumn(unit) {
 				name := strings.ToUpper(unit.Name())
 				if expanded := UnabbreviatedUnitName[name]; expanded != "" {
 					name = expanded
