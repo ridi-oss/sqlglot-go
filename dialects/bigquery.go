@@ -1,7 +1,6 @@
 package dialects
 
 import (
-	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/tokens"
 )
 
@@ -85,9 +84,4 @@ func BigQuery() *Dialect {
 	delete(cfg.Comments, "/*+")
 	d.TokenizerConfig = tokens.CompileConfig(cfg)
 	return d
-}
-
-// bigqueryFunctions ports parsers/bigquery.py:224-323 FUNCTIONS.
-func bigqueryFunctions() map[string]func([]exp.Expression) exp.Expression {
-	return map[string]func([]exp.Expression) exp.Expression{}
 }

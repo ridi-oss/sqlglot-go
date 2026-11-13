@@ -19,11 +19,18 @@ var sqlNameOverrides = map[expressions.Kind]string{
 	// mirror the classes' explicit _sql_names (verified against .reference base-write):
 	// JSONFormat->JSON_FORMAT (json.py:145), MD5Digest->MD5_DIGEST (string.py:540),
 	// SHA2->SHA2 (string.py:562), DayOfWeekIso->DAYOFWEEK_ISO (temporal.py:217).
-	expressions.KindJSONFormat:   "JSON_FORMAT",
-	expressions.KindMD5Digest:    "MD5_DIGEST",
-	expressions.KindSHA2:         "SHA2",
-	expressions.KindSHA2Digest:   "SHA2_DIGEST",
-	expressions.KindDayOfWeekIso: "DAYOFWEEK_ISO",
+	expressions.KindJSONFormat:       "JSON_FORMAT",
+	expressions.KindMD5Digest:        "MD5_DIGEST",
+	expressions.KindSHA2:             "SHA2",
+	expressions.KindSHA2Digest:       "SHA2_DIGEST",
+	expressions.KindDayOfWeekIso:     "DAYOFWEEK_ISO",
+	expressions.KindAIEmbed:          "AI_EMBED",
+	expressions.KindAIGenerate:       "AI_GENERATE",
+	expressions.KindAISimilarity:     "AI_SIMILARITY",
+	expressions.KindJSONStripNulls:   "JSON_STRIP_NULLS",
+	expressions.KindJSONExtractArray: "JSON_EXTRACT_ARRAY",
+	expressions.KindSHA:              "SHA",
+	expressions.KindTimestampDiff:    "TIMESTAMPDIFF",
 }
 
 func (g *Generator) sqlName(kind expressions.Kind) string {

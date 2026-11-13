@@ -3595,7 +3595,12 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 		alias := !knownFunction
 		args := p.parseFunctionArgs(alias)
 		if knownFunction {
-			result = p.validateExpression(function(args), exprArgs(args))
+			built := function(args)
+			if built == nil {
+				p.raiseError("Invalid arguments for " + upper)
+				return nil
+			}
+			result = p.validateExpression(built, exprArgs(args))
 		} else {
 			var name any = this
 			if tokenType == tokens.IDENTIFIER {

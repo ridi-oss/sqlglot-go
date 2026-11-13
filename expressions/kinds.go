@@ -713,6 +713,76 @@ const (
 	// `DECLARE <name> <type> [DEFAULT <expr>]` local variables (also T-SQL upstream).
 	KindDeclare
 	KindDeclareItem
+	KindKwarg
+	KindHavingMax
+	KindAIEmbed
+	KindAIGenerate
+	KindAISimilarity
+	KindApproxTopK
+	KindSafeFunc
+	KindNetFunc
+	KindExport
+	KindForIn
+	KindPredict
+	KindGenerateEmbedding
+	KindMLTranslate
+	KindMLForecast
+	KindAIForecast
+	KindFeaturesAtTime
+	KindVectorSearch
+	KindMakeInterval
+	KindCurrentDatetime
+	KindJSONBool
+	KindContains
+	KindDateFromParts
+	KindTsOrDsToDatetime
+	KindTsOrDsToTimestamp
+	KindTsOrDsToTime
+	KindDatetime
+	KindTimestampFromParts
+	KindTimeFromParts
+	KindWeekStart
+	KindJSONStripNulls
+	KindParseDatetime
+	KindParseTime
+	KindSHA1Digest
+	KindNormalize
+	KindByteLength
+	KindLowerHex
+	KindJSONKeysAtDepth
+	KindJSONValueArray
+	KindJSONExtractArray
+	KindBitwiseAndAgg
+	KindBitwiseOrAgg
+	KindBitwiseXorAgg
+	KindBitwiseCount
+	KindIntDiv
+	KindTimestamp
+	KindDatetimeTrunc
+	KindDatetimeDiff
+	KindDatetimeAdd
+	KindDatetimeSub
+	KindTimeAdd
+	KindTimeSub
+	KindTimestampAdd
+	KindTimestampSub
+	KindLastDay
+	KindSafeDivide
+	KindInt64
+	KindGenerateText
+	KindGenerateTable
+	KindGenerateBool
+	KindGenerateInt
+	KindGenerateDouble
+	KindTime
+	KindDateSub
+	KindVolatileProperty
+	KindArgMax
+	KindArgMin
+	KindSHA
+	KindTimestampDiff
+	KindUnixDate
+	KindUuid
 )
 
 type Trait uint32
@@ -1317,6 +1387,76 @@ var argTypes = map[Kind][]argSpec{
 	KindTimeToStr:              {{"this", true}, {"format", true}, {"culture", false}, {"zone", false}},
 	KindStarMap:                defaultArgTypes,
 	KindVarMap:                 {{"keys", true}, {"values", true}},
+	KindKwarg:                  {{"this", true}, {"expression", true}},
+	KindHavingMax:              {{"this", true}, {"expression", true}, {"max", true}},
+	KindAIEmbed:                {{"expressions", true}},
+	KindAIGenerate:             {{"expressions", true}},
+	KindAISimilarity:           {{"expressions", true}},
+	KindApproxTopK:             {{"this", true}, {"expression", false}, {"counters", false}},
+	KindSafeFunc:               {{"this", true}},
+	KindNetFunc:                {{"this", true}},
+	KindExport:                 {{"this", true}, {"connection", false}, {"options", true}},
+	KindForIn:                  {{"this", true}, {"expression", true}},
+	KindPredict:                {{"this", true}, {"expression", true}, {"params_struct", false}},
+	KindGenerateEmbedding:      {{"this", true}, {"expression", true}, {"params_struct", false}, {"is_text", false}},
+	KindMLTranslate:            {{"this", true}, {"expression", true}, {"params_struct", true}},
+	KindMLForecast:             {{"this", true}, {"expression", false}, {"params_struct", false}},
+	KindAIForecast:             {{"this", true}, {"data_col", false}, {"timestamp_col", false}, {"model", false}, {"id_cols", false}, {"horizon", false}, {"forecast_end_timestamp", false}, {"confidence_level", false}, {"output_historical_time_series", false}, {"context_window", false}},
+	KindFeaturesAtTime:         {{"this", true}, {"time", false}, {"num_rows", false}, {"ignore_feature_nulls", false}},
+	KindVectorSearch:           {{"this", true}, {"column_to_search", true}, {"query_table", true}, {"query_column_to_search", false}, {"top_k", false}, {"distance_type", false}, {"options", false}},
+	KindMakeInterval:           {{"year", false}, {"month", false}, {"week", false}, {"day", false}, {"hour", false}, {"minute", false}, {"second", false}},
+	KindCurrentDatetime:        {{"this", false}},
+	KindJSONBool:               {{"this", true}},
+	KindContains:               {{"this", true}, {"expression", true}, {"json_scope", false}},
+	KindDateFromParts:          {{"year", true}, {"month", false}, {"day", false}, {"allow_overflow", false}},
+	KindTsOrDsToDatetime:       {{"this", true}},
+	KindTsOrDsToTimestamp:      {{"this", true}},
+	KindTsOrDsToTime:           {{"this", true}, {"format", false}, {"safe", false}},
+	KindDatetime:               {{"this", true}, {"expression", false}},
+	KindTimestampFromParts:     {{"year", false}, {"month", false}, {"day", false}, {"hour", false}, {"min", false}, {"sec", false}, {"nano", false}, {"zone", false}, {"milli", false}, {"this", false}, {"expression", false}},
+	KindTimeFromParts:          {{"hour", true}, {"min", true}, {"sec", true}, {"nano", false}, {"fractions", false}, {"precision", false}, {"overflow", false}},
+	KindWeekStart:              {{"this", true}},
+	KindJSONStripNulls:         {{"this", true}, {"expression", false}, {"include_arrays", false}, {"remove_empty", false}},
+	KindParseDatetime:          {{"this", true}, {"format", false}, {"zone", false}, {"default_year", false}},
+	KindParseTime:              {{"this", true}, {"format", true}},
+	KindSHA1Digest:             {{"this", true}},
+	KindNormalize:              {{"this", true}, {"form", false}, {"is_casefold", false}},
+	KindByteLength:             {{"this", true}},
+	KindLowerHex:               {{"this", true}, {"case", false}},
+	KindJSONKeysAtDepth:        {{"this", true}, {"expression", false}, {"mode", false}},
+	KindJSONValueArray:         {{"this", true}, {"expression", false}},
+	KindJSONExtractArray:       {{"this", true}, {"expression", false}},
+	KindBitwiseAndAgg:          {{"this", true}},
+	KindBitwiseOrAgg:           {{"this", true}},
+	KindBitwiseXorAgg:          {{"this", true}},
+	KindBitwiseCount:           {{"this", true}},
+	KindIntDiv:                 {{"this", true}, {"expression", true}},
+	KindTimestamp:              {{"this", false}, {"zone", false}, {"with_tz", false}},
+	KindDatetimeTrunc:          {{"this", true}, {"unit", true}, {"zone", false}},
+	KindDatetimeDiff:           {{"this", true}, {"expression", true}, {"unit", false}, {"date_part_boundary", false}},
+	KindDatetimeAdd:            {{"this", true}, {"expression", true}, {"unit", false}},
+	KindDatetimeSub:            {{"this", true}, {"expression", true}, {"unit", false}},
+	KindTimeAdd:                {{"this", true}, {"expression", true}, {"unit", false}},
+	KindTimeSub:                {{"this", true}, {"expression", true}, {"unit", false}},
+	KindTimestampAdd:           {{"this", true}, {"expression", true}, {"unit", false}},
+	KindTimestampSub:           {{"this", true}, {"expression", true}, {"unit", false}},
+	KindLastDay:                {{"this", true}, {"unit", false}},
+	KindSafeDivide:             {{"this", true}, {"expression", true}},
+	KindInt64:                  {{"this", true}},
+	KindGenerateText:           {{"this", true}, {"expression", false}, {"params_struct", false}},
+	KindGenerateTable:          {{"this", true}, {"expression", false}, {"params_struct", false}},
+	KindGenerateBool:           {{"this", true}, {"expression", false}, {"params_struct", false}},
+	KindGenerateInt:            {{"this", true}, {"expression", false}, {"params_struct", false}},
+	KindGenerateDouble:         {{"this", true}, {"expression", false}, {"params_struct", false}},
+	KindTime:                   {{"this", false}, {"zone", false}},
+	KindDateSub:                {{"this", true}, {"expression", true}, {"unit", false}},
+	KindVolatileProperty:       {{"this", false}},
+	KindArgMax:                 {{"this", true}, {"expression", true}, {"count", false}},
+	KindArgMin:                 {{"this", true}, {"expression", true}, {"count", false}},
+	KindSHA:                    {{"this", true}},
+	KindTimestampDiff:          {{"this", true}, {"expression", true}, {"unit", false}},
+	KindUnixDate:               {{"this", true}},
+	KindUuid:                   {{"this", false}, {"name", false}, {"is_string", false}},
 }
 
 var traitsOf = map[Kind]Trait{
@@ -1582,23 +1722,89 @@ var traitsOf = map[Kind]Trait{
 	KindArrayFirst:     TraitCondition | TraitFunc,
 	// hive cluster: Func subclasses are Conditions with TraitFunc; aggregate
 	// subclasses additionally carry TraitAggFunc. Property/query nodes have no traits.
-	KindTransform:        TraitCondition | TraitFunc,
-	KindToBase64:         TraitCondition | TraitFunc,
-	KindFromBase64:       TraitCondition | TraitFunc,
-	KindTsOrDsAdd:        TraitCondition | TraitFunc,
-	KindTsOrDsToDate:     TraitCondition | TraitFunc,
-	KindFirst:            TraitCondition | TraitFunc | TraitAggFunc,
-	KindFirstValue:       TraitCondition | TraitFunc | TraitAggFunc,
-	KindLast:             TraitCondition | TraitFunc | TraitAggFunc,
-	KindLastValue:        TraitCondition | TraitFunc | TraitAggFunc,
-	KindRegexpExtract:    TraitCondition | TraitFunc,
-	KindRegexpExtractAll: TraitCondition | TraitFunc,
-	KindTimestampTrunc:   TraitCondition | TraitFunc,
-	KindDateTrunc:        TraitCondition | TraitFunc,
-	KindUnixToStr:        TraitCondition | TraitFunc,
-	KindTimeToStr:        TraitCondition | TraitFunc,
-	KindStarMap:          TraitCondition | TraitFunc,
-	KindVarMap:           TraitCondition | TraitFunc,
+	KindTransform:          TraitCondition | TraitFunc,
+	KindToBase64:           TraitCondition | TraitFunc,
+	KindFromBase64:         TraitCondition | TraitFunc,
+	KindTsOrDsAdd:          TraitCondition | TraitFunc,
+	KindTsOrDsToDate:       TraitCondition | TraitFunc,
+	KindFirst:              TraitCondition | TraitFunc | TraitAggFunc,
+	KindFirstValue:         TraitCondition | TraitFunc | TraitAggFunc,
+	KindLast:               TraitCondition | TraitFunc | TraitAggFunc,
+	KindLastValue:          TraitCondition | TraitFunc | TraitAggFunc,
+	KindRegexpExtract:      TraitCondition | TraitFunc,
+	KindRegexpExtractAll:   TraitCondition | TraitFunc,
+	KindTimestampTrunc:     TraitCondition | TraitFunc,
+	KindDateTrunc:          TraitCondition | TraitFunc,
+	KindUnixToStr:          TraitCondition | TraitFunc,
+	KindTimeToStr:          TraitCondition | TraitFunc,
+	KindStarMap:            TraitCondition | TraitFunc,
+	KindVarMap:             TraitCondition | TraitFunc,
+	KindKwarg:              TraitCondition | TraitBinary,
+	KindAIEmbed:            TraitCondition | TraitFunc,
+	KindAIGenerate:         TraitCondition | TraitFunc,
+	KindAISimilarity:       TraitCondition | TraitFunc,
+	KindApproxTopK:         TraitCondition | TraitFunc | TraitAggFunc,
+	KindSafeFunc:           TraitCondition | TraitFunc,
+	KindNetFunc:            TraitCondition | TraitFunc,
+	KindPredict:            TraitCondition | TraitFunc,
+	KindGenerateEmbedding:  TraitCondition | TraitFunc,
+	KindMLTranslate:        TraitCondition | TraitFunc,
+	KindMLForecast:         TraitCondition | TraitFunc,
+	KindAIForecast:         TraitCondition | TraitFunc,
+	KindFeaturesAtTime:     TraitCondition | TraitFunc,
+	KindVectorSearch:       TraitCondition | TraitFunc,
+	KindMakeInterval:       TraitCondition | TraitFunc,
+	KindCurrentDatetime:    TraitCondition | TraitFunc,
+	KindJSONBool:           TraitCondition | TraitFunc,
+	KindContains:           TraitCondition | TraitFunc,
+	KindDateFromParts:      TraitCondition | TraitFunc,
+	KindTsOrDsToDatetime:   TraitCondition | TraitFunc,
+	KindTsOrDsToTimestamp:  TraitCondition | TraitFunc,
+	KindTsOrDsToTime:       TraitCondition | TraitFunc,
+	KindDatetime:           TraitCondition | TraitFunc,
+	KindTimestampFromParts: TraitCondition | TraitFunc,
+	KindTimeFromParts:      TraitCondition | TraitFunc,
+	KindWeekStart:          TraitCondition | TraitFunc,
+	KindJSONStripNulls:     TraitCondition | TraitFunc,
+	KindParseDatetime:      TraitCondition | TraitFunc,
+	KindParseTime:          TraitCondition | TraitFunc,
+	KindSHA1Digest:         TraitCondition | TraitFunc,
+	KindNormalize:          TraitCondition | TraitFunc,
+	KindByteLength:         TraitCondition | TraitFunc,
+	KindLowerHex:           TraitCondition | TraitFunc,
+	KindJSONKeysAtDepth:    TraitCondition | TraitFunc,
+	KindJSONValueArray:     TraitCondition | TraitFunc,
+	KindJSONExtractArray:   TraitCondition | TraitFunc,
+	KindBitwiseAndAgg:      TraitCondition | TraitFunc | TraitAggFunc,
+	KindBitwiseOrAgg:       TraitCondition | TraitFunc | TraitAggFunc,
+	KindBitwiseXorAgg:      TraitCondition | TraitFunc | TraitAggFunc,
+	KindBitwiseCount:       TraitCondition | TraitFunc,
+	KindIntDiv:             TraitCondition | TraitBinary,
+	KindTimestamp:          TraitCondition | TraitFunc,
+	KindDatetimeTrunc:      TraitCondition | TraitFunc,
+	KindDatetimeDiff:       TraitCondition | TraitFunc,
+	KindDatetimeAdd:        TraitCondition | TraitFunc,
+	KindDatetimeSub:        TraitCondition | TraitFunc,
+	KindTimeAdd:            TraitCondition | TraitFunc,
+	KindTimeSub:            TraitCondition | TraitFunc,
+	KindTimestampAdd:       TraitCondition | TraitFunc,
+	KindTimestampSub:       TraitCondition | TraitFunc,
+	KindLastDay:            TraitCondition | TraitFunc,
+	KindSafeDivide:         TraitCondition | TraitFunc,
+	KindInt64:              TraitCondition | TraitFunc,
+	KindGenerateText:       TraitCondition | TraitFunc,
+	KindGenerateTable:      TraitCondition | TraitFunc,
+	KindGenerateBool:       TraitCondition | TraitFunc,
+	KindGenerateInt:        TraitCondition | TraitFunc,
+	KindGenerateDouble:     TraitCondition | TraitFunc,
+	KindTime:               TraitCondition | TraitFunc,
+	KindDateSub:            TraitCondition | TraitFunc,
+	KindArgMax:             TraitCondition | TraitFunc | TraitAggFunc,
+	KindArgMin:             TraitCondition | TraitFunc | TraitAggFunc,
+	KindSHA:                TraitCondition | TraitFunc,
+	KindTimestampDiff:      TraitCondition | TraitFunc,
+	KindUnixDate:           TraitCondition | TraitFunc,
+	KindUuid:               TraitCondition | TraitFunc,
 }
 
 var primitive = map[Kind]bool{
@@ -2082,6 +2288,76 @@ var className = map[Kind]string{
 	KindTimeToStr:              "TimeToStr",
 	KindStarMap:                "StarMap",
 	KindVarMap:                 "VarMap",
+	KindKwarg:                  "Kwarg",
+	KindHavingMax:              "HavingMax",
+	KindAIEmbed:                "AIEmbed",
+	KindAIGenerate:             "AIGenerate",
+	KindAISimilarity:           "AISimilarity",
+	KindApproxTopK:             "ApproxTopK",
+	KindSafeFunc:               "SafeFunc",
+	KindNetFunc:                "NetFunc",
+	KindExport:                 "Export",
+	KindForIn:                  "ForIn",
+	KindPredict:                "Predict",
+	KindGenerateEmbedding:      "GenerateEmbedding",
+	KindMLTranslate:            "MLTranslate",
+	KindMLForecast:             "MLForecast",
+	KindAIForecast:             "AIForecast",
+	KindFeaturesAtTime:         "FeaturesAtTime",
+	KindVectorSearch:           "VectorSearch",
+	KindMakeInterval:           "MakeInterval",
+	KindCurrentDatetime:        "CurrentDatetime",
+	KindJSONBool:               "JSONBool",
+	KindContains:               "Contains",
+	KindDateFromParts:          "DateFromParts",
+	KindTsOrDsToDatetime:       "TsOrDsToDatetime",
+	KindTsOrDsToTimestamp:      "TsOrDsToTimestamp",
+	KindTsOrDsToTime:           "TsOrDsToTime",
+	KindDatetime:               "Datetime",
+	KindTimestampFromParts:     "TimestampFromParts",
+	KindTimeFromParts:          "TimeFromParts",
+	KindWeekStart:              "WeekStart",
+	KindJSONStripNulls:         "JSONStripNulls",
+	KindParseDatetime:          "ParseDatetime",
+	KindParseTime:              "ParseTime",
+	KindSHA1Digest:             "SHA1Digest",
+	KindNormalize:              "Normalize",
+	KindByteLength:             "ByteLength",
+	KindLowerHex:               "LowerHex",
+	KindJSONKeysAtDepth:        "JSONKeysAtDepth",
+	KindJSONValueArray:         "JSONValueArray",
+	KindJSONExtractArray:       "JSONExtractArray",
+	KindBitwiseAndAgg:          "BitwiseAndAgg",
+	KindBitwiseOrAgg:           "BitwiseOrAgg",
+	KindBitwiseXorAgg:          "BitwiseXorAgg",
+	KindBitwiseCount:           "BitwiseCount",
+	KindIntDiv:                 "IntDiv",
+	KindTimestamp:              "Timestamp",
+	KindDatetimeTrunc:          "DatetimeTrunc",
+	KindDatetimeDiff:           "DatetimeDiff",
+	KindDatetimeAdd:            "DatetimeAdd",
+	KindDatetimeSub:            "DatetimeSub",
+	KindTimeAdd:                "TimeAdd",
+	KindTimeSub:                "TimeSub",
+	KindTimestampAdd:           "TimestampAdd",
+	KindTimestampSub:           "TimestampSub",
+	KindLastDay:                "LastDay",
+	KindSafeDivide:             "SafeDivide",
+	KindInt64:                  "Int64",
+	KindGenerateText:           "GenerateText",
+	KindGenerateTable:          "GenerateTable",
+	KindGenerateBool:           "GenerateBool",
+	KindGenerateInt:            "GenerateInt",
+	KindGenerateDouble:         "GenerateDouble",
+	KindTime:                   "Time",
+	KindDateSub:                "DateSub",
+	KindVolatileProperty:       "VolatileProperty",
+	KindArgMax:                 "ArgMax",
+	KindArgMin:                 "ArgMin",
+	KindSHA:                    "SHA",
+	KindTimestampDiff:          "TimestampDiff",
+	KindUnixDate:               "UnixDate",
+	KindUuid:                   "Uuid",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func
@@ -2108,7 +2384,10 @@ var varLenArgs = map[Kind]bool{
 	// presto cluster: MD5Digest is_var_len_args=True (string.py:540).
 	KindMD5Digest: true,
 	// hive cluster: VarMap is_var_len_args=True (array.py:339-341).
-	KindVarMap: true,
+	KindVarMap:       true,
+	KindAIEmbed:      true,
+	KindAIGenerate:   true,
+	KindAISimilarity: true,
 }
 
 // ArgKeys returns the arg keys of a Kind in class-declaration order (mirrors

@@ -239,7 +239,7 @@ const (
 	minPassTrino    = 67
 	minPassPresto   = 170
 	minPassHive     = 141
-	minPassBigQuery = 0
+	minPassBigQuery = 422
 )
 
 // Total floors catch dropped failing records that pass floors cannot detect.
