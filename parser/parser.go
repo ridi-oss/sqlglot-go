@@ -2757,6 +2757,13 @@ var jsonOperatorTokens = map[tokens.TokenType]bool{
 }
 
 func (p *Parser) parseColumnOps(this exp.Expression) exp.Expression {
+	if p.isBigQuery() {
+		return p.bigqueryParseColumnOps(this)
+	}
+	return p.parseColumnOpsBase(this)
+}
+
+func (p *Parser) parseColumnOpsBase(this exp.Expression) exp.Expression {
 	for bracketsTokens[p.curr.TokenType] {
 		this = p.parseBracket(this)
 	}
@@ -2867,12 +2874,14 @@ func (p *Parser) parsePrimary() exp.Expression {
 		p.advance()
 		primary := primaryParser(p, token)
 		if token.TokenType == tokens.STRING {
-			// _parse_primary's adjacent-string-literal rewrite (parser.py:6871-6885):
-			// 'a' 'b' 'c' -> Concat('a', 'b', 'c'). ADJACENT_STRINGS_CANNOT_BE_CONNECTED
-			// defaults false and isn't overridden by base/mysql/postgres, so the
-			// _is_connected() raise-error branch never fires and is omitted here.
+			// _parse_primary's adjacent-string-literal rewrite (parser.py:7107-7118):
+			// 'a' 'b' 'c' -> Concat('a', 'b', 'c').
 			concatExpressions := []exp.Expression{primary}
 			for p.curr.TokenType == tokens.STRING {
+				// parsers/bigquery.py:194 ADJACENT_STRINGS_CANNOT_BE_CONNECTED: 'can''t' is an error.
+				if p.isBigQuery() && p.isConnected() {
+					p.raiseError("Adjacent string literals need to be separated by whitespace or comments")
+				}
 				p.advance()
 				concatExpressions = append(concatExpressions, exp.LiteralString(p.prev.Text))
 			}
@@ -3647,8 +3656,12 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 		}
 		function := functions[upper]
 		knownFunction := function != nil && !anonymous && !opaque
-		alias := !knownFunction
+		// parser.py:7257 FUNCTIONS_WITH_ALIASED_ARGS = {"STRUCT"}.
+		alias := !knownFunction || upper == "STRUCT"
 		args := p.parseFunctionArgs(alias)
+		if alias && knownFunction {
+			args = p.kvToPropEq(args)
+		}
 		if knownFunction {
 			built := function(args)
 			if built == nil {
@@ -3656,6 +3669,9 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 				return nil
 			}
 			result = p.validateExpression(built, exprArgs(args))
+			if p.dialect.PreserveOriginalNames {
+				result.Meta()["name"] = this
+			}
 		} else {
 			var name any = this
 			if tokenType == tokens.IDENTIFIER {
@@ -4524,4 +4540,27 @@ func (p *Parser) parseHavingMax(this exp.Expression) exp.Expression {
 	p.matchTexts(map[string]bool{"MAX": true, "MIN": true})
 	isMax := stringsUpper(p.prev.Text) != "MIN"
 	return p.expression(exp.New(exp.KindHavingMax, exp.Args{"this": this, "expression": p.parseColumn(), "max": isMax}), nil, nil)
+}
+
+// kvToPropEq ports _kv_to_prop_eq (parser.py:7308-7333) without parse_map: key-value
+// arguments (`1 AS a`, `a = 1`) become PropertyEQ(this=name, expression=value).
+func (p *Parser) kvToPropEq(args []exp.Expression) []exp.Expression {
+	out := make([]exp.Expression, 0, len(args))
+	for _, e := range args {
+		if e != nil {
+			switch e.Kind() {
+			case exp.KindAlias:
+				e = p.expression(exp.PropertyEQ(exp.Args{"this": e.Arg("alias"), "expression": e.This()}), nil, nil)
+			case exp.KindEQ, exp.KindSlice:
+				e = p.expression(exp.PropertyEQ(exp.Args{"this": exp.ToIdentifier(e.This().Name()), "expression": e.Expr()}), nil, nil)
+			}
+			if e.Kind() == exp.KindPropertyEQ {
+				if this := e.This(); this != nil && this.Kind() == exp.KindColumn {
+					this.Replace(this.This())
+				}
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }

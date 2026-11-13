@@ -114,7 +114,7 @@ func (p *Parser) bigqueryParseTableParts(schema, isDBReference, fast bool) exp.E
 			names = append(names, part.Name())
 		}
 		parts := quotedIdentifiers(bigquerySplitQualifiedName(strings.Join(names, "."), 3))
-		var newThis exp.Expression = parts[2]
+		newThis := parts[2]
 		if len(parts) > 3 && newThis != nil {
 			newThis = exp.DotBuild(append([]exp.Expression{newThis}, parts[3:]...))
 		}
@@ -191,7 +191,7 @@ func (p *Parser) bigqueryParseColumn(column exp.Expression) exp.Expression {
 		names = append(names, part.Name())
 	}
 	ids := quotedIdentifiers(bigquerySplitQualifiedName(strings.Join(names, "."), 4))
-	var this exp.Expression = ids[3]
+	this := ids[3]
 	if len(ids) > 4 && this != nil {
 		this = exp.DotBuild(append([]exp.Expression{this}, ids[4:]...))
 	}
@@ -270,7 +270,7 @@ func tableToColumn(table exp.Expression) exp.Expression {
 	for i := range head {
 		args[keys[i]] = head[len(head)-1-i].Copy()
 	}
-	var column exp.Expression = exp.Column(args)
+	column := exp.Column(args)
 	if len(fields) > 0 {
 		chain := []exp.Expression{column}
 		for _, f := range fields {
@@ -279,4 +279,64 @@ func tableToColumn(table exp.Expression) exp.Expression {
 		column = exp.DotBuild(chain)
 	}
 	return column
+}
+
+// bigqueryParseColumnOps ports _parse_column_ops (parsers/bigquery.py:773-799): SAFE.f(...) and
+// NET.f(...) wrap the known function; AI.f(...) / ML.f(...) re-parse f with its function parser.
+func (p *Parser) bigqueryParseColumnOps(this exp.Expression) exp.Expression {
+	funcIndex := p.index + 1
+	this = p.parseColumnOpsBase(this)
+	if this == nil || this.Kind() != exp.KindDot {
+		return this
+	}
+	expr := this.Expr()
+	if expr == nil || !expr.Is(exp.TraitFunc) || this.This() == nil {
+		return this
+	}
+	switch prefix := strings.ToUpper(this.This().Name()); prefix {
+	case "NET", "SAFE":
+		kind := exp.KindSafeFunc
+		if prefix == "NET" {
+			kind = exp.KindNetFunc
+		}
+		p.retreat(funcIndex)
+		return p.expression(exp.New(kind, exp.Args{"this": p.parseFunction(nil, false, false, true)}), nil, nil)
+	case "AI", "ML":
+		p.retreat(funcIndex)
+		if parsed := p.parseFunction(nil, false, false, true); parsed != nil {
+			return p.expression(exp.Dot(exp.Args{"this": this.This(), "expression": parsed}), nil, nil)
+		}
+	}
+	return this
+}
+
+// bracketOffsets ports BRACKET_OFFSETS (parsers/bigquery.py:386-391): name -> (offset, safe).
+var bracketOffsets = map[string]struct {
+	offset int
+	safe   bool
+}{"OFFSET": {0, false}, "ORDINAL": {1, false}, "SAFE_OFFSET": {0, true}, "SAFE_ORDINAL": {1, true}}
+
+// bigqueryParseBracket ports _parse_bracket (parsers/bigquery.py:579-602).
+func (p *Parser) bigqueryParseBracket(this exp.Expression) exp.Expression {
+	bracket := p.parseBracketBase(this)
+	if bracket == nil || bracket == this {
+		return bracket
+	}
+	if bracket.Kind() == exp.KindArray {
+		bracket.Set("struct_name_inheritance", true)
+	}
+	if bracket.Kind() != exp.KindBracket {
+		return bracket
+	}
+	for _, e := range bracket.Expressions() {
+		spec, ok := bracketOffsets[strings.ToUpper(e.Name())]
+		args := e.Expressions()
+		if e.Kind() != exp.KindAnonymous || !ok || len(args) == 0 {
+			break
+		}
+		bracket.Set("offset", spec.offset)
+		bracket.Set("safe", spec.safe)
+		e.Replace(args[0])
+	}
+	return bracket
 }

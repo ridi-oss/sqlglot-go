@@ -1222,7 +1222,7 @@ func expandStructStarsNoParens(expression exp.Expression, scope *Scope, resolver
 			chain = append(chain, part.Copy())
 		}
 		chain = append(chain, this.Copy())
-		var column exp.Expression = exp.Column(exp.Args{"this": chain[0], "table": asExpression(dotColumn.Arg("table")).Copy()})
+		column := exp.Column(exp.Args{"this": chain[0], "table": asExpression(dotColumn.Arg("table")).Copy()})
 		if len(chain) > 1 {
 			column = exp.DotBuild(append([]exp.Expression{column}, chain[1:]...))
 		}

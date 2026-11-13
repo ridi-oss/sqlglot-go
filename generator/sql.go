@@ -177,6 +177,10 @@ func (g *Generator) dotSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) columnParts(e expressions.Expression) string {
+	if truthy(e.Arg("shadow")) && g.dialect.ProjectionAliasesShadowSourceNames {
+		// generator.py:1154-1156: the qualifier would be captured by a colliding projection alias.
+		return g.sqlKey(e, "this")
+	}
 	if g.isDialect("bigquery") && e.MetaGet("quoted_column") != nil {
 		return g.bigqueryColumnParts(e)
 	}
@@ -600,6 +604,9 @@ func (g *Generator) optionsModifier(e expressions.Expression) string {
 }
 
 func (g *Generator) selectSQL(e expressions.Expression) string {
+	if g.isDialect("bigquery") {
+		bigqueryUnqualifyUnnest(e)
+	}
 	hint := g.sqlKey(e, "hint")
 	distinct := g.sqlKey(e, "distinct")
 	if distinct != "" {
@@ -2524,6 +2531,9 @@ func (g *Generator) unnestSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) bracketSQL(e expressions.Expression) string {
+	if g.isDialect("bigquery") {
+		return g.bigqueryBracketSQL(e)
+	}
 	// Base IndexOffset is 0, so apply_index_offset is unnecessary for slice 2.
 	exprs := listFromValue(e.Arg("expressions"))
 	sqls := make([]string, 0, len(exprs))

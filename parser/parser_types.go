@@ -643,6 +643,13 @@ func (p *Parser) parseVarOrString(upper bool) exp.Expression {
 }
 
 func (p *Parser) parseBracket(this exp.Expression) exp.Expression {
+	if p.isBigQuery() {
+		return p.bigqueryParseBracket(this)
+	}
+	return p.parseBracketBase(this)
+}
+
+func (p *Parser) parseBracketBase(this exp.Expression) exp.Expression {
 	if !p.matchSet(map[tokens.TokenType]bool{tokens.L_BRACKET: true, tokens.L_BRACE: true}) {
 		return this
 	}

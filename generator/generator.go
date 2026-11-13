@@ -610,7 +610,18 @@ func (g *Generator) normalizeFunc(name string) string {
 }
 
 func (g *Generator) functionFallbackSQL(e expressions.Expression) string {
-	return g.funcCall(g.sqlName(e.Kind()), g.fallbackArgs(e), "(", ")", true)
+	return g.funcCall(g.funcName(e), g.fallbackArgs(e), "(", ")", true)
+}
+
+// funcName is the function's SQL name, or the name it was written with under
+// PRESERVE_ORIGINAL_NAMES (generator.py:4681-4684).
+func (g *Generator) funcName(e expressions.Expression) string {
+	if g.dialect.PreserveOriginalNames {
+		if original, ok := e.MetaGet("name").(string); ok && original != "" {
+			return original
+		}
+	}
+	return g.sqlName(e.Kind())
 }
 
 // fallbackArgs gathers an expression's argument values in ArgKeys (declared) order,

@@ -30,7 +30,7 @@ func (g *Generator) structSQL(e expressions.Expression) string {
 		}
 		args = append(args, field)
 	}
-	return g.funcCall(g.sqlName(e.Kind()), args, "(", ")", true)
+	return g.funcCall(g.funcName(e), args, "(", ")", true)
 }
 
 // versionSQL ports version_sql (generator.py:2649-2653).

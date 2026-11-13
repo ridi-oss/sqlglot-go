@@ -118,6 +118,13 @@ func init() {
 			return rename("MIN")(g, e)
 		},
 		exp.KindMod: (*Generator).bigqueryModSQL,
+		// generator.py:4620-4625 with LOG_BASE_FIRST = False.
+		exp.KindLog: func(g *Generator, e exp.Expression) string {
+			if truthy(e.Arg("expression")) {
+				return g.funcCall("LOG", []any{e.Arg("expression"), e.Arg("this")}, "(", ")", true)
+			}
+			return g.funcCall("LOG", []any{e.Arg("this")}, "(", ")", true)
+		},
 		exp.KindNormalize: func(g *Generator, e exp.Expression) string {
 			name := "NORMALIZE"
 			if truthy(e.Arg("is_casefold")) {
@@ -178,7 +185,7 @@ func init() {
 			return g.funcCall("WEEK", []any{e.Arg("this")}, "(", ")", true)
 		},
 		exp.KindDateTrunc: func(g *Generator, e exp.Expression) string {
-			var unit any = e.Arg("unit")
+			unit := e.Arg("unit")
 			if u := asExpression(unit); u != nil && u.IsString() {
 				unit = u.Name()
 			}
@@ -348,10 +355,7 @@ func init() {
 		if truthy(e.Arg("strict")) {
 			suffix += " STRICT"
 		}
-		args := []any{}
-		for _, x := range listFromValue(e.Arg("expressions")) {
-			args = append(args, x)
-		}
+		args := append([]any{}, listFromValue(e.Arg("expressions"))...)
 		return g.funcCall("JSON_ARRAY", args, "(", suffix+")", true)
 	}
 }
@@ -361,6 +365,7 @@ func init() {
 	dispatch[exp.KindLowerHex] = func(g *Generator, e exp.Expression) string {
 		return g.funcCall("LOWER", []any{g.funcCall("HEX", []any{e.Arg("this")}, "(", ")", true)}, "(", ")", true)
 	}
+	dispatch[exp.KindPseudocolumn] = (*Generator).columnSQL
 	dispatch[exp.KindKwarg] = func(g *Generator, e exp.Expression) string { return g.binary(e, "=>") }
 	dispatch[exp.KindExport] = func(g *Generator, e exp.Expression) string {
 		connection := g.sqlKey(e, "connection")
@@ -462,4 +467,50 @@ func (g *Generator) bigqueryCastSQL(e exp.Expression, safePrefix string) string 
 		}
 	}
 	return g.castSQLWithPrefix(e, safePrefix)
+}
+
+// bigqueryUnqualifyUnnest ports transforms.unqualify_unnest (transforms.py:278-294): drop the
+// table qualifier that qualify_columns points at an UNNEST alias, which BigQuery cannot name.
+func bigqueryUnqualifyUnnest(sel exp.Expression) {
+	aliases := map[string]bool{}
+	for _, unnest := range sel.WalkWithPrune(true, func(n exp.Expression) bool { return n != sel && n.Is(exp.TraitQuery) }) {
+		if unnest.Kind() != exp.KindUnnest || unnest.Parent() == nil {
+			continue
+		}
+		if k := unnest.Parent().Kind(); k == exp.KindFrom || k == exp.KindJoin {
+			if alias := unnest.Alias(); alias != "" {
+				aliases[alias] = true
+			}
+		}
+	}
+	if len(aliases) == 0 {
+		return
+	}
+	for _, column := range sel.FindAll(exp.KindColumn) {
+		parts := column.Parts()
+		if len(parts) == 0 {
+			continue
+		}
+		if leftmost := parts[0]; leftmost.ArgKey() != "this" && aliases[leftmost.Name()] {
+			leftmost.Pop()
+		}
+	}
+}
+
+// generators/bigquery.py:668-696, without the annotation-driven struct-subscript rewrite.
+func (g *Generator) bigqueryBracketSQL(e exp.Expression) string {
+	sql := g.expressions(exprsOptions{expression: e, flat: true})
+	switch offset := e.Arg("offset"); offset {
+	case 0:
+		sql = "OFFSET(" + sql + ")"
+	case 1:
+		sql = "ORDINAL(" + sql + ")"
+	case nil:
+	default:
+		g.unsupported("Unsupported array offset")
+	}
+	if truthy(e.Arg("safe")) {
+		sql = "SAFE_" + sql
+	}
+	return g.sqlKey(e, "this") + "[" + sql + "]"
 }

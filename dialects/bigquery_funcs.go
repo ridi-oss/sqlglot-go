@@ -93,7 +93,7 @@ func bigqueryDateDeltaWithInterval(kind exp.Kind) func([]exp.Expression) exp.Exp
 			// dialect.py:1670 raises ParseError; a nil result fails the parse the same way.
 			return nil
 		}
-		var unit exp.Expression = exp.LiteralString("DAY")
+		unit := exp.LiteralString("DAY")
 		if u := asExpr(interval.Arg("unit")); u != nil {
 			if u.Kind() == exp.KindVar || u.Kind() == exp.KindLiteral {
 				unit = exp.LiteralString(u.Name())
@@ -213,13 +213,20 @@ func bigqueryFunctions() map[string]func([]exp.Expression) exp.Expression {
 		"JSON_EXTRACT_ARRAY":        bigqueryExtractJSON(exp.KindJSONExtractArray, true),
 		"JSON_EXTRACT_STRING_ARRAY": bigqueryExtractJSON(exp.KindJSONValueArray, true),
 		"JSON_KEYS":                 fromArgList(exp.KindJSONKeysAtDepth),
-		"JSON_QUERY":                bigqueryNamedJSON("JSON_QUERY", bigqueryExtractJSON(exp.KindJSONExtract, false)),
-		"JSON_QUERY_ARRAY":          bigqueryNamedJSON("JSON_QUERY_ARRAY", bigqueryExtractJSON(exp.KindJSONExtractArray, true)),
+		"JSON_QUERY":                bigqueryExtractJSON(exp.KindJSONExtract, false),
+		"JSON_QUERY_ARRAY":          bigqueryExtractJSON(exp.KindJSONExtractArray, true),
 		"JSON_STRIP_NULLS":          bigqueryBuildJSONStripNulls,
-		"JSON_VALUE":                bigqueryNamedJSON("JSON_VALUE", bigqueryExtractJSON(exp.KindJSONExtractScalar, true)),
+		"JSON_VALUE":                bigqueryExtractJSON(exp.KindJSONExtractScalar, true),
 		"JSON_VALUE_ARRAY":          bigqueryExtractJSON(exp.KindJSONValueArray, true),
 		"LAST_DAY": func(args []exp.Expression) exp.Expression {
 			return bigqueryNormalizeBareWeek(exp.FromArgList(exp.KindLastDay, args))
+		},
+		// build_logarithm (parser.py:78-88) with LOG_BASE_FIRST = False (dialects/bigquery.py:26).
+		"LOG": func(args []exp.Expression) exp.Expression {
+			if len(args) > 1 {
+				return exp.FromArgList(exp.KindLog, []exp.Expression{args[1], args[0]})
+			}
+			return exp.FromArgList(exp.KindLn, args)
 		},
 		"LENGTH": func(args []exp.Expression) exp.Expression {
 			return exp.New(exp.KindLength, exp.Args{"this": seqGet(args, 0), "binary": true})
@@ -320,16 +327,6 @@ func bigqueryFunctions() map[string]func([]exp.Expression) exp.Expression {
 			}
 			return exp.New(exp.KindWeekStart, exp.Args{"this": this})
 		},
-	}
-}
-
-// bigqueryNamedJSON records the source function name, as JSON_QUERY/JSON_VALUE share a class
-// with JSON_EXTRACT/JSON_EXTRACT_SCALAR (the parser stores meta["name"], parser.py _parse_function_call).
-func bigqueryNamedJSON(name string, build func([]exp.Expression) exp.Expression) func([]exp.Expression) exp.Expression {
-	return func(args []exp.Expression) exp.Expression {
-		e := build(args)
-		e.Meta()["name"] = name
-		return e
 	}
 }
 
