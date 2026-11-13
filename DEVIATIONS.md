@@ -178,6 +178,24 @@ AST cannot tell a parsed `WITH OFFSET` from `WITH ORDINALITY AS u(v, n)`, whose 
 upstream pops into the same `Identifier` offset, so the check is parser-only. Test
 `parser/postgres_unnest_test.go`.
 
+### 1.22 BigQuery keeps unqualified table names case-sensitive
+
+Upstream's `normalize_identifier` (`dialects/bigquery.py:153-174`) folds every name that is not
+dataset-qualified, guessing it may be a CTE, so `FROM Users` with a default dataset qualifies to
+`ds.users`. BigQuery table names are case-sensitive. Under `NormalizeIdentifiers` (and so `Qualify`), an unqualified table name that
+does not match a CTE in the statement (case-insensitively) is marked `is_table` and keeps its case;
+CTE references still fold. Test `bigquery_test.go` (`TestBigQueryUnqualifiedTableNameCase`).
+
+### 1.23 BigQuery struct types follow projections
+
+Upstream reads a column's STRUCT type from `annotate_types`. The port has no full annotator, so the
+resolver derives it from the schema and from STRUCT/ARRAY literals. Through a derived table or CTE it
+follows the projection (`SELECT o AS s` gives `s` the type of `o`); upstream's UNNEST lookup
+(`resolver.py:423-428`) matches the output name against nested tables instead and can pick the wrong
+column. A projection that is neither a column nor a literal gives no type, so `s.*` stays unexpanded.
+`s.* EXCEPT/REPLACE (...)` on a struct is also left unexpanded: upstream expands it and drops the
+modifier. Tests `bigquery_test.go`, the BigQuery cases of `qualify_columns.sql`.
+
 ## Opt-in behavioral extensions beyond upstream
 
 Additive analysis features; default behavior and fixture output unchanged.
@@ -185,6 +203,10 @@ Additive analysis features; default behavior and fixture output unchanged.
 - **Search-path table qualification** (`QualifyOpts.SearchPath`): resolves the schema part by proven
   existence against the supplied schema, in order; no fallback to `DefaultSchema`, no catalog stamp,
   unproven stays unqualified (fail-closed). Names fold role-aware (§1.2). Empty path = upstream path.
+- **Default-dataset catalog** (`QualifyOpts.DefaultSchemaCatalog`): the catalog stamped on a table
+  that received `DefaultSchema`; `Catalog` stays the catalog for tables that were already
+  schema-qualified. Models a BigQuery job whose defaultDataset lives in another project. Unset =
+  upstream behavior.
 - **Qualify resolution report** (`QualifyOpts.ResolutionReport` → `SourceKind` per source): exposes
   the source classification the qualify scope pass already computes. `Unresolved` is the zero value.
   DML roots populate from the §6.1 analysis traversal.

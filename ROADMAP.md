@@ -233,6 +233,23 @@ and (where it goes beyond upstream grammar) the Class-A ledger. Corpus/fidelity 
   `Unresolved` is the zero value (fail-closed); nil report is a strict no-op. Composes with R3: a DML
   root classifies its target _and_ read-sources from the analysis traversal.
 
+## BigQuery dialect (slice 1 of the BigQuery-for-proxy-monster plan) — DONE
+
+`dialects.BigQuery()` ports `dialects/bigquery.py`, `parsers/bigquery.py` and
+`generators/bigquery.py`: tokenizer (backtick identifiers, raw/byte/triple-quoted strings, `#`
+comments), dashed/numeric/quoted-path table names, INFORMATION_SCHEMA views, SAFE./NET. prefixes,
+`SELECT AS STRUCT`, set-operation `BY NAME`/`CORRESPONDING`, `CAST ... FORMAT`, kwargs `=>`,
+`HAVING MAX`, implicit and `IN UNNEST`, `WITH OFFSET`, EXPORT DATA, ML./AI. functions, and the
+identifier case rules. Qualify: pseudo-columns, UNNEST struct fields and `struct_col.*` from schema
+and literal types (no full `annotate_types`, DEVIATIONS §1.23), `DefaultSchemaCatalog`. Corpus
+655/689; all BigQuery cases of the qualify_columns/qualify_tables/normalize_identifiers fixtures pass.
+Not yet ported: JSON path normalization, LOAD DATA, GAP_FILL, JSON_OBJECT, `PREFIXED_PIVOT_COLUMNS`,
+`CONSTRAINT_PARSERS["OPTIONS"]`, `NESTED_TYPE_TOKENS` (TABLE), `_parse_property` NOT DETERMINISTIC,
+and ML./AI. calls in projection position. Several BigQuery DDL forms (CLUSTER BY, column OPTIONS,
+CLONE/COPY, CREATE MODEL, table functions) still round-trip only as `Command`; no BigQuery rows in
+`fidelity_cases.txt` yet. All of these fail closed or are lineage-neutral.
+Next: DDL/DML fidelity, then scripting blocks as single statements (BEGIN…END, IF, LOOP, FOR…IN).
+
 ## Athena enabler parity (slice A of the Athena-for-proxy-monster plan) — DONE
 
 Brings dialect `athena` to feature parity with the mysql/postgres enabler surface pm consumes:
