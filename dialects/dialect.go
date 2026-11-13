@@ -624,6 +624,8 @@ func dialectByName(name string) (*Dialect, error) {
 		return Hive(), nil
 	case "athena":
 		return Athena(), nil
+	case "bigquery":
+		return BigQuery(), nil
 	default:
 		return nil, fmt.Errorf("unknown dialect %q", name)
 	}

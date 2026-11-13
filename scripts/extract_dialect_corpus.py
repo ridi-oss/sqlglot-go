@@ -19,7 +19,7 @@ Run manually (after `scripts/fetch-reference.sh`, since .reference/ is gitignore
     PYTHONPATH=.reference/sqlglot-v30.17.0 python3 scripts/extract_dialect_corpus.py
 
 Use --dialects athena,trino,presto,hive to replace only those dialects in the existing file.
-Without --dialects, all six dialects are extracted and the file is fully rewritten.
+Without --dialects, all dialects are extracted and the file is fully rewritten.
 
 Seongjin.
 """
@@ -58,9 +58,10 @@ from tests.dialects.test_presto import TestPresto  # noqa: E402
 from tests.dialects.test_hive import TestHive  # noqa: E402
 from tests.dialects.test_mysql import TestMySQL  # noqa: E402
 from tests.dialects.test_postgres import TestPostgres  # noqa: E402
+from tests.dialects.test_bigquery import TestBigQuery  # noqa: E402
 
-DIALECTS = ("mysql", "postgres", "athena", "trino", "presto", "hive")
-SAME_DIALECT_WRITES = {"athena", "trino", "presto", "hive"}
+DIALECTS = ("mysql", "postgres", "athena", "trino", "presto", "hive", "bigquery")
+SAME_DIALECT_WRITES = {"athena", "trino", "presto", "hive", "bigquery"}
 
 captured = []
 
@@ -133,6 +134,8 @@ Validator.validate_all = patched_validate_all
 # silently incomplete), so it aborts extraction before anything is written.
 KNOWN_FAILURES = {
     ("TestPostgres", "test_array_offset"),
+    # Asserts on transpile warnings the patches suppress; its second identity case is lost.
+    ("TestBigQuery", "test_warnings"),
 }
 
 
@@ -148,7 +151,7 @@ def _test_key(test):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--dialects", help="comma-separated dialects to replace; default: all six, full rewrite"
+        "--dialects", help="comma-separated dialects to replace; default: all, full rewrite"
     )
     args = parser.parse_args()
     selected = set(DIALECTS if args.dialects is None else args.dialects.split(","))
@@ -158,7 +161,7 @@ def main():
 
     runner = unittest.TextTestRunner(verbosity=0)
     unexpected = []
-    for cls in (TestMySQL, TestPostgres, TestAthena, TestTrino, TestPresto, TestHive):
+    for cls in (TestMySQL, TestPostgres, TestAthena, TestTrino, TestPresto, TestHive, TestBigQuery):
         if cls.dialect not in selected:
             continue
         result = runner.run(unittest.defaultTestLoader.loadTestsFromTestCase(cls))
