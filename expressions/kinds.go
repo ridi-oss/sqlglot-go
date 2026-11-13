@@ -1176,8 +1176,8 @@ var argTypes = map[Kind][]argSpec{
 	// (temporal.py:452-469, key order preserved); TimeStrToDate/TimeStrToUnix are `pass`
 	// (temporal.py:464,472) and so fall back to Expression's default {"this": True} - spelled
 	// out explicitly here (defaultArgTypes) rather than omitted, matching e.g. KindPragma above.
-	KindStrToDate:     {{"this", true}, {"format", false}, {"safe", false}},
-	KindStrToTime:     {{"this", true}, {"format", true}, {"zone", false}, {"safe", false}, {"target_type", false}},
+	KindStrToDate:     {{"this", true}, {"format", false}, {"safe", false}, {"default_year", false}},
+	KindStrToTime:     {{"this", true}, {"format", true}, {"zone", false}, {"safe", false}, {"target_type", false}, {"default_year", false}},
 	KindStrToUnix:     {{"this", false}, {"format", false}},
 	KindTimeStrToDate: defaultArgTypes,
 	KindTimeStrToTime: {{"this", true}, {"zone", false}},

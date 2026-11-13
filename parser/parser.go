@@ -1954,6 +1954,11 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 			p.advance()
 			this = p.parseEscape(p.expression(exp.Glob(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
 		case tokens.OVERLAPS:
+			// parsers/bigquery.py:368-370 drops OVERLAPS from RANGE_PARSERS.
+			if p.isBigQuery() {
+				matched = false
+				break
+			}
 			// binary_range_parser(exp.Overlaps) (parser.py:1195).
 			p.advance()
 			this = p.parseEscape(p.expression(exp.Overlaps(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
@@ -3090,7 +3095,7 @@ func (p *Parser) parsePGTypedLiteralValue() exp.Expression {
 func (p *Parser) parseIdVar(anyToken bool, toks map[tokens.TokenType]bool) exp.Expression {
 	expression := p.parseIdentifier()
 	if expression == nil {
-		if (anyToken && p.advanceAny(false) != nil) || p.matchSet(tokensOrDefault(toks, idVarTokens)) {
+		if (anyToken && p.advanceAny(false) != nil) || p.matchIDToken(tokensOrDefault(toks, idVarTokens)) {
 			quoted := p.prev.TokenType == tokens.STRING
 			expression = p.identifierExpression(quoted)
 		}

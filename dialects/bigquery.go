@@ -26,6 +26,7 @@ func BigQuery() *Dialect {
 	d.ExcludesPseudocolumnsFromStar = true
 	d.QueryResultsAreStructs = true
 	d.SetOpDistinctRequired = true
+	d.CastFormatToTime = BigQueryParseFormat
 	d.AliasPostVersion = false
 	d.NormalizationStrategy = CaseInsensitive
 	d.NormalizeFunctions = ""

@@ -128,7 +128,10 @@ type Dialect struct {
 	QueryResultsAreStructs             bool
 	// SetOpDistinctRequired ports SET_OP_DISTINCT_BY_DEFAULT = None (dialects/bigquery.py:151):
 	// UNION/EXCEPT/INTERSECT must spell out DISTINCT or ALL.
-	SetOpDistinctRequired             bool
+	SetOpDistinctRequired bool
+	// CastFormatToTime ports format_time over FORMAT_MAPPING (or TIME_MAPPING) for
+	// CAST(x AS <temporal> FORMAT '...') (parser.py:8147-8157); nil keeps the format as written.
+	CastFormatToTime                  func(string) string
 	RequiresParenthesizedStructAccess bool
 	IndexOffset                       int
 	// RenameTableWithDB ports the generator flag of the same name (generator.py:344): base

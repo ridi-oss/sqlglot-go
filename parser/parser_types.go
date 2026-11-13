@@ -538,7 +538,33 @@ func (p *Parser) parseCast(strict bool, safe any) exp.Expression {
 		default_ = p.parseBitwise()
 		p.matchTextSeq("ON", "CONVERSION", "ERROR")
 	}
-	if to == nil {
+	var format exp.Expression
+	if p.matchSet(castFormatTokens) {
+		// parser.py:8141-8164: CAST(x AS <type> FORMAT '<fmt>' [AT TIME ZONE <tz>]).
+		fmtString := p.parseWrapped(p.parseString, true)
+		format = p.parseAtTimeZone(fmtString)
+		if to == nil {
+			to = exp.DTypeUnknown.IntoExpr(nil)
+		}
+		if dtype, ok := to.Arg("this").(exp.DType); ok && exp.TemporalTypes[dtype] {
+			value := ""
+			if fmtString != nil {
+				value = fmtString.Name()
+			}
+			if p.dialect.CastFormatToTime != nil {
+				value = p.dialect.CastFormatToTime(value)
+			}
+			kind := exp.KindStrToTime
+			if dtype == exp.DTypeDate {
+				kind = exp.KindStrToDate
+			}
+			result := p.expression(exp.New(kind, exp.Args{"this": this, "format": exp.LiteralString(value), "safe": safe}), nil, nil)
+			if format != nil && format.Kind() == exp.KindAtTimeZone && kind == exp.KindStrToTime {
+				result.Set("zone", format.Arg("zone"))
+			}
+			return result
+		}
+	} else if to == nil {
 		p.raiseError("Expected TYPE after CAST")
 	} else if exp.IsType(to, exp.DTypeChar) && (p.match(tokens.CHARACTER_SET) || p.matchTextSeq("CHARACTER", "SET")) {
 		// parser.py:7900-7901 (elif branch): CAST(x AS CHAR CHARACTER SET <cs>) captures the
@@ -548,7 +574,7 @@ func (p *Parser) parseCast(strict bool, safe any) exp.Expression {
 		// corpus case in this slice exercises them.
 		to = exp.DTypeCharacterSet.IntoExpr(exp.Args{"kind": p.parseVarOrString(false)})
 	}
-	args := exp.Args{"this": this, "to": to, "default": default_, "action": p.parseVarFromOptions(castActions, false)}
+	args := exp.Args{"this": this, "to": to, "format": format, "default": default_, "action": p.parseVarFromOptions(castActions, false)}
 	if safe != nil {
 		args["safe"] = safe
 	}
@@ -716,3 +742,5 @@ func (p *Parser) parseSlice(this exp.Expression) exp.Expression {
 	}
 	return p.expression(exp.Slice(exp.Args{"this": this, "expression": end, "step": step}), nil, nil)
 }
+
+var castFormatTokens = map[tokens.TokenType]bool{tokens.FORMAT: true, tokens.COMMA: true}

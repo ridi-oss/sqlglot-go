@@ -161,40 +161,15 @@
 {"dialect":"bigquery","category":"generate: error","sql":"SELECT category, ANY_VALUE(product HAVING MAX price), ANY_VALUE(product HAVING MIN cost), ANY_VALUE(supplier) FROM products GROUP BY category"}
 {"dialect":"bigquery","category":"generate: error","sql":"SELECT ts + MAKE_INTERVAL(1, 2, minute => 5, day => 3)"}
 {"dialect":"bigquery","category":"generate: error","sql":"TO_JSON(9999999999, stringify_wide_numbers => FALSE)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"CAST(encrypted_value AS STRING FORMAT 'BASE64')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SAFE_CAST(encrypted_value AS STRING FORMAT 'BASE64')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SAFE_CAST(some_date AS DATE FORMAT 'DD MONTH YYYY')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SAFE_CAST(some_date AS DATE FORMAT 'YYYY-MM-DD') AS some_date"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'linear')], ignore_null_values => FALSE) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'locf')]) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'null')], origin => CAST('2023-11-01 09:30:01' AS DATETIME)) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT AI.GENERATE_BOOL(MODEL `mydataset.gemini_model`, 'Is sky blue?')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST('20201225' AS TIMESTAMP FORMAT 'YYYYMMDD' AT TIME ZONE 'America/New_York')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST('20201225' AS TIMESTAMP FORMAT 'YYYYMMDD')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST('2026-03-24' AS STRING FORMAT ('YYYY'))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(CURRENT_DATE AS STRING FORMAT 'DAY') AS current_day"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(TIMESTAMP '2008-12-25 00:00:00+00:00' AS STRING FORMAT 'YYYY-MM-DD HH24:MI:SS TZH:TZM' AT TIME ZONE 'Asia/Kolkata') AS date_time_to_string"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(TIMESTAMP '2008-12-25 00:00:00+00:00' AS STRING FORMAT 'YYYY-MM-DD HH24:MI:SS TZH:TZM') AS date_time_to_string"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(date AS STRING FORMAT ('YYYY')) FROM (SELECT DATE('2026-03-24') AS date)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(date AS STRING FORMAT ('YYYY-MM-DD'))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(date AS TIMESTAMP FORMAT ('YYYY-MM-DD HH24:MI:SS'))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(timestamp AS STRING FORMAT ('YYYY-MM-DD') AT TIME ZONE 'UTC')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT a, b, c, d, e FROM GAP_FILL(TABLE foo, ts_column => 'b', partitioning_columns => ['a'], value_columns => [('c', 'bar'), ('d', 'baz'), ('e', 'bla')], bucket_width => INTERVAL '1' DAY)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"cast(x as date format 'MM/DD/YYYY')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"cast(x as time format 'YYYY.MM.DD HH:MI:SSTZH')"}
 {"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INTO TABLE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
 {"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INTO TEMP TABLE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
 {"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA OVERWRITE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"SELECT GRANT FROM (SELECT 'input' AS GRANT)"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT a overlaps"}
-{"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"PARSE_TIMESTAMP('%FT%H:%M:%E*S%z', x)"}
-{"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E6S%z', x)"}
-{"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"SELECT PARSE_DATE('%A %b %e %Y', 'Thursday Dec 25 2008')"}
-{"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"SELECT PARSE_DATE('%Y%m%d', '20081225')"}
-{"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"SELECT PARSE_DATE('%m-%d', '12-25')"}
-{"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"SELECT PARSE_TIMESTAMP('%c', 'Thu Dec 25 07:30:00 2008', 'UTC')"}
-{"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"SELECT PARSE_TIMESTAMP('%m-%d %H:%M:%S', '12-25 07:30:00')"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION count_evens(n BIGINT) RETURNS BIGINT BEGIN DECLARE total BIGINT DEFAULT 0; DECLARE i BIGINT DEFAULT 0; WHILE i < n DO SET total = total + 1; IF i = 0 THEN SET total = total + 1; END IF; SET i = i + 1; END WHILE; RETURN total; END SELECT COUNT_EVENS(3)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION custom_sqrt(a INTEGER) RETURNS DOUBLE COMMENT 'Custom sqrt function' RETURNS NULL ON NULL INPUT NOT DETERMINISTIC LANGUAGE SQL SECURITY DEFINER WITH (weight=42, cost='low') RETURN a SELECT CUSTOM_SQRT(4)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION declare() RETURNS INTEGER RETURN 1 SELECT DECLARE()"}

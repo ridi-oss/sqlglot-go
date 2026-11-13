@@ -199,3 +199,17 @@ func (p *Parser) bigqueryParseColumn(column exp.Expression) exp.Expression {
 	column.Meta()["quoted_column"] = true
 	return column
 }
+
+// matchIDToken applies BigQuery's ID_VAR/ALIAS/TABLE_ALIAS token-set edits
+// (parsers/bigquery.py:196-222): GRANT is usable as a name, ASC/DESC are not.
+func (p *Parser) matchIDToken(set map[tokens.TokenType]bool) bool {
+	if p.isBigQuery() {
+		switch p.curr.TokenType {
+		case tokens.GRANT:
+			return p.match(tokens.GRANT)
+		case tokens.ASC, tokens.DESC:
+			return false
+		}
+	}
+	return p.matchSet(set)
+}
