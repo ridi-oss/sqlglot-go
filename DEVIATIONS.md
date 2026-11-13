@@ -197,8 +197,9 @@ a backticked UDF name keep their case. Tests `bigquery_test.go`
 
 ### 1.23 BigQuery struct and UNNEST types
 
-Port limitation (not an upstream bug): upstream reads a column's STRUCT type from `annotate_types`,
-which the port does not have. The resolver instead takes the type from the schema for a base-table
+Not ported yet (not an upstream bug): upstream reads a column's STRUCT type from `annotate_types`.
+We skipped porting it (`optimizer/annotate_types.go` is an empty stub, ROADMAP slice 4c) and should
+port it; it is a high-priority backlog item. Until then the resolver takes the type from the schema for a base-table
 column, follows a pass-through column through a derived table or CTE (`SELECT o AS s` gives `s` the
 type of `o`, as upstream's annotator does), and reads STRUCT/ARRAY literals. When none applies
 (e.g. a function result), the type is unknown and `s.*` stays unexpanded; a consumer must treat an

@@ -72,7 +72,7 @@ Slices (historical ledger; each landed `go test ./...` green before the next):
      invariant), 18 invalid cases raise. qualify() runs end-to-end (JOIN with unqualified cols
      → qualified + stars expanded + validated). Carried 4a items done: NamedSelects KindSubquery
      (+ Selects()); AST-invariant assertion added to the optimizer harness (assertASTInvariants).
-   - 4c (DEFERRED, OFF probe's critical path): full TypeAnnotator/annotate_types (coercion
+   - 4c (DEFERRED — now HIGH PRIORITY, see Remaining work): full TypeAnnotator/annotate_types (coercion
      tables, per-node type rules). KEY FINDING: annotate_scope is NEVER called for base/mysql/
      postgres — both call sites are gated by ANNOTATE_ALL_SCOPES / SUPPORTS_STRUCT_STAR_EXPANSION,
      both false in base (qualify_columns.py:112,788). A minimal constructible TypeAnnotator +
@@ -107,6 +107,12 @@ The parse → generate round-trip is done for the ported corpus (see Status). Th
 mostly the **optimizer** (port 1:1 from `.reference/`, port the matching upstream tests,
 differential-check against the pinned Python):
 
+- **HIGH PRIORITY — full `annotate_types` (slice 4c).** Never ported: `optimizer/annotate_types.go`
+  is an empty stub. BigQuery needs it (`ANNOTATE_ALL_SCOPES`, `SUPPORTS_STRUCT_STAR_EXPANSION`):
+  without it a struct whose type comes from an expression (`SELECT x.* FROM (SELECT IF(c, a, b) AS
+  x FROM t)`) stays unexpanded, where upstream expands it (DEVIATIONS §1.23). Port
+  `optimizer/annotate_types.py` plus `typing/__init__.py` and `typing/bigquery.py`, then replace the
+  stand-in `literalType` / schema lookups in `optimizer/resolver.go`. Roughly 3-5 days.
 - THE REST OF THE OPTIMIZER (the big one): `simplify` (full — only `simplify_parens` is present),
   `normalize` (CNF/DNF), `pushdown_predicates`, `pushdown_projections`, `eliminate_ctes` /
   `eliminate_joins` / `eliminate_subqueries`, `merge_subqueries`, `unnest_subqueries`,
