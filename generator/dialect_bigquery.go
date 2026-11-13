@@ -366,6 +366,13 @@ func init() {
 		return g.funcCall("LOWER", []any{g.funcCall("HEX", []any{e.Arg("this")}, "(", ")", true)}, "(", ")", true)
 	}
 	dispatch[exp.KindPseudocolumn] = (*Generator).columnSQL
+	dispatch[exp.KindTimestampDiff] = func(g *Generator, e exp.Expression) string {
+		if g.dialect.Name == "mysql" {
+			// generators/mysql.py:198-200.
+			return g.funcCall("TIMESTAMPDIFF", []any{unitToVarValue(asExpression(e.Arg("unit"))), e.Arg("expression"), e.Arg("this")}, "(", ")", true)
+		}
+		return g.functionFallbackSQL(e)
+	}
 	dispatch[exp.KindKwarg] = func(g *Generator, e exp.Expression) string { return g.binary(e, "=>") }
 	dispatch[exp.KindExport] = func(g *Generator, e exp.Expression) string {
 		connection := g.sqlKey(e, "connection")

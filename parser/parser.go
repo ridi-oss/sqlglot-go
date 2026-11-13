@@ -347,7 +347,13 @@ func (p *Parser) Parse(rawTokens []tokens.Token, sql string) (expressions []exp.
 	if p.isAthenaRouter() {
 		return p.parseAthena(rawTokens, sql)
 	}
-	return p.parse(p.parseStatement, rawTokens, sql), nil
+	statements := p.parse(p.parseStatement, rawTokens, sql)
+	if p.isBigQuery() {
+		for _, statement := range statements {
+			bigqueryCorrelatedUnnests(statement)
+		}
+	}
+	return statements, nil
 }
 
 func (p *Parser) ParseInto(rawTokens []tokens.Token, sql string, into exp.Kind) (out []exp.Expression, err error) {
@@ -4377,6 +4383,15 @@ func init() {
 		"IF": func(p *Parser) exp.Expression { return p.parseIf() },
 	}
 	functionParsers = map[string]func(*Parser) exp.Expression{
+		// parser.py:9944-9949.
+		"NORMALIZE": func(p *Parser) exp.Expression {
+			this := p.parseBitwise()
+			var form exp.Expression
+			if p.match(tokens.COMMA) {
+				form = p.parseVar(false, nil, false)
+			}
+			return p.expression(exp.New(exp.KindNormalize, exp.Args{"this": this, "form": form}), nil, nil)
+		},
 		"CAST":        func(p *Parser) exp.Expression { return p.parseCast(p.strictCast, nil) },
 		"TRY_CAST":    func(p *Parser) exp.Expression { return p.parseCast(false, true) },
 		"SAFE_CAST":   func(p *Parser) exp.Expression { return p.parseCast(false, true) },

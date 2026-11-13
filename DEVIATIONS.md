@@ -204,6 +204,18 @@ Upstream's `PSEUDOCOLUMNS` (`dialects/bigquery.py:89-95`) includes `_DBT_MAX_PAR
 template variable. BigQuery reserves only the `_PARTITION*`, `_TABLE_SUFFIX` and `_FILE_NAME`
 names, so a real column called `_dbt_max_partition` stays an ordinary Column with its source.
 
+### 1.25 BigQuery correlated implicit UNNEST
+
+BigQuery resolves the first name of a FROM path against every range variable in scope, including
+those of enclosing queries, before trying a dataset. Upstream (`parser.py:4305-4330`) turns
+`FROM t, t.arr` into an UNNEST only when `t` is a source of the same SELECT, so in
+`SELECT (SELECT ... FROM u.tags) FROM Sales.Users AS u` it reads `u.tags` as a table and loses
+the read of `Users.tags`. The port converts such paths to `UNNEST(u.tags)` too; a CTE body does
+not see the outer query, and a derived table in a FROM sees neither that FROM's other sources nor
+anything further out. UPDATE/DELETE/MERGE targets and joins, and UNNEST aliases, count as enclosing
+sources. A backticked `` `o.arr` `` stays a table, as BigQuery reads it. Test `bigquery_test.go`
+(`TestBigQueryCorrelatedImplicitUnnest`).
+
 ## Opt-in behavioral extensions beyond upstream
 
 Additive analysis features; default behavior and fixture output unchanged.
@@ -326,6 +338,8 @@ None change `.sql()`:
 ## 4. Cosmetic AST-shape divergences (output identical, `.ToS()` differs)
 
 - Comment bubbling: a trailing comment can attach to a slightly different node.
+- BigQuery `NORMALIZE_AND_CASEFOLD(x, NFKC)`: the form is a `Var`, as for `NORMALIZE`; upstream's
+  builder (`parsers/bigquery.py:268`) leaves it a `Column`, which lineage would read as a column.
 - MySQL `PARTITION BY RANGE (YEAR(col))`: upstream wraps/unwraps `TsOrDsToDate`; the port elides
   both (capped in `fidelity_test.go` `maxASTDivergences`).
 

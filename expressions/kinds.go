@@ -786,6 +786,8 @@ const (
 	KindJSONArray
 	KindTranslate
 	KindPseudocolumn
+	KindTimeDiff
+	KindTimeTrunc
 )
 
 type Trait uint32
@@ -1463,6 +1465,8 @@ var argTypes = map[Kind][]argSpec{
 	KindJSONArray:              {{"expressions", false}, {"null_handling", false}, {"return_type", false}, {"strict", false}},
 	KindTranslate:              {{"this", true}, {"from_", true}, {"to", true}},
 	KindPseudocolumn:           {{"this", true}, {"table", false}, {"schema", false}, {"catalog", false}, {"join_mark", false}, {"shadow", false}},
+	KindTimeDiff:               {{"this", true}, {"expression", true}, {"unit", false}},
+	KindTimeTrunc:              {{"this", true}, {"unit", true}, {"zone", false}},
 }
 
 var traitsOf = map[Kind]Trait{
@@ -1814,6 +1818,8 @@ var traitsOf = map[Kind]Trait{
 	KindJSONArray:          TraitCondition | TraitFunc,
 	KindTranslate:          TraitCondition | TraitFunc,
 	KindPseudocolumn:       TraitCondition,
+	KindTimeDiff:           TraitCondition | TraitFunc,
+	KindTimeTrunc:          TraitCondition | TraitFunc,
 }
 
 var primitive = map[Kind]bool{
@@ -2370,6 +2376,8 @@ var className = map[Kind]string{
 	KindJSONArray:              "JSONArray",
 	KindTranslate:              "Translate",
 	KindPseudocolumn:           "Pseudocolumn",
+	KindTimeDiff:               "TimeDiff",
+	KindTimeTrunc:              "TimeTrunc",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func

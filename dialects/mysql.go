@@ -137,6 +137,13 @@ func MySQL() *Dialect {
 	// kept mysql-local for now (not needed to close any base/postgres parity gap; deferred to
 	// avoid changing base STR_POSITION/TIME_STR_TO_UNIX rendering that no fixture exercises).
 	d.Functions = map[string]func([]exp.Expression) exp.Expression{
+		// parsers/mysql.py:134 build_date_delta(exp.TimestampDiff): TIMESTAMPDIFF(unit, a, b).
+		"TIMESTAMPDIFF": func(args []exp.Expression) exp.Expression {
+			if len(args) < 3 {
+				return exp.FromArgList(exp.KindTimestampDiff, args)
+			}
+			return exp.New(exp.KindTimestampDiff, exp.Args{"this": args[2], "expression": args[1], "unit": args[0]})
+		},
 		"CURDATE":          exp.FromArgListFunc(exp.KindCurrentDate),
 		"CURTIME":          exp.FromArgListFunc(exp.KindCurrentTime),
 		"DATABASE":         exp.FromArgListFunc(exp.KindCurrentSchema),

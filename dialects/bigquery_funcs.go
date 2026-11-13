@@ -234,7 +234,12 @@ func bigqueryFunctions() map[string]func([]exp.Expression) exp.Expression {
 		"MD5":  fromArgList(exp.KindMD5Digest),
 		"SHA1": fromArgList(exp.KindSHA1Digest),
 		"NORMALIZE_AND_CASEFOLD": func(args []exp.Expression) exp.Expression {
-			return exp.New(exp.KindNormalize, exp.Args{"this": seqGet(args, 0), "form": seqGet(args, 1), "is_casefold": true})
+			// The form is a keyword (NFKC), not a column; upstream keeps it a Column here.
+			form := seqGet(args, 1)
+			if form != nil && form.Kind() == exp.KindColumn && len(form.Parts()) == 1 {
+				form = exp.Var(exp.Args{"this": form.Name()})
+			}
+			return exp.New(exp.KindNormalize, exp.Args{"this": seqGet(args, 0), "form": form, "is_casefold": true})
 		},
 		"OCTET_LENGTH": fromArgList(exp.KindByteLength),
 		"TO_HEX": func(args []exp.Expression) exp.Expression {

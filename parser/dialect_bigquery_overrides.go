@@ -240,12 +240,7 @@ func (p *Parser) implicitUnnestsToExplicit(this exp.Expression) exp.Expression {
 		normalized := p.normalizedCopy(table, true)
 		if table.Kind() == exp.KindTable && asExpr(join.Arg("on")) == nil {
 			if parts := normalized.Parts(); len(parts) > 1 && refs[parts[0].Name()] {
-				column := tableToColumn(table)
-				unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{column}})
-				if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias {
-					unnest.Set("alias", exp.TableAlias(exp.Args{"columns": []exp.Expression{alias.This()}}))
-				}
-				table.Replace(unnest)
+				tableToUnnest(table)
 			}
 		}
 		refs[normalized.AliasOrName()] = true
@@ -339,4 +334,124 @@ func (p *Parser) bigqueryParseBracket(this exp.Expression) exp.Expression {
 		e.Replace(args[0])
 	}
 	return bracket
+}
+
+// tableToUnnest replaces a `FROM t.arr [AS a]` table with `UNNEST(t.arr) [AS a]`.
+func tableToUnnest(table exp.Expression) {
+	unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{tableToColumn(table)}})
+	if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias {
+		unnest.Set("alias", exp.TableAlias(exp.Args{"columns": []exp.Expression{alias.This()}}))
+	}
+	table.Replace(unnest)
+}
+
+// bigqueryCorrelatedUnnests turns `FROM o.arr` inside a subquery into `UNNEST(o.arr)` when o names
+// a source of an enclosing query: BigQuery resolves a path's first name against the range
+// variables in scope, including correlated ones, before datasets.
+// divergence: upstream only checks the joins of the same SELECT (DEVIATIONS §1.25).
+func bigqueryCorrelatedUnnests(statement exp.Expression) {
+	if statement == nil {
+		return
+	}
+	for _, table := range statement.FindAll(exp.KindTable) {
+		this := table.This()
+		parent := table.Parent()
+		if this == nil || this.Kind() != exp.KindIdentifier || table.Arg("schema") == nil || parent == nil {
+			continue
+		}
+		// A backticked path `o.arr` names a table, unlike `o`.`arr` (generators/bigquery.py:614-627).
+		if table.MetaGet("quoted_table") != nil {
+			continue
+		}
+		if parent.Kind() != exp.KindFrom && parent.Kind() != exp.KindJoin {
+			continue
+		}
+		owner := parent.Parent()
+		if owner == nil || owner.Kind() != exp.KindSelect {
+			continue
+		}
+		parts := table.Parts()
+		if !enclosingSourceNames(owner)[strings.ToLower(parts[0].Name())] {
+			continue
+		}
+		// The first name is the outer range variable: o.s.arr reads column s, then field arr.
+		column := exp.Column(exp.Args{"this": parts[1].Copy(), "table": parts[0].Copy()})
+		if len(parts) > 2 {
+			chain := []exp.Expression{column}
+			for _, part := range parts[2:] {
+				chain = append(chain, part.Copy())
+			}
+			column = exp.DotBuild(chain)
+		}
+		unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{column}})
+		if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias {
+			unnest.Set("alias", exp.TableAlias(exp.Args{"columns": []exp.Expression{alias.This()}}))
+		}
+		table.Replace(unnest)
+	}
+}
+
+// enclosingSourceNames collects the lowercase alias-or-names of the sources of every query that
+// encloses sel: FROM/JOIN of a SELECT, the target and FROM/USING of UPDATE, DELETE and MERGE. It
+// stops at a CTE boundary (a CTE body cannot correlate) and at a derived table in a FROM clause,
+// which sees neither that FROM's other sources nor anything further out.
+func enclosingSourceNames(sel exp.Expression) map[string]bool {
+	names := map[string]bool{}
+	var add func(source exp.Expression)
+	add = func(source exp.Expression) {
+		if source == nil {
+			return
+		}
+		if source.Kind() == exp.KindFrom {
+			source = source.This()
+		}
+		if source == nil {
+			return
+		}
+		if name := source.AliasOrName(); name != "" {
+			names[strings.ToLower(name)] = true
+		}
+		// An UNNEST range variable is named by its alias column.
+		if source.Kind() == exp.KindUnnest {
+			for _, name := range source.AliasColumnNames() {
+				names[strings.ToLower(name)] = true
+			}
+		}
+		// UPDATE/DELETE attach their joins to the target table.
+		joins, _ := source.Arg("joins").([]exp.Expression)
+		for _, join := range joins {
+			add(join.This())
+		}
+	}
+	derived := false
+	for prev, n := sel, sel.Parent(); n != nil && n.Kind() != exp.KindCTE; prev, n = n, n.Parent() {
+		switch n.Kind() {
+		case exp.KindFrom, exp.KindJoin:
+			// Only the source itself is derived; a subquery in a JOIN's ON may correlate.
+			derived = n.This() == prev
+			continue
+		case exp.KindSelect, exp.KindUpdate, exp.KindDelete, exp.KindMerge:
+		default:
+			continue
+		}
+		if derived {
+			// A derived table cannot correlate past the query whose FROM holds it.
+			return names
+		}
+		add(asExpr(n.Arg("this")))
+		add(asExpr(n.Arg("from_")))
+		switch using := n.Arg("using").(type) {
+		case exp.Expression:
+			add(using)
+		case []exp.Expression:
+			for _, u := range using {
+				add(u)
+			}
+		}
+		joins, _ := n.Arg("joins").([]exp.Expression)
+		for _, join := range joins {
+			add(join.This())
+		}
+	}
+	return names
 }

@@ -20,6 +20,7 @@ func seqGet[T any](s []T, i int) T {
 var opaqueDroppedFunctionParsers = map[string]bool{
 	"CONCAT":    true,
 	"DATE_PART": true,
+	"NORMALIZE": true,
 }
 
 // captureOpaqueName snapshots the current call's as-written name at form-split parser ENTRY,

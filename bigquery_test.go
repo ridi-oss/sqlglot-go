@@ -270,3 +270,86 @@ func TestBigQueryNormalizeCTEVisibility(t *testing.T) {
 		}
 	}
 }
+
+// DEVIATIONS §1.25: a FROM path whose first name is an enclosing query's source is an implicit
+// UNNEST of that source's column; a CTE body does not see the outer query.
+func TestBigQueryCorrelatedImplicitUnnest(t *testing.T) {
+	for sql, want := range map[string]string{
+		"SELECT (SELECT STRING_AGG(x) FROM Public.tags AS x) FROM Sales.Users AS Public":                                          "SELECT (SELECT STRING_AGG(x) FROM UNNEST(Public.tags) AS x) FROM Sales.Users AS Public",
+		"SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM u.tags AS t WHERE t = 'a')":                                    "SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM UNNEST(u.tags) AS t WHERE t = 'a')",
+		"SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM Other.t)":                                                      "SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM Other.t)",
+		"WITH c AS (SELECT * FROM ds.t) SELECT * FROM c, x AS ds":                                                                 "WITH c AS (SELECT * FROM ds.t) SELECT * FROM c CROSS JOIN x AS ds",
+		"SELECT (WITH c AS (SELECT * FROM o.arr) SELECT 1 FROM c) FROM t AS o":                                                    "SELECT (WITH c AS (SELECT * FROM o.arr) SELECT 1 FROM c) FROM t AS o",
+		"DELETE FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM U.tags AS t)":                                                    "DELETE FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM UNNEST(U.tags) AS t)",
+		"UPDATE Sales.Users AS u SET id = (SELECT COUNT(t) FROM u.tags AS t) WHERE TRUE":                                          "UPDATE Sales.Users AS u SET id = (SELECT COUNT(t) FROM UNNEST(u.tags) AS t) WHERE TRUE",
+		"SELECT * FROM ds.users AS o, (SELECT * FROM o.arr) AS x":                                                                 "SELECT * FROM ds.users AS o CROSS JOIN (SELECT * FROM o.arr) AS x",
+		"SELECT (SELECT 1 FROM ds.other JOIN o.arr AS a ON TRUE) FROM ds.t AS o":                                                  "SELECT (SELECT 1 FROM ds.other JOIN UNNEST(o.arr) AS a ON TRUE) FROM ds.t AS o",
+		"SELECT ARRAY(SELECT x FROM o.arr AS x) FROM ds.t AS o":                                                                   "SELECT ARRAY(SELECT x FROM UNNEST(o.arr) AS x) FROM ds.t AS o",
+		"SELECT 1 FROM Sales.Users AS u UNION ALL SELECT 1 FROM u.tags":                                                           "SELECT 1 FROM Sales.Users AS u UNION ALL SELECT 1 FROM u.tags",
+		"SELECT (SELECT 1 FROM `u.tags`) FROM Sales.Users AS u":                                                                   "SELECT (SELECT 1 FROM `u.tags`) FROM Sales.Users AS u",
+		"SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM ds.a, (SELECT (SELECT 1 FROM u.tbl) FROM ds.b) AS d)":          "SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM ds.a CROSS JOIN (SELECT (SELECT 1 FROM u.tbl) FROM ds.b) AS d)",
+		"SELECT (SELECT 1 FROM o.items) FROM Sales.Users AS u, u.orders AS o":                                                     "SELECT (SELECT 1 FROM UNNEST(o.items)) FROM Sales.Users AS u CROSS JOIN UNNEST(u.orders) AS o",
+		"DELETE Sales.Target AS t FROM Sales.Target AS t JOIN Sales.Users AS u ON t.id = u.id WHERE EXISTS(SELECT 1 FROM u.tags)": "DELETE Sales.Target AS t FROM Sales.Target AS t JOIN Sales.Users AS u ON t.id = u.id WHERE EXISTS(SELECT 1 FROM UNNEST(u.tags))",
+	} {
+		statements, err := sqlglot.Parse(sql, "bigquery")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := sqlglot.Generate(statements[0], "bigquery", generator.Options{}); got != want {
+			t.Errorf("%s\n got: %s\nwant: %s", sql, got, want)
+		}
+	}
+
+	// Lineage: the subquery reads Users.tags.
+	opts := optimizer.DefaultQualifyOpts()
+	opts.Dialect = "bigquery"
+	opts.Schema = schema.M("Sales", schema.M("Users", schema.M("id", "INT64", "tags", "ARRAY<STRING>")))
+	e, err := sqlglot.ParseOne("SELECT (SELECT STRING_AGG(x) FROM Public.tags AS x) FROM Sales.Users AS Public", "bigquery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := optimizer.Qualify(e, opts)
+	got, _ := sqlglot.Generate(q, "bigquery", generator.Options{})
+	if want := "SELECT (SELECT STRING_AGG(`x`) AS `_col_0` FROM UNNEST(`public`.`tags`) AS `x`) AS `_col_0` FROM `Sales`.`Users` AS `public`"; got != want {
+		t.Errorf("qualify\n got: %s\nwant: %s", got, want)
+	}
+	// The unnested column is tags of the outer source public, which is Sales.Users.
+	column := q.Find(exp.KindUnnest).Find(exp.KindColumn)
+	if column.Name() != "tags" || column.Text("table") != "public" {
+		t.Errorf("unnest column: %s", column.ToS())
+	}
+	if source := q.Find(exp.KindFrom).This(); source.AliasOrName() != "public" || source.Name() != "Users" {
+		t.Errorf("outer source: %s", source.ToS())
+	}
+}
+
+// Date parts and NORMALIZE forms are keywords, never column references.
+func TestBigQueryDatePartsAreVars(t *testing.T) {
+	e, err := sqlglot.ParseOne("SELECT TIME_TRUNC(t, HOUR), TIME_DIFF(a, b, MINUTE), NORMALIZE(x, NFKC), NORMALIZE_AND_CASEFOLD(x, NFD) FROM z", "bigquery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sel := range e.Selects() {
+		arg := sel.Arg("unit")
+		if arg == nil {
+			arg = sel.Arg("form")
+		}
+		if v, _ := arg.(exp.Expression); v == nil || v.Kind() != exp.KindVar {
+			t.Errorf("not a Var: %s", sel.ToS())
+		}
+	}
+}
+
+// MySQL TIMESTAMPDIFF takes the unit first; both operands stay columns.
+func TestMySQLTimestampDiffKeepsColumns(t *testing.T) {
+	e, err := sqlglot.ParseOne("SELECT TIMESTAMPDIFF(MINUTE, a, b) FROM t", "mysql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(e.FindAll(exp.KindColumn)); got != 2 {
+		t.Errorf("found %d columns: %s", got, e.ToS())
+	}
+	if got, _ := sqlglot.Generate(e, "mysql", generator.Options{}); got != "SELECT TIMESTAMPDIFF(MINUTE, a, b) FROM t" {
+		t.Errorf("round trip: %s", got)
+	}
+}

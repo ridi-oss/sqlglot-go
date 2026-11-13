@@ -221,3 +221,9 @@ func Translate(args Args) Expression { return newNode(KindTranslate, args) }
 
 // Pseudocolumn ports exp.Pseudocolumn.
 func Pseudocolumn(args Args) Expression { return newNode(KindPseudocolumn, args) }
+
+// TimeDiff ports exp.TimeDiff.
+func TimeDiff(args Args) Expression { return newNode(KindTimeDiff, args) }
+
+// TimeTrunc ports exp.TimeTrunc.
+func TimeTrunc(args Args) Expression { return newNode(KindTimeTrunc, args) }

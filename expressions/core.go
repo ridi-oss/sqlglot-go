@@ -1498,5 +1498,5 @@ var timeUnitKinds = map[Kind]bool{
 	KindDateAdd: true, KindDateDiff: true, KindDateSub: true, KindDatetimeAdd: true, KindDatetimeDiff: true,
 	KindDatetimeSub: true, KindDatetimeTrunc: true, KindLastDay: true, KindTimeAdd: true, KindTimeSub: true,
 	KindTimestampAdd: true, KindTimestampDiff: true, KindTimestampSub: true, KindTimestampTrunc: true,
-	KindTsOrDsAdd: true,
+	KindTsOrDsAdd: true, KindTimeDiff: true, KindTimeTrunc: true,
 }
