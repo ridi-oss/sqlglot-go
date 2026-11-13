@@ -33,12 +33,13 @@ func BigQuery() *Dialect {
 	d.AliasPostVersion = false
 	d.NormalizationStrategy = CaseInsensitive
 	d.NormalizeFunctions = ""
+	// divergence: upstream also lists _DBT_MAX_PARTITION, a dbt variable that BigQuery does not
+	// reserve; a real column with that name must keep its lineage (DEVIATIONS §1.24).
 	d.Pseudocolumns = map[string]bool{
-		"_PARTITIONTIME":     true,
-		"_PARTITIONDATE":     true,
-		"_TABLE_SUFFIX":      true,
-		"_FILE_NAME":         true,
-		"_DBT_MAX_PARTITION": true,
+		"_PARTITIONTIME": true,
+		"_PARTITIONDATE": true,
+		"_TABLE_SUFFIX":  true,
+		"_FILE_NAME":     true,
 	}
 	// parsers/bigquery.py:190-194.
 	d.LogDefaultsToLn = true

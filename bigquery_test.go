@@ -231,3 +231,42 @@ func TestBigQueryNormalizeKeepsTableNameCase(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
+
+// DEVIATIONS §1.24: _DBT_MAX_PARTITION is an ordinary column with a source.
+func TestBigQueryDbtMaxPartitionIsAColumn(t *testing.T) {
+	e, err := sqlglot.ParseOne("SELECT _DBT_MAX_PARTITION FROM t", "bigquery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := optimizer.DefaultQualifyOpts()
+	opts.Dialect = "bigquery"
+	opts.Schema = schema.M("t", schema.M("_dbt_max_partition", "DATE"))
+	q := optimizer.Qualify(e, opts)
+	if q.Find(exp.KindPseudocolumn) != nil {
+		t.Fatalf("became a Pseudocolumn: %s", q.ToS())
+	}
+	if c := q.Find(exp.KindColumn); c == nil || c.Text("table") != "t" {
+		t.Errorf("not a qualified column: %s", q.ToS())
+	}
+}
+
+// NormalizeIdentifiers alone: a CTE reference folds, a same-named table in that CTE's own body
+// (or before the CTE is defined) is the physical table and keeps its case.
+func TestBigQueryNormalizeCTEVisibility(t *testing.T) {
+	for sql, want := range map[string]string{
+		"SELECT F(X).Field.g(), Sales.upper(X)":                                    "SELECT F(x).field.g(), Sales.upper(x)",
+		"WITH Foo AS (SELECT 1) SELECT * FROM FOO":                                 "WITH foo AS (SELECT 1) SELECT * FROM foo",
+		"WITH Users AS (SELECT * FROM Users) SELECT * FROM Users":                  "WITH users AS (SELECT * FROM Users) SELECT * FROM users",
+		"WITH a AS (SELECT * FROM B), B AS (SELECT 1) SELECT * FROM a, B":          "WITH a AS (SELECT * FROM B), b AS (SELECT 1) SELECT * FROM a CROSS JOIN b",
+		"WITH RECURSIVE R AS (SELECT 1 UNION ALL SELECT * FROM R) SELECT * FROM R": "WITH RECURSIVE r AS (SELECT 1 UNION ALL SELECT * FROM r) SELECT * FROM r",
+	} {
+		e, err := sqlglot.ParseOne(sql, "bigquery")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := sqlglot.Generate(optimizer.NormalizeIdentifiers(e, "bigquery"), "bigquery", generator.Options{})
+		if got != want {
+			t.Errorf("%s\n got: %s\nwant: %s", sql, got, want)
+		}
+	}
+}

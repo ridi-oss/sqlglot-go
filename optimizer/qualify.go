@@ -121,18 +121,28 @@ func markBigQueryTableNames(expression exp.Expression) {
 	}
 }
 
-// cteVisible reports whether a WITH clause on an enclosing query defines name.
+// cteVisible reports whether a WITH clause on an enclosing query defines name. Inside a CTE's
+// own body only the earlier CTEs are visible, unless the WITH is RECURSIVE.
 func cteVisible(node exp.Expression, name string) bool {
+	var via exp.Expression
 	for n := node.Parent(); n != nil; n = n.Parent() {
+		if n.Kind() == exp.KindCTE {
+			via = n
+		}
 		with := asExpression(n.Arg("with_"))
 		if with == nil {
 			continue
 		}
+		recursive := truthy(with.Arg("recursive"))
 		for _, cte := range with.Expressions() {
+			if cte == via && !recursive {
+				break
+			}
 			if strings.ToLower(cte.AliasOrName()) == name {
 				return true
 			}
 		}
+		via = nil
 	}
 	return false
 }

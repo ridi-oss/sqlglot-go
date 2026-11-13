@@ -123,8 +123,16 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 		panic(err)
 	}
 	name := strings.ToLower(d.Name)
-	supported := name == "mysql" || name == "postgres" || name == "athena"
+	supported := name == "mysql" || name == "postgres" || name == "athena" || name == "bigquery"
 	r := &engineResolver{catalog: catalog, dialect: d, searchPath: searchPath, ctes: cteNames(expression)}
+	if name == "bigquery" {
+		folded := make(map[string]bool, len(r.ctes))
+		for alias := range r.ctes {
+			folded[asciiLowerName(alias)] = true
+		}
+		r.ctes = folded
+		r.tempFunctions = bigqueryTempFunctions(expression)
+	}
 	if name == "athena" {
 		folded := make(map[string]bool, len(r.ctes))
 		for alias := range r.ctes {
@@ -143,6 +151,8 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 				}
 				if name == "athena" {
 					calls[node] = r.resolveAthenaCall(node)
+				} else if name == "bigquery" {
+					calls[node] = r.resolveBigQueryCall(node)
 				} else {
 					calls[node] = r.resolveCall(node)
 				}
@@ -155,6 +165,8 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 				}
 				if name == "athena" {
 					relations[node] = r.resolveAthenaRelation(node)
+				} else if name == "bigquery" {
+					relations[node] = r.resolveBigQueryRelation(node)
 				} else {
 					relations[node] = r.resolveRelation(node)
 				}
@@ -164,10 +176,11 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 }
 
 type engineResolver struct {
-	catalog    *EngineCatalog
-	dialect    *dialects.Dialect
-	searchPath []string
-	ctes       map[string]bool
+	catalog       *EngineCatalog
+	dialect       *dialects.Dialect
+	searchPath    []string
+	ctes          map[string]bool
+	tempFunctions map[string]bool
 }
 
 func (r *engineResolver) isMySQL() bool { return strings.ToLower(r.dialect.Name) == "mysql" }

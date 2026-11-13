@@ -184,7 +184,9 @@ Upstream's `normalize_identifier` (`dialects/bigquery.py:153-174`) folds every n
 dataset-qualified, guessing it may be a CTE, so `FROM Users` with a default dataset qualifies to
 `ds.users`. BigQuery table names are case-sensitive. Under `NormalizeIdentifiers` (and so `Qualify`), an unqualified table name that
 does not match a CTE in the statement (case-insensitively) is marked `is_table` and keeps its case;
-CTE references still fold. Test `bigquery_test.go` (`TestBigQueryUnqualifiedTableNameCase`).
+CTE references still fold. The dataset path of a UDF call (`Sales.f()`, `` `p.Sales.f`() ``)
+keeps its case the same way, as does a backticked function name (`` `MyFn`() ``); upstream folds
+both, though its own comment calls BigQuery UDF names case-sensitive. Test `bigquery_test.go` (`TestBigQueryUnqualifiedTableNameCase`).
 
 ### 1.23 BigQuery struct types follow projections
 
@@ -195,6 +197,12 @@ follows the projection (`SELECT o AS s` gives `s` the type of `o`); upstream's U
 column. A projection that is neither a column nor a literal gives no type, so `s.*` stays unexpanded.
 `s.* EXCEPT/REPLACE (...)` on a struct is also left unexpanded: upstream expands it and drops the
 modifier. Tests `bigquery_test.go`, the BigQuery cases of `qualify_columns.sql`.
+
+### 1.24 BigQuery pseudo-columns exclude `_DBT_MAX_PARTITION`
+
+Upstream's `PSEUDOCOLUMNS` (`dialects/bigquery.py:89-95`) includes `_DBT_MAX_PARTITION`, a dbt
+template variable. BigQuery reserves only the `_PARTITION*`, `_TABLE_SUFFIX` and `_FILE_NAME`
+names, so a real column called `_dbt_max_partition` stays an ordinary Column with its source.
 
 ## Opt-in behavioral extensions beyond upstream
 
@@ -237,8 +245,11 @@ Additive analysis features; default behavior and fixture output unchanged.
   consumer-supplied `DefaultCatalog` + `CurrentDatabase`, calls a single global builtin set with a
   bare-name identity, qualified calls Unknown; ambiguity fails closed to Unknown). The
   catalog is a pure consumer input introspected from the live target — no name sets ship with
-  sqlglot-go — and resolution is report-only: the AST is never rewritten. Tests
-  `optimizer/engine_catalog_test.go`.
+  sqlglot-go — and resolution is report-only: the AST is never rewritten. BigQuery: an unqualified
+  call is a temp UDF of the statement or a builtin; `SAFE.f` resolves like `f`; `NET.f` and
+  `ns.f` are builtin by dotted lowercase name; `ds.f` / `proj.ds.f` is a UDF via `UDFSchemas` (proj
+  must be `DefaultCatalog`); relations follow the Athena rule with case-kept path parts. Tests
+  `optimizer/engine_catalog_test.go`, `optimizer/engine_catalog_bigquery_test.go`.
 
 Neither is a grammar construct — no ledger row.
 
