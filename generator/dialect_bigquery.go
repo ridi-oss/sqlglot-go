@@ -27,6 +27,8 @@ func init() {
 	rename := prestoRename
 	call := prestoCall
 	registerDialectDispatch("bigquery", map[exp.Kind]func(*Generator, exp.Expression) string{
+		exp.KindDeclare:        (*Generator).declareDefaultSQL,
+		exp.KindDeclareItem:    (*Generator).declareItemDefaultSQL,
 		exp.KindAIEmbed:        rename("EMBED"),
 		exp.KindAIGenerate:     rename("GENERATE"),
 		exp.KindAISimilarity:   rename("SIMILARITY"),
@@ -349,4 +351,84 @@ func init() {
 		}
 		return g.funcCall("JSON_ARRAY", args, "(", suffix+")", true)
 	}
+}
+
+// Base generator methods for nodes the BigQuery grammar introduces (generator.py).
+func init() {
+	dispatch[exp.KindKwarg] = func(g *Generator, e exp.Expression) string { return g.binary(e, "=>") }
+	dispatch[exp.KindExport] = func(g *Generator, e exp.Expression) string {
+		connection := g.sqlKey(e, "connection")
+		if connection != "" {
+			connection = "WITH CONNECTION " + connection + " "
+		}
+		return "EXPORT DATA " + connection + g.sqlKey(e, "options") + " AS " + g.sqlKey(e, "this")
+	}
+	dispatch[exp.KindForIn] = func(g *Generator, e exp.Expression) string {
+		return "FOR " + g.sqlKey(e, "this") + " DO " + g.sqlKey(e, "expression")
+	}
+	dispatch[exp.KindHavingMax] = func(g *Generator, e exp.Expression) string {
+		kind := "MIN"
+		if truthy(e.Arg("max")) {
+			kind = "MAX"
+		}
+		return g.sqlKey(e, "this") + " HAVING " + kind + " " + g.sqlKey(e, "expression")
+	}
+	dispatch[exp.KindSafeFunc] = func(g *Generator, e exp.Expression) string { return "SAFE." + g.sqlKey(e, "this") }
+	dispatch[exp.KindNetFunc] = func(g *Generator, e exp.Expression) string { return "NET." + g.sqlKey(e, "this") }
+	for kind, name := range map[exp.Kind]string{
+		exp.KindPredict: "PREDICT", exp.KindGenerateText: "GENERATE_TEXT", exp.KindGenerateTable: "GENERATE_TABLE",
+		exp.KindGenerateBool: "GENERATE_BOOL", exp.KindGenerateInt: "GENERATE_INT", exp.KindGenerateDouble: "GENERATE_DOUBLE",
+		exp.KindMLTranslate: "TRANSLATE", exp.KindMLForecast: "FORECAST",
+	} {
+		name := name
+		dispatch[kind] = func(g *Generator, e exp.Expression) string { return g.mlSQL(e, name) }
+	}
+	dispatch[exp.KindGenerateEmbedding] = func(g *Generator, e exp.Expression) string {
+		if truthy(e.Arg("is_text")) {
+			return g.mlSQL(e, "GENERATE_TEXT_EMBEDDING")
+		}
+		return g.mlSQL(e, "GENERATE_EMBEDDING")
+	}
+	dispatch[exp.KindAIForecast] = func(g *Generator, e exp.Expression) string {
+		return g.funcCall("FORECAST", g.tableArgs(e, "this", "data_col", "timestamp_col", "model", "id_cols", "horizon",
+			"forecast_end_timestamp", "confidence_level", "output_historical_time_series", "context_window"), "(", ")", true)
+	}
+	dispatch[exp.KindFeaturesAtTime] = func(g *Generator, e exp.Expression) string {
+		return g.funcCall("FEATURES_AT_TIME", g.tableArgs(e, "this", "time", "num_rows", "ignore_feature_nulls"), "(", ")", true)
+	}
+	dispatch[exp.KindVectorSearch] = func(g *Generator, e exp.Expression) string {
+		args := g.tableArgs(e, "this", "column_to_search", "query_table", "query_column_to_search", "top_k", "distance_type", "options")
+		if q := asExpression(e.Arg("query_table")); q != nil && q.Kind() == exp.KindTable {
+			args[2] = "TABLE " + g.gen(q)
+		}
+		return g.funcCall("VECTOR_SEARCH", args, "(", ")", true)
+	}
+}
+
+// tableArgs collects args for a table-valued function call, prefixing a Table `this` with TABLE.
+func (g *Generator) tableArgs(e exp.Expression, keys ...string) []any {
+	args := make([]any, len(keys))
+	for i, key := range keys {
+		args[i] = e.Arg(key)
+	}
+	if this := asExpression(e.Arg("this")); this != nil && this.Kind() == exp.KindTable {
+		args[0] = "TABLE " + g.gen(this)
+	}
+	return args
+}
+
+// mlSQL ports _ml_sql (generator.py:5054-5066).
+func (g *Generator) mlSQL(e exp.Expression, name string) string {
+	var exprSQL any
+	if expr := asExpression(e.Arg("expression")); expr != nil {
+		exprSQL = g.gen(expr)
+		if expr.Kind() == exp.KindTable {
+			exprSQL = "TABLE " + g.gen(expr)
+		}
+	}
+	var params any
+	if p := g.sqlKey(e, "params_struct"); p != "" {
+		params = p
+	}
+	return g.funcCall(name, []any{"MODEL " + g.sqlKey(e, "this"), exprSQL, params}, "(", ")", true)
 }
