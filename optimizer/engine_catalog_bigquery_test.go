@@ -54,7 +54,12 @@ func TestBigQueryEngineCalls(t *testing.T) {
 		{"SELECT SAFE.nope(x)", optimizer.ResolvedCall{}},
 		{"SELECT NET.HOST(x)", optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "net.host"}},
 		{"SELECT KEYS.NEW_KEYSET('x')", optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "keys.new_keyset"}},
-		{"SELECT Sales.MASK(x)", optimizer.ResolvedCall{Kind: optimizer.CallUDF, Identity: "Sales.mask"}},
+		{"SELECT Sales.mask(x)", optimizer.ResolvedCall{Kind: optimizer.CallUDF, Identity: "Sales.mask"}},
+		// UDF names are case-sensitive: MASK is a different (unknown) function.
+		{"SELECT Sales.MASK(x)", optimizer.ResolvedCall{}},
+		{"SELECT UPPER(x)", optimizer.ResolvedCall{Kind: optimizer.CallBuiltin, Identity: "upper"}},
+		{"SELECT p.Sales.MASK(x)", optimizer.ResolvedCall{}},
+		{"SELECT * FROM Sales.MASK(1)", optimizer.ResolvedCall{}},
 		{"SELECT p.Sales.mask(x)", optimizer.ResolvedCall{Kind: optimizer.CallUDF, Identity: "Sales.mask"}},
 		{"SELECT `p.Sales.mask`(x)", optimizer.ResolvedCall{Kind: optimizer.CallUDF, Identity: "Sales.mask"}},
 		{"SELECT other.Sales.mask(x)", optimizer.ResolvedCall{}},
@@ -77,7 +82,7 @@ func TestBigQueryEngineCalls(t *testing.T) {
 	}
 
 	// A temp function defined under the same root is a UDF and shadows the builtin name set.
-	statements, err := sqlglot.Parse("CREATE TEMP FUNCTION Upper(x INT64) AS (x); SELECT upper(1)", "bigquery,opaque_functions=true")
+	statements, err := sqlglot.Parse("CREATE TEMP FUNCTION upper(x INT64) AS (x); SELECT upper(1)", "bigquery,opaque_functions=true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +120,7 @@ func TestBigQueryEngineRelations(t *testing.T) {
 
 // Through NormalizeIdentifiers (as Qualify and proxy-monster run it), a 3-part UDF path keeps its case.
 func TestBigQueryEngineCallsAfterNormalize(t *testing.T) {
-	e, err := sqlglot.ParseOne("SELECT p.Sales.mask(x), Sales.MASK(x), `p.Sales.mask`(x) FROM Users", "bigquery")
+	e, err := sqlglot.ParseOne("SELECT p.Sales.mask(x), Sales.mask(x), `p.Sales.mask`(x) FROM Users", "bigquery")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +135,27 @@ func TestBigQueryEngineCallsAfterNormalize(t *testing.T) {
 	for _, call := range calls {
 		if report[call] != want {
 			t.Errorf("%s: got %+v", call.ToS(), report[call])
+		}
+	}
+}
+
+// UDF names are case-sensitive in BigQuery: temp MyF matches only MyF, and Upper does not
+// shadow the builtin upper.
+func TestBigQueryTempFunctionCase(t *testing.T) {
+	for sql, want := range map[string]optimizer.ResolvedCall{
+		"CREATE TEMP FUNCTION MyF(x INT64) AS (x); SELECT MyF(1)":     {Kind: optimizer.CallUDF, Identity: "MyF"},
+		"CREATE TEMP FUNCTION MyF(x INT64) AS (x); SELECT myf(1)":     {},
+		"CREATE TEMP FUNCTION Upper(x INT64) AS (x); SELECT upper(1)": {Kind: optimizer.CallBuiltin, Identity: "upper"},
+	} {
+		statements, err := sqlglot.Parse(sql, "bigquery,opaque_functions=true")
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := exp.New(exp.KindBlock, exp.Args{"expressions": statements})
+		report := map[exp.Expression]optimizer.ResolvedCall{}
+		optimizer.ResolveEngineIdentities(root, bigqueryEngineCatalog(), "bigquery", nil, report, nil)
+		if got := report[statements[1].Find(exp.KindAnonymous)]; got != want {
+			t.Errorf("%s: got %+v, want %+v", sql, got, want)
 		}
 	}
 }

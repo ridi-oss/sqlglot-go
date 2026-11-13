@@ -182,10 +182,11 @@ upstream pops into the same `Identifier` offset, so the check is parser-only. Te
 
 Upstream bug: `normalize_identifier` (`dialects/bigquery.py:153-174`) lowercases every table name
 that has no dataset in front, guessing it may be a CTE. With a default dataset, `FROM Users`
-becomes `ds.users`, but BigQuery table names are case-sensitive, so a lookup binds the wrong table
-(or none) when both `Users` and `users` exist. It also lowercases the dataset in a UDF call
-(`Sales.f()` -> `sales.f()`) and a backticked UDF name (`` `MyFn`() ``), though BigQuery dataset
-and UDF names are case-sensitive and its own comment says so.
+becomes `ds.users`, but BigQuery dataset and table names are case-sensitive (unless the dataset sets
+`is_case_insensitive`), so a lookup binds the wrong table (or none) when both `Users` and `users`
+exist. It also lowercases the dataset in a UDF call (`Sales.f()` -> `sales.f()`) and a backticked
+UDF name (`` `MyFn`() ``), though BigQuery UDF names are case-sensitive and its own comment says
+so. (BigQuery case rules: GoogleSQL lexical structure, "Case sensitivity".)
 
 Fixed: `NormalizeIdentifiers` (and so `Qualify`) keeps the case of an unqualified table name unless
 a CTE visible from that table has the same name (CTE names are case-insensitive). Visibility follows
@@ -213,21 +214,26 @@ Tests `bigquery_test.go`, the BigQuery cases of `qualify_columns.sql`.
 ### 1.24 BigQuery pseudo-columns exclude `_DBT_MAX_PARTITION`
 
 Upstream bug: `PSEUDOCOLUMNS` (`dialects/bigquery.py:89-95`) includes `_DBT_MAX_PARTITION`, a dbt
-template variable that BigQuery does not reserve. A real column with that name becomes a
+template variable, not a reserved name (BigQuery's reserved column prefixes are `_TABLE_`,
+`_FILE_`, `_PARTITION`, `_ROW_TIMESTAMP`, `__ROOT__`, `_COLIDENTIFIER` and `_CHANGE_*`). A real column with that name becomes a
 `Pseudocolumn` with no source table, so its read is lost from lineage. Fixed: it is an ordinary
 Column. The other four (`_PARTITIONTIME`, `_PARTITIONDATE`, `_TABLE_SUFFIX`, `_FILE_NAME`) use
-prefixes BigQuery reserves, so no user column can have them. Test `bigquery_test.go`
+reserved prefixes, so no user column can have them. Test `bigquery_test.go`
 (`TestBigQueryDbtMaxPartitionIsAColumn`).
 
 ### 1.25 BigQuery correlated implicit UNNEST
 
 Upstream bug: BigQuery resolves the first name of a FROM path against the range variables in scope,
 including those of enclosing queries, before datasets. Upstream (`parser.py:4305-4330`) checks only
-the sources of the same SELECT, so in `SELECT (SELECT ... FROM u.tags) FROM Sales.Users AS u` it
-reads `u.tags` as table `tags` in dataset `u`, and the read of `Users.tags` is lost.
+the sources of the same SELECT, and there skips joins with ON. So in
+`SELECT (SELECT ... FROM u.tags) FROM Sales.Users AS u` and in
+`FROM Sales.Users AS u JOIN u.tags AS t ON TRUE` it reads `u.tags` as table `tags` in dataset `u`,
+and the read of `Users.tags` is lost.
 
-Fixed: such a path becomes `UNNEST(u.tags)` when `u` (case-insensitive) is a source of an enclosing
-query: SELECT FROM/JOIN, UPDATE/DELETE/MERGE targets and their joins, and UNNEST aliases.
+Fixed: such a path becomes `UNNEST(u.tags)` when `u` (case-insensitive) is an earlier source of the
+same SELECT (any join with or without ON, except the right side of a RIGHT or FULL join, which
+cannot see the left), compared case-insensitively (upstream compares case-kept table names, so
+`FROM Sales.Users JOIN users.tags` missed), or a source of an enclosing query: SELECT FROM/JOIN, UPDATE/DELETE/MERGE targets and their joins, and UNNEST aliases.
 `u.s.arr` reads column `s` of `u`, then field `arr`. It does not apply inside a CTE body, inside a
 derived table in a FROM (which sees neither that FROM's other sources nor anything further out), or
 to a backticked `` `u.tags` ``, which BigQuery reads as a table. Test `bigquery_test.go`
@@ -278,7 +284,9 @@ Additive analysis features; default behavior and fixture output unchanged.
   sqlglot-go — and resolution is report-only: the AST is never rewritten. BigQuery: an unqualified
   call is a temp UDF of the statement or a builtin; `SAFE.f` resolves like `f`; `NET.f` and
   `ns.f` are builtin by dotted lowercase name; `ds.f` / `proj.ds.f` is a UDF via `UDFSchemas` (proj
-  must be `DefaultCatalog`); relations follow the Athena rule with case-kept path parts. Tests
+  must be `DefaultCatalog`). Built-in names match case-insensitively and UDF names (temp and
+  persistent) exactly, per BigQuery's case rules (GoogleSQL lexical structure, "Case sensitivity"),
+  so `UDFSchemas` must hold names as defined; relations follow the Athena rule with case-kept path parts. Tests
   `optimizer/engine_catalog_test.go`, `optimizer/engine_catalog_bigquery_test.go`.
 
 Neither is a grammar construct — no ledger row.

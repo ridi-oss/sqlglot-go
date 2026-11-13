@@ -28,7 +28,7 @@ func bigqueryTempFunctions(expression exp.Expression) map[string]bool {
 		}
 		if udf := create.This(); udf != nil {
 			if target := udf.This(); target != nil && target.Kind() == exp.KindTable && target.Arg("schema") == nil {
-				names[asciiLowerName(target.Name())] = true
+				names[target.Name()] = true
 			}
 		}
 	}
@@ -54,7 +54,7 @@ func pathParts(e exp.Expression) ([]exp.Expression, bool) {
 // resolveBigQueryCall classifies an Anonymous call: an unqualified name is a temp UDF of the
 // statement or a builtin; SAFE.f resolves like f; NET.f and ns.f are builtin when the dotted
 // lowercase name is in BuiltinFunctions; ds.f / proj.ds.f is a persistent UDF when
-// UDFSchemas[ds][f] holds and proj (if written) is DefaultCatalog. Anything else is Unknown.
+// UDFSchemas[ds][f] holds with f as written and proj (if written) is DefaultCatalog. Anything else is Unknown.
 func (r *engineResolver) resolveBigQueryCall(node exp.Expression) ResolvedCall {
 	var names []string
 	switch v := node.Arg("this").(type) {
@@ -113,7 +113,10 @@ func (r *engineResolver) resolveBigQueryCall(node exp.Expression) ResolvedCall {
 		return ResolvedCall{}
 	}
 	qualifier = append(qualifier, names[:len(names)-1]...)
-	name := asciiLowerName(names[len(names)-1])
+	// BigQuery: built-in function names are case-insensitive, UDF names (temp and persistent)
+	// case-sensitive (GoogleSQL lexical structure, "Case sensitivity").
+	written := names[len(names)-1]
+	name := asciiLowerName(written)
 	if name == "" || !identityComponentOK(name) {
 		return ResolvedCall{}
 	}
@@ -125,8 +128,8 @@ func (r *engineResolver) resolveBigQueryCall(node exp.Expression) ResolvedCall {
 
 	switch len(qualifier) {
 	case 0:
-		if r.tempFunctions[name] {
-			return ResolvedCall{Kind: CallUDF, Identity: name}
+		if r.tempFunctions[written] {
+			return ResolvedCall{Kind: CallUDF, Identity: written}
 		}
 		if r.catalog.BuiltinFunctions[name] {
 			return ResolvedCall{Kind: CallBuiltin, Identity: name}
@@ -135,12 +138,12 @@ func (r *engineResolver) resolveBigQueryCall(node exp.Expression) ResolvedCall {
 		if dotted := asciiLowerName(qualifier[0]) + "." + name; r.catalog.BuiltinFunctions[dotted] {
 			return ResolvedCall{Kind: CallBuiltin, Identity: dotted}
 		}
-		if r.catalog.UDFSchemas[qualifier[0]][name] {
-			return ResolvedCall{Kind: CallUDF, Identity: qualifier[0] + "." + name}
+		if r.catalog.UDFSchemas[qualifier[0]][written] {
+			return ResolvedCall{Kind: CallUDF, Identity: qualifier[0] + "." + written}
 		}
 	case 2:
-		if qualifier[0] == r.catalog.DefaultCatalog && r.catalog.UDFSchemas[qualifier[1]][name] {
-			return ResolvedCall{Kind: CallUDF, Identity: qualifier[1] + "." + name}
+		if qualifier[0] == r.catalog.DefaultCatalog && r.catalog.UDFSchemas[qualifier[1]][written] {
+			return ResolvedCall{Kind: CallUDF, Identity: qualifier[1] + "." + written}
 		}
 	}
 	return ResolvedCall{}

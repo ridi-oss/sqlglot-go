@@ -287,6 +287,19 @@ func TestBigQueryCorrelatedImplicitUnnest(t *testing.T) {
 		"SELECT ARRAY(SELECT x FROM o.arr AS x) FROM ds.t AS o":                                                                   "SELECT ARRAY(SELECT x FROM UNNEST(o.arr) AS x) FROM ds.t AS o",
 		"SELECT 1 FROM Sales.Users AS u UNION ALL SELECT 1 FROM u.tags":                                                           "SELECT 1 FROM Sales.Users AS u UNION ALL SELECT 1 FROM u.tags",
 		"SELECT (SELECT 1 FROM `u.tags`) FROM Sales.Users AS u":                                                                   "SELECT (SELECT 1 FROM `u.tags`) FROM Sales.Users AS u",
+		"SELECT t FROM Sales.Users AS u JOIN u.tags AS t ON TRUE":                                                                 "SELECT t FROM Sales.Users AS u JOIN UNNEST(u.tags) AS t ON TRUE",
+		"SELECT * FROM ds.users AS u JOIN u.f() AS x ON TRUE":                                                                     "SELECT * FROM ds.users AS u JOIN u.f() AS x ON TRUE",
+		"SELECT * FROM Sales.Users AS u JOIN u.tags AS t USING (x)":                                                               "SELECT * FROM Sales.Users AS u JOIN UNNEST(u.tags) AS t USING (x)",
+		"SELECT * FROM ds.x AS Sales JOIN Sales.Users ON TRUE":                                                                    "SELECT * FROM ds.x AS Sales JOIN UNNEST(Sales.Users) ON TRUE",
+		"SELECT * FROM Sales.Users JOIN Sales.Orders ON TRUE":                                                                     "SELECT * FROM Sales.Users JOIN Sales.Orders ON TRUE",
+		"SELECT * FROM ds.x AS Sales RIGHT JOIN Sales.Users AS u ON TRUE":                                                         "SELECT * FROM ds.x AS Sales RIGHT JOIN Sales.Users AS u ON TRUE",
+		"SELECT * FROM ds.x AS Sales FULL JOIN Sales.Users AS u ON TRUE":                                                          "SELECT * FROM ds.x AS Sales FULL JOIN Sales.Users AS u ON TRUE",
+		"SELECT t FROM Sales.Users JOIN users.tags AS t ON TRUE":                                                                  "SELECT t FROM Sales.Users JOIN UNNEST(users.tags) AS t ON TRUE",
+		"SELECT t FROM UNNEST(a) AS u JOIN u.tags AS t ON TRUE":                                                                   "SELECT t FROM UNNEST(a) AS u JOIN UNNEST(u.tags) AS t ON TRUE",
+		"SELECT i FROM Sales.Users AS u, u.orders JOIN orders.items AS i ON TRUE":                                                 "SELECT i FROM Sales.Users AS u CROSS JOIN UNNEST(u.orders) JOIN UNNEST(orders.items) AS i ON TRUE",
+		"SELECT t FROM Sales.Users AS u JOIN `u.tags` AS t ON TRUE":                                                               "SELECT t FROM Sales.Users AS u JOIN `u.tags` AS t ON TRUE",
+		"SELECT t FROM Sales.Users AS u LEFT JOIN u.tags AS t ON t <> 'x'":                                                        "SELECT t FROM Sales.Users AS u LEFT JOIN UNNEST(u.tags) AS t ON t <> 'x'",
+		"SELECT * FROM Sales.Users AS u, `u.tags`":                                                                                "SELECT * FROM Sales.Users AS u CROSS JOIN `u.tags`",
 		"SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM ds.a, (SELECT (SELECT 1 FROM u.tbl) FROM ds.b) AS d)":          "SELECT * FROM Sales.Users AS u WHERE EXISTS(SELECT 1 FROM ds.a CROSS JOIN (SELECT (SELECT 1 FROM u.tbl) FROM ds.b) AS d)",
 		"SELECT (SELECT 1 FROM o.items) FROM Sales.Users AS u, u.orders AS o":                                                     "SELECT (SELECT 1 FROM UNNEST(o.items)) FROM Sales.Users AS u CROSS JOIN UNNEST(u.orders) AS o",
 		"DELETE Sales.Target AS t FROM Sales.Target AS t JOIN Sales.Users AS u ON t.id = u.id WHERE EXISTS(SELECT 1 FROM u.tags)": "DELETE Sales.Target AS t FROM Sales.Target AS t JOIN Sales.Users AS u ON t.id = u.id WHERE EXISTS(SELECT 1 FROM UNNEST(u.tags))",
@@ -351,5 +364,22 @@ func TestMySQLTimestampDiffKeepsColumns(t *testing.T) {
 	}
 	if got, _ := sqlglot.Generate(e, "mysql", generator.Options{}); got != "SELECT TIMESTAMPDIFF(MINUTE, a, b) FROM t" {
 		t.Errorf("round trip: %s", got)
+	}
+}
+
+// u.s.arr after u reads column s of u, then field arr, even when another source is named s.
+func TestBigQueryRangeVariablePathShape(t *testing.T) {
+	for _, sql := range []string{
+		"SELECT x FROM ds.users AS u JOIN ds.other AS s ON TRUE JOIN u.s.arr AS x ON TRUE",
+		"SELECT x FROM ds.users AS u, u.s.arr AS x",
+	} {
+		e, err := sqlglot.ParseOne(sql, "bigquery")
+		if err != nil {
+			t.Fatal(err)
+		}
+		column := e.Find(exp.KindUnnest).Find(exp.KindColumn)
+		if column == nil || column.Text("table") != "u" || column.Name() != "s" || column.Text("schema") != "" {
+			t.Errorf("%s: unnest reads %s", sql, e.Find(exp.KindUnnest).ToS())
+		}
 	}
 }

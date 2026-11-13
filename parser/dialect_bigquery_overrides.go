@@ -214,66 +214,51 @@ func (p *Parser) matchIDToken(set map[tokens.TokenType]bool) bool {
 	return p.matchSet(set)
 }
 
-// normalizedCopy ports normalize_identifiers over a copy of e.
-func (p *Parser) normalizedCopy(e exp.Expression, maybeColumn bool) exp.Expression {
-	c := e.Copy()
-	if maybeColumn {
-		c.Meta()["maybe_column"] = true
-	}
-	for _, id := range c.FindAll(exp.KindIdentifier) {
-		p.dialect.NormalizeIdentifier(id)
-	}
-	return c
-}
-
 // implicitUnnestsToExplicit ports _implicit_unnests_to_explicit (parser.py:4305-4330):
 // `FROM t, t.arr` joins the array column t.arr, i.e. `CROSS JOIN UNNEST(t.arr)`.
 func (p *Parser) implicitUnnestsToExplicit(this exp.Expression) exp.Expression {
 	from := asExpr(this.Arg("from_"))
-	refs := map[string]bool{p.normalizedCopy(from.This(), false).AliasOrName(): true}
+	// divergence (DEVIATIONS §1.25): range variable names compare case-insensitively; upstream
+	// compares the normalized names, which keep a table's case, so `FROM Sales.Users JOIN
+	// Users.tags` missed. An explicit UNNEST alias is a range variable too.
+	refs := map[string]bool{}
+	addRef := func(source exp.Expression) {
+		if name := source.AliasOrName(); name != "" {
+			refs[strings.ToLower(name)] = true
+		}
+		if source.Kind() == exp.KindUnnest {
+			for _, name := range source.AliasColumnNames() {
+				refs[strings.ToLower(name)] = true
+			}
+		}
+	}
+	if from != nil && from.This() != nil {
+		addRef(from.This())
+	}
 	joins, _ := this.Arg("joins").([]exp.Expression)
 	for _, join := range joins {
 		table := join.This()
 		if table == nil {
 			continue
 		}
-		normalized := p.normalizedCopy(table, true)
-		if table.Kind() == exp.KindTable && asExpr(join.Arg("on")) == nil {
-			if parts := normalized.Parts(); len(parts) > 1 && refs[parts[0].Name()] {
-				tableToUnnest(table)
+		// divergence: upstream (parser.py:4315) skips joins with ON, so `JOIN u.tags AS t ON TRUE`
+		// stays a table; BigQuery resolves u as the range variable either way. The right side of
+		// a RIGHT or FULL join cannot see the left side, so there a path stays a table. Only a
+		// plain name path converts; upstream also turns `t.f()` into UNNEST(f()), dropping t.
+		side := strings.ToUpper(join.Text("side"))
+		if isNamePath(table) && side != "RIGHT" && side != "FULL" {
+			if parts := table.Parts(); len(parts) > 1 && refs[strings.ToLower(parts[0].Name())] {
+				rangeVariableUnnest(table)
+				// An unaliased path's implicit alias is its last name, as upstream keeps it.
+				if table.Arg("alias") == nil {
+					refs[strings.ToLower(parts[len(parts)-1].Name())] = true
+				}
+				table = join.This()
 			}
 		}
-		refs[normalized.AliasOrName()] = true
+		addRef(table)
 	}
 	return this
-}
-
-// tableToColumn ports Table.to_column without the alias (expressions/query.py:1004-1018).
-func tableToColumn(table exp.Expression) exp.Expression {
-	parts := table.Parts()
-	last := parts[len(parts)-1]
-	if last.Kind() != exp.KindIdentifier {
-		return last
-	}
-	head := parts
-	var fields []exp.Expression
-	if len(parts) > 4 {
-		head, fields = parts[:4], parts[4:]
-	}
-	args := exp.Args{}
-	keys := []string{"this", "table", "schema", "catalog"}
-	for i := range head {
-		args[keys[i]] = head[len(head)-1-i].Copy()
-	}
-	column := exp.Column(args)
-	if len(fields) > 0 {
-		chain := []exp.Expression{column}
-		for _, f := range fields {
-			chain = append(chain, f.Copy())
-		}
-		column = exp.DotBuild(chain)
-	}
-	return column
 }
 
 // bigqueryParseColumnOps ports _parse_column_ops (parsers/bigquery.py:773-799): SAFE.f(...) and
@@ -336,9 +321,27 @@ func (p *Parser) bigqueryParseBracket(this exp.Expression) exp.Expression {
 	return bracket
 }
 
-// tableToUnnest replaces a `FROM t.arr [AS a]` table with `UNNEST(t.arr) [AS a]`.
-func tableToUnnest(table exp.Expression) {
-	unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{tableToColumn(table)}})
+// isNamePath reports whether a FROM table is a plain, unbackticked name path such as u.tags.
+func isNamePath(table exp.Expression) bool {
+	this := table.This()
+	return table.Kind() == exp.KindTable && this != nil && this.Kind() == exp.KindIdentifier &&
+		table.MetaGet("quoted_table") == nil
+}
+
+// rangeVariableUnnest replaces `FROM u.s.arr [AS a]` with `UNNEST(u.s.arr) [AS a]`, where u is a
+// range variable: the path reads column s of u, then field arr.
+// divergence: upstream's Table.to_column reads u.s.arr as schema u, table s, column arr.
+func rangeVariableUnnest(table exp.Expression) {
+	parts := table.Parts()
+	column := exp.Column(exp.Args{"this": parts[1].Copy(), "table": parts[0].Copy()})
+	if len(parts) > 2 {
+		chain := []exp.Expression{column}
+		for _, part := range parts[2:] {
+			chain = append(chain, part.Copy())
+		}
+		column = exp.DotBuild(chain)
+	}
+	unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{column}})
 	if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias {
 		unnest.Set("alias", exp.TableAlias(exp.Args{"columns": []exp.Expression{alias.This()}}))
 	}
@@ -374,20 +377,7 @@ func bigqueryCorrelatedUnnests(statement exp.Expression) {
 		if !enclosingSourceNames(owner)[strings.ToLower(parts[0].Name())] {
 			continue
 		}
-		// The first name is the outer range variable: o.s.arr reads column s, then field arr.
-		column := exp.Column(exp.Args{"this": parts[1].Copy(), "table": parts[0].Copy()})
-		if len(parts) > 2 {
-			chain := []exp.Expression{column}
-			for _, part := range parts[2:] {
-				chain = append(chain, part.Copy())
-			}
-			column = exp.DotBuild(chain)
-		}
-		unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{column}})
-		if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias {
-			unnest.Set("alias", exp.TableAlias(exp.Args{"columns": []exp.Expression{alias.This()}}))
-		}
-		table.Replace(unnest)
+		rangeVariableUnnest(table)
 	}
 }
 

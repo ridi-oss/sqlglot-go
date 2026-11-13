@@ -11,7 +11,8 @@ import (
 // (DEVIATIONS: opaque_functions companion). It is a PURE consumer input, introspected from the
 // live target instance — sqlglot-go ships no name sets, only the resolution algorithm. All name
 // keys are expected pre-folded: function names lowercase (function identifiers are
-// case-insensitive in all supported engines), relation names folded per the dialect's strategy.
+// case-insensitive in MySQL/PG/Athena; BigQuery UDF names are case-sensitive, so its UDFSchemas
+// hold them as defined), relation names folded per the dialect's strategy.
 // A name missing from the catalog resolves Unknown (fail-closed).
 type EngineCatalog struct {
 	// BuiltinFunctions is the priority builtin name set: MySQL natives (builtin > loadable >
