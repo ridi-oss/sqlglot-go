@@ -307,3 +307,25 @@ func (g *Generator) bigqueryTimeToStrSQL(e exp.Expression) string {
 	}
 	return g.funcCall(funcName, []any{bigqueryFormatTime(g, e, false), timeExpr.Arg("this"), e.Arg("zone")}, "(", ")", true)
 }
+
+// generators/bigquery.py:604-612: `dataset.table`.name keeps the quoted table path.
+func (g *Generator) bigqueryColumnParts(e exp.Expression) string {
+	parts := e.Parts()
+	names := make([]string, 0, len(parts))
+	for _, part := range parts[:len(parts)-1] {
+		names = append(names, part.Name())
+	}
+	path := g.gen(exp.Identifier(exp.Args{"this": strings.Join(names, "."), "quoted": true}))
+	return path + "." + g.sqlKey(e, "this")
+}
+
+// generators/bigquery.py:614-627: `x.y` and `x`.`y` can resolve differently, so a table
+// written as one quoted path is generated as one.
+func (g *Generator) bigqueryTableParts(e exp.Expression) string {
+	parts := e.Parts()
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		names = append(names, part.Name())
+	}
+	return g.gen(exp.Identifier(exp.Args{"this": strings.Join(names, "."), "quoted": true}))
+}

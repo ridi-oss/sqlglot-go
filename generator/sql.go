@@ -177,6 +177,9 @@ func (g *Generator) dotSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) columnParts(e expressions.Expression) string {
+	if g.isDialect("bigquery") && e.MetaGet("quoted_column") != nil {
+		return g.bigqueryColumnParts(e)
+	}
 	parts := []string{}
 	for _, key := range []string{"catalog", "schema", "table", "this"} {
 		if v := e.Arg(key); truthy(v) {
@@ -2561,6 +2564,9 @@ func (g *Generator) intervalSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) tableParts(e expressions.Expression) string {
+	if g.isDialect("bigquery") && e.MetaGet("quoted_table") != nil {
+		return g.bigqueryTableParts(e)
+	}
 	parts := []string{}
 	for _, key := range []string{"catalog", "schema", "this"} {
 		if v := e.Arg(key); v != nil {

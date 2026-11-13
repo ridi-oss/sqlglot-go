@@ -1423,6 +1423,13 @@ func (p *Parser) parseTable(schema bool, joins bool, aliasTokens map[tokens.Toke
 }
 
 func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool, fast bool) exp.Expression {
+	if p.isBigQuery() {
+		return p.bigqueryParseTableParts(schema, isDBReference, fast)
+	}
+	return p.parseTablePartsBase(schema, isDBReference, wildcard, fast)
+}
+
+func (p *Parser) parseTablePartsBase(schema bool, isDBReference bool, wildcard bool, fast bool) exp.Expression {
 	var catalog exp.Expression
 	// schemaPart holds the ANSI-schema-level qualifier (upstream's "db" arg — the port renames
 	// this arg to "schema"; the local can't be named "schema" here as that is already the
@@ -1439,6 +1446,14 @@ func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool,
 			if table == nil {
 				table = exp.Identifier(exp.Args{"this": "", "quoted": false})
 			}
+		}
+	}
+	// parser.py:4935-4944: `events_*` wildcard table names.
+	if wildcard && p.isConnected() && (table == nil || table.Kind() == exp.KindIdentifier) && p.match(tokens.STAR) {
+		if table != nil {
+			table.Set("this", table.Name()+"*")
+		} else {
+			table = exp.Identifier(exp.Args{"this": "*"})
 		}
 	}
 	if isDBReference {
@@ -1462,6 +1477,13 @@ func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool,
 }
 
 func (p *Parser) parseTablePart(schema bool) exp.Expression {
+	if p.isBigQuery() {
+		return p.bigqueryParseTablePart(schema)
+	}
+	return p.parseTablePartBase(schema)
+}
+
+func (p *Parser) parseTablePartBase(schema bool) exp.Expression {
 	// Table-valued function sources (parser.py:4664-4670), e.g. `FROM generate_series(1, 10)`
 	// or `FROM JSON_TABLE(...)`: outside schema position, a function call takes priority over
 	// a plain identifier so the parsed Func node becomes exp.Table's "this" arg.
@@ -2569,6 +2591,9 @@ func (p *Parser) parseColumn() exp.Expression {
 			return nil
 		}
 		column = p.parseColumnOps(this)
+	}
+	if p.isBigQuery() {
+		return p.bigqueryParseColumn(column)
 	}
 	return column
 }

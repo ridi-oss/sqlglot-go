@@ -8,6 +8,10 @@ import (
 func BigQuery() *Dialect {
 	d := Base()
 	d.Name = "bigquery"
+	d.IdentifierStart, d.IdentifierEnd = "`", "`"
+	// HEX_START/BYTE_START take the first HEX_STRINGS/BYTE_STRINGS tuple (dialects/dialect.py:293).
+	d.HexStart, d.HexEnd = "0x", ""
+	d.ByteStart, d.ByteEnd = "b'", "'"
 	// dialects/bigquery.py:23-50 class attributes.
 	d.UnnestColumnOnly = true
 	d.SupportsUserDefinedTypes = false
