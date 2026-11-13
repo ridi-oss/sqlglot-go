@@ -29,19 +29,23 @@ func (g *Generator) groupConcatSQL(e expressions.Expression) string {
 		}
 		return "GROUP_CONCAT(" + g.sqlKey(e, "this") + " SEPARATOR " + separator + ")"
 	}
-	if g.dialect.Name != "postgres" {
+	bigquery := g.isDialect("bigquery")
+	if g.dialect.Name != "postgres" && !bigquery {
 		return g.functionFallbackSQL(e)
 	}
 
 	this := asExpression(e.Arg("this"))
 
 	// separator defaults to a comma literal (sep="," upstream) when GroupConcat has no
-	// explicit "separator" arg.
+	// explicit "separator" arg; BigQuery passes sep=None (generators/bigquery.py:342-344).
 	separatorExpr := asExpression(e.Arg("separator"))
-	if separatorExpr == nil {
+	if separatorExpr == nil && !bigquery {
 		separatorExpr = expressions.LiteralString(",")
 	}
-	separator := g.gen(separatorExpr)
+	var separator any
+	if separatorExpr != nil {
+		separator = g.gen(separatorExpr)
+	}
 
 	// STRING_AGG(x, ',' ORDER BY y LIMIT n) parses "this" as exp.Limit(this=Order(this=x,
 	// ...)); pop the Limit's own "this" out so `limit` renders as a trailing LIMIT clause

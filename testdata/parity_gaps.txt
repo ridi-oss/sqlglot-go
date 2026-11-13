@@ -15,34 +15,9 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 'semester_1', (Q3, Q4) AS 'semester_2'))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 1, (Q3, Q4) AS 2))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST(ARRAY<STRUCT<x INT64>>[])"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST(['7', '14']) AS x"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST([1]) WITH OFFSET"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST([1]) WITH OFFSET y"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST(x) WITH OFFSET EXCEPT DISTINCT SELECT * FROM UNNEST(y) WITH OFFSET"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM a LEFT JOIN b ON a.key = b.key AND a.val IN UNNEST(b.arr)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM a WHERE b IN UNNEST([1, 2, 3])"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM a WHERE b NOT IN UNNEST([1, 2, 3])"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM foo AS t0 FOR SYSTEM_TIME AS OF '2026-02-12T23:22:21.743416+00:00'"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t AS t(c1, c2)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t WHERE EXISTS(SELECT * FROM unnest(nums) AS x WHERE x > 1)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t, UNNEST(`t2`.`t3`) AS `col`"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET ANTI JOIN foo"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET FULL JOIN foo"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET LEFT JOIN foo"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET NATURAL JOIN foo"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET RIGHT JOIN foo"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET SEMI JOIN foo"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST(`t1`) AS `col`"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST(`t1`.`t2`.`t3`.`t4`) AS `col`"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM tbl CROSS JOIN UNNEST(col) AS ref WITH OFFSET "}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM tbl CROSS JOIN UNNEST(col) AS ref WITH OFFSET AS pos"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM tbl FOR SYSTEM TIME AS OF z"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM tbl FOR SYSTEM_TIME AS OF z"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM test QUALIFY a IS DISTINCT FROM b WINDOW c AS (PARTITION BY d)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT 1 AS at"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT 1 AS hash"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT ARRAY(SELECT DISTINCT x FROM UNNEST(some_numbers) AS x) AS unique_numbers"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT ARRAY(SELECT x FROM UNNEST([0, 1]) AS x)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT ARRAY<FLOAT64>[1, 2, 3]"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT DATE_DIFF('2024-01-15', '2022-04-28', WEEK(SATURDAY))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT DATE_DIFF('2024-06-15', '2024-01-08', WEEK(MONDAY))"}
@@ -58,30 +33,12 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT(['a', 'b'], [TO_JSON(10), TO_JSON(['foo', 'bar'])]) AS json_data"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT TIMESTAMP_DIFF(TIMESTAMP_SECONDS(60), TIMESTAMP_SECONDS(0), minute)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT TO_HEX(SHA1('abc'))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT a, GROUP_CONCAT(b) FROM table GROUP BY a"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT foo IN UNNEST(bar) AS bla"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT id, mnth + 1 AS a_mnth FROM t CROSS JOIN UNNEST(GENERATE_DATE_ARRAY(start_month, DATE_TRUNC(CURRENT_DATE, MONTH), INTERVAL '1' MONTH)) AS mnth"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT id, mnth AS a_mnth FROM t CROSS JOIN UNNEST(GENERATE_DATE_ARRAY(start_month, DATE_TRUNC(CURRENT_DATE, MONTH), INTERVAL '1' MONTH)) AS mnth"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT id, mnth FROM t CROSS JOIN UNNEST(GENERATE_DATE_ARRAY(start_month, DATE_TRUNC(CURRENT_DATE, MONTH), INTERVAL '1' MONTH)) AS mnth"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT participant FROM UNNEST([STRUCT('Rudisha' AS name, [23.4, 26.3, 26.4, 26.1] AS laps)]) AS participant"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT r\"\"\"a\\\"b\"\"\""}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT r\"\"\"ends with \\\"\"\"\""}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT results FROM Coordinates AS c, UNNEST(c.position) AS results"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT results FROM Coordinates, Coordinates.position AS results"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT t.c1, h.c2, s.c3 FROM t1 AS t, UNNEST(t.t2) AS h, UNNEST(h.t3) AS s"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT y + 1 z FROM x GROUP BY y + 1 ORDER BY z"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"STRING_AGG(DISTINCT a ORDER BY b DESC, c DESC LIMIT 10)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"STRING_AGG(DISTINCT a, ' & ')"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"STRING_AGG(DISTINCT v, sep LIMIT 3)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"STRING_AGG(a)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"STRING_AGG(a, ' & ' ORDER BY LENGTH(a))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"STRING_AGG(a, ' & ')"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"STRING_AGG(foo, b'|' ORDER BY bar)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"TO_HEX(x)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"UPPER(TO_HEX(x))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH Races AS (SELECT '800M' AS race) SELECT race, participant FROM Races AS r CROSS JOIN UNNEST([STRUCT('Rudisha' AS name, [23.4, 26.3, 26.4, 26.1] AS laps)]) AS participant"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH cte(c) AS (SELECT * FROM t) SELECT * FROM cte"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH foo AS (SELECT [1, 2, 3] AS array_col) SELECT array_col[offset] FROM foo CROSS JOIN UNNEST(array_col) WITH OFFSET AS offset"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"r'x\\''"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"INSERT INTO test (cola, colb) VALUES (CAST(7 AS STRING(10)), CAST(14 AS STRING(10)))"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT * FROM UNNEST(ARRAY<STRUCT<device_id INT64, time DATETIME, signal INT64, state STRING>>[STRUCT(1, DATETIME '2023-11-01 09:34:01', 74, 'INACTIVE'),STRUCT(4, DATETIME '2023-11-01 09:38:01', 80, 'ACTIVE')])"}
@@ -90,12 +47,7 @@
 {"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT DATE_DIFF(DATE '2024-01-01', DATE '2024-01-15', WEEK(SUNDAY))"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT DATE_DIFF(DATE '2024-09-15', DATE '2024-01-08', WEEK(MONDAY))"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT cola FROM (SELECT CAST('1' AS STRING(10)) AS cola UNION ALL SELECT CAST('2' AS STRING(10)) AS cola)"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"WITH sample AS (SELECT * FROM UNNEST([TIMESTAMP '2024-03-15 14:35:46', TIMESTAMP '2024-03-16 01:12:03']) AS ts) SELECT ts, TIMESTAMP_TRUNC(ts, DAY, 'America/New_York') AS truncated_ts FROM sample"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"WITH sample AS (SELECT * FROM UNNEST([TIMESTAMP '2024-03-15 14:35:46', TIMESTAMP '2024-03-16 01:12:03']) AS ts) SELECT ts, TIMESTAMP_TRUNC(ts, MINUTE) AS truncated_ts FROM sample"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"WITH sample AS (SELECT * FROM UNNEST([TIMESTAMP '2024-03-15 14:35:46', TIMESTAMP '2024-03-16 01:12:03']) AS ts) SELECT ts, TIMESTAMP_TRUNC(ts, MINUTE, 'America/New_York') AS truncated_ts FROM sample"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"WITH sample AS (SELECT ts FROM UNNEST([TIMESTAMP '2024-03-15 14:35:46', TIMESTAMP '2024-03-16 01:12:03']) AS ts) SELECT ts, TIMESTAMP_TRUNC(ts, DAY) AS truncated_ts FROM sample"}
 {"dialect":"bigquery","category":"gen: ddl/properties","sql":"ALTER TABLE foo DROP PRIMARY KEY IF EXISTS"}
-{"dialect":"bigquery","category":"gen: ddl/properties","sql":"CREATE TABLE IF NOT EXISTS foo AS SELECT * FROM bla EXCEPT DISTINCT (SELECT * FROM bar) LIMIT 0"}
 {"dialect":"bigquery","category":"gen: ddl/properties","sql":"CREATE TABLE db.example_table (x int) PARTITION BY x cluster by x"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'linear')], ignore_null_values => FALSE) ORDER BY time"}

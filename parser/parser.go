@@ -1083,6 +1083,10 @@ func (p *Parser) parseQueryModifiers(this exp.Expression) exp.Expression {
 			}
 		}
 	}
+	// parser.py:4385-4386 SUPPORTS_IMPLICIT_UNNEST (parsers/bigquery.py:192).
+	if p.isBigQuery() && this != nil && asExpr(this.Arg("from_")) != nil {
+		this = p.implicitUnnestsToExplicit(this)
+	}
 	return this
 }
 

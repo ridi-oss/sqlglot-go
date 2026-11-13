@@ -213,3 +213,70 @@ func (p *Parser) matchIDToken(set map[tokens.TokenType]bool) bool {
 	}
 	return p.matchSet(set)
 }
+
+// normalizedCopy ports normalize_identifiers over a copy of e.
+func (p *Parser) normalizedCopy(e exp.Expression, maybeColumn bool) exp.Expression {
+	c := e.Copy()
+	if maybeColumn {
+		c.Meta()["maybe_column"] = true
+	}
+	for _, id := range c.FindAll(exp.KindIdentifier) {
+		p.dialect.NormalizeIdentifier(id)
+	}
+	return c
+}
+
+// implicitUnnestsToExplicit ports _implicit_unnests_to_explicit (parser.py:4305-4330):
+// `FROM t, t.arr` joins the array column t.arr, i.e. `CROSS JOIN UNNEST(t.arr)`.
+func (p *Parser) implicitUnnestsToExplicit(this exp.Expression) exp.Expression {
+	from := asExpr(this.Arg("from_"))
+	refs := map[string]bool{p.normalizedCopy(from.This(), false).AliasOrName(): true}
+	joins, _ := this.Arg("joins").([]exp.Expression)
+	for _, join := range joins {
+		table := join.This()
+		if table == nil {
+			continue
+		}
+		normalized := p.normalizedCopy(table, true)
+		if table.Kind() == exp.KindTable && asExpr(join.Arg("on")) == nil {
+			if parts := normalized.Parts(); len(parts) > 1 && refs[parts[0].Name()] {
+				column := tableToColumn(table)
+				unnest := exp.Unnest(exp.Args{"expressions": []exp.Expression{column}})
+				if alias := asExpr(table.Arg("alias")); alias != nil && alias.Kind() == exp.KindTableAlias {
+					unnest.Set("alias", exp.TableAlias(exp.Args{"columns": []exp.Expression{alias.This()}}))
+				}
+				table.Replace(unnest)
+			}
+		}
+		refs[normalized.AliasOrName()] = true
+	}
+	return this
+}
+
+// tableToColumn ports Table.to_column without the alias (expressions/query.py:1004-1018).
+func tableToColumn(table exp.Expression) exp.Expression {
+	parts := table.Parts()
+	last := parts[len(parts)-1]
+	if last.Kind() != exp.KindIdentifier {
+		return last
+	}
+	head := parts
+	var fields []exp.Expression
+	if len(parts) > 4 {
+		head, fields = parts[:4], parts[4:]
+	}
+	args := exp.Args{}
+	keys := []string{"this", "table", "schema", "catalog"}
+	for i := range head {
+		args[keys[i]] = head[len(head)-1-i].Copy()
+	}
+	var column exp.Expression = exp.Column(args)
+	if len(fields) > 0 {
+		chain := []exp.Expression{column}
+		for _, f := range fields {
+			chain = append(chain, f.Copy())
+		}
+		column = exp.DotBuild(chain)
+	}
+	return column
+}

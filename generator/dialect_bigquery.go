@@ -355,6 +355,9 @@ func init() {
 
 // Base generator methods for nodes the BigQuery grammar introduces (generator.py).
 func init() {
+	dispatch[exp.KindLowerHex] = func(g *Generator, e exp.Expression) string {
+		return g.funcCall("LOWER", []any{g.funcCall("HEX", []any{e.Arg("this")}, "(", ")", true)}, "(", ")", true)
+	}
 	dispatch[exp.KindKwarg] = func(g *Generator, e exp.Expression) string { return g.binary(e, "=>") }
 	dispatch[exp.KindExport] = func(g *Generator, e exp.Expression) string {
 		connection := g.sqlKey(e, "connection")

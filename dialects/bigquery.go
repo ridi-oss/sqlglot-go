@@ -1,7 +1,9 @@
 package dialects
 
 import (
+	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/tokens"
+	"strings"
 )
 
 // BigQuery ports dialects/bigquery.py, parsers/bigquery.py and generators/bigquery.py.
@@ -43,6 +45,11 @@ func BigQuery() *Dialect {
 	// generators/bigquery.py:252.
 	d.IntervalAllowsPluralForm = false
 	d.RenameTableWithDB = false
+	// generators/bigquery.py:484-581 RESERVED_KEYWORDS.
+	d.ReservedKeywords = map[string]bool{}
+	for _, w := range strings.Fields(`all and any array as asc assert_rows_modified at between by case cast collate contains create cross cube current default define desc distinct else end enum escape except exclude exists extract false fetch following for from full group grouping groups hash having if ignore in inner intersect interval into is join lateral left like limit lookup merge natural new no not null nulls of on or order outer over partition preceding proto qualify range recursive respect right rollup rows select set some struct tablesample then to treat true unbounded union unnest using when where window with within`) {
+		d.ReservedKeywords[w] = true
+	}
 	d.Functions = bigqueryFunctions()
 
 	cfg := tokens.BaseConfig()
@@ -90,4 +97,35 @@ func BigQuery() *Dialect {
 	delete(cfg.Comments, "/*+")
 	d.TokenizerConfig = tokens.CompileConfig(cfg)
 	return d
+}
+
+// bigqueryNormalizeIdentifier ports BigQuery.normalize_identifier (dialects/bigquery.py:153-174):
+// CTEs and columns are case-insensitive, but UDF and table names are case-sensitive. A table is
+// detected by being qualified with at least a dataset.
+func bigqueryNormalizeIdentifier(e exp.Expression) exp.Expression {
+	parent := e.Parent()
+	for parent != nil && parent.Kind() == exp.KindDot {
+		parent = parent.Parent()
+	}
+	caseSensitive := metaTrue(e, "is_table")
+	if parent != nil {
+		switch parent.Kind() {
+		case exp.KindUserDefinedFunction:
+			caseSensitive = true
+		case exp.KindTable:
+			if parent.Text("schema") != "" && (metaTrue(parent, "quoted_table") || !metaTrue(parent, "maybe_column")) {
+				caseSensitive = true
+			}
+		}
+	}
+	if !caseSensitive {
+		this, _ := e.Arg("this").(string)
+		e.Set("this", asciiLower(this))
+	}
+	return e
+}
+
+func metaTrue(e exp.Expression, key string) bool {
+	v, ok := e.MetaGet(key).(bool)
+	return ok && v
 }
