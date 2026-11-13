@@ -1,4 +1,3 @@
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"DATE_DIFF('2017-12-18', '2017-12-17', WEEK(SATURDAY))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(1e1000000, 4)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(20, 4)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(76, 38)"}
@@ -14,15 +13,7 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SAFE.PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', '2024-01-15 10:30:00')"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 'semester_1', (Q3, Q4) AS 'semester_2'))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 1, (Q3, Q4) AS 2))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST(ARRAY<STRUCT<x INT64>>[])"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t AS t(c1, c2)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET ANTI JOIN foo"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t1, UNNEST([1, 2]) AS hit WITH OFFSET SEMI JOIN foo"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT ARRAY<FLOAT64>[1, 2, 3]"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT DATE_DIFF('2024-01-15', '2022-04-28', WEEK(SATURDAY))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT DATE_DIFF('2024-06-15', '2024-01-08', WEEK(MONDAY))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT DATE_DIFF('2026-01-15', '2024-01-08', WEEK(SUNDAY))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT DATE_DIFF(d1, d2, WEEK(SUNDAY))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT GENERATE_DATE_ARRAY('2016-10-05', '2016-10-08')"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT('a', 10, 'a', 'foo') AS json_data"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT('foo', 10, 'bar', TRUE) AS json_data"}
@@ -32,21 +23,8 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT(['a', 'b'], [STRUCT(10 AS id, 'Red' AS color), STRUCT(20 AS id, 'Blue' AS color)]) AS json_data"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT(['a', 'b'], [TO_JSON(10), TO_JSON(['foo', 'bar'])]) AS json_data"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT TIMESTAMP_DIFF(TIMESTAMP_SECONDS(60), TIMESTAMP_SECONDS(0), minute)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT TO_HEX(SHA1('abc'))"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT r\"\"\"a\\\"b\"\"\""}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT r\"\"\"ends with \\\"\"\"\""}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT y + 1 z FROM x GROUP BY y + 1 ORDER BY z"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"TO_HEX(x)"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"UPPER(TO_HEX(x))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH cte(c) AS (SELECT * FROM t) SELECT * FROM cte"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"r'x\\''"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"INSERT INTO test (cola, colb) VALUES (CAST(7 AS STRING(10)), CAST(14 AS STRING(10)))"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT * FROM UNNEST(ARRAY<STRUCT<device_id INT64, time DATETIME, signal INT64, state STRING>>[STRUCT(1, DATETIME '2023-11-01 09:34:01', 74, 'INACTIVE'),STRUCT(4, DATETIME '2023-11-01 09:38:01', 80, 'ACTIVE')])"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT CAST('1' AS STRING(10)) UNION ALL SELECT CAST('2' AS STRING(10))"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT CAST(1 AS NUMERIC(10, 2))"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT DATE_DIFF(DATE '2024-01-01', DATE '2024-01-15', WEEK(SUNDAY))"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT DATE_DIFF(DATE '2024-09-15', DATE '2024-01-08', WEEK(MONDAY))"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT cola FROM (SELECT CAST('1' AS STRING(10)) AS cola UNION ALL SELECT CAST('2' AS STRING(10)) AS cola)"}
 {"dialect":"bigquery","category":"gen: ddl/properties","sql":"ALTER TABLE foo DROP PRIMARY KEY IF EXISTS"}
 {"dialect":"bigquery","category":"gen: ddl/properties","sql":"CREATE TABLE db.example_table (x int) PARTITION BY x cluster by x"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE) ORDER BY time"}

@@ -271,9 +271,9 @@ func unpivotTarget(expression exp.Expression) exp.Expression {
 // unnestOffsetAliasTokens ports UNNEST_OFFSET_ALIAS_TOKENS = TABLE_ALIAS_TOKENS - SET_OPERATIONS
 // (parser.py:1777).
 func (p *Parser) unnestOffsetAliasTokens() map[tokens.TokenType]bool {
-	base := p.tableAliasTokensFor()
-	out := make(map[tokens.TokenType]bool, len(base))
-	for tt := range base {
+	// Computed from the base TABLE_ALIAS_TOKENS: dialect additions (BigQuery ANTI/SEMI) are not in it.
+	out := make(map[tokens.TokenType]bool, len(tableAliasTokens))
+	for tt := range tableAliasTokens {
 		if !setOperationTokens[tt] {
 			out[tt] = true
 		}

@@ -77,7 +77,9 @@ func init() {
 				"negate":     e.Arg("negate"),
 			}))
 		},
-		exp.KindIntDiv:            rename("DIV"),
+		exp.KindIntDiv: rename("DIV"),
+		// generator.py:2024-2028 with HEX_FUNC = "TO_HEX" and HEX_LOWERCASE = True.
+		exp.KindLowerHex:          call("TO_HEX", "this"),
 		exp.KindInt64:             rename("INT64"),
 		exp.KindJSONBool:          rename("BOOL"),
 		exp.KindJSONExtract:       (*Generator).bigqueryJSONExtractSQL,
@@ -183,8 +185,9 @@ func init() {
 			return g.funcCall("DATE_TRUNC", []any{e.Arg("this"), unit, e.Arg("zone")}, "(", ")", true)
 		},
 		exp.KindTimeToStr: (*Generator).bigqueryTimeToStrSQL,
+		exp.KindCast:      func(g *Generator, e exp.Expression) string { return g.bigqueryCastSQL(e, "") },
 		exp.KindTryCast: func(g *Generator, e exp.Expression) string {
-			return g.castSQLWithPrefix(e, "SAFE_")
+			return g.bigqueryCastSQL(e, "SAFE_")
 		},
 		exp.KindContains: func(g *Generator, e exp.Expression) string {
 			this, expr := asExpression(e.Arg("this")), asExpression(e.Arg("expression"))
@@ -434,4 +437,29 @@ func (g *Generator) mlSQL(e exp.Expression, name string) string {
 		params = p
 	}
 	return g.funcCall(name, []any{"MODEL " + g.sqlKey(e, "this"), exprSQL, params}, "(", ")", true)
+}
+
+// generators/bigquery.py:320 (remove_precision_parameterized_types) and 716-727: inline
+// typed array literals such as ARRAY<INT64>[1, 2] round-trip as written.
+func (g *Generator) bigqueryCastSQL(e exp.Expression, safePrefix string) string {
+	for _, dt := range e.FindAll(exp.KindDataType) {
+		var kept []exp.Expression
+		for _, param := range listFromValue(dt.Arg("expressions")) {
+			if p := asExpression(param); p != nil && p.Kind() != exp.KindDataTypeParam {
+				kept = append(kept, p)
+			}
+		}
+		dt.Set("expressions", kept)
+	}
+	if this := asExpression(e.Arg("this")); this != nil && this.Kind() == exp.KindArray {
+		elems := listFromValue(this.Arg("expressions"))
+		var first exp.Expression
+		if len(elems) > 0 {
+			first = asExpression(elems[0])
+		}
+		if first == nil || first.Find(exp.TraitQuery) == nil {
+			return g.sqlKey(e, "to") + g.gen(this)
+		}
+	}
+	return g.castSQLWithPrefix(e, safePrefix)
 }

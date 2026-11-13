@@ -371,7 +371,11 @@ func (g *Generator) parameterSQL(e expressions.Expression) string {
 // rawStringSQL ports rawstring_sql (generator.py:1653-1659): a raw/heredoc string is
 // re-emitted as an ordinary quoted string literal (e.g. postgres `$$doc$$` -> `'doc'`).
 func (g *Generator) rawStringSQL(e expressions.Expression) string {
-	return g.quoteStart + g.escapeStr(e.Text("this")) + g.quoteEnd
+	text := e.Text("this")
+	if g.stringsSupportEscapedSequences {
+		text = strings.ReplaceAll(text, "\\", "\\\\")
+	}
+	return g.quoteStart + g.escapeStrOpts(text, escapeStrOptions{escapeBackslash: false}) + g.quoteEnd
 }
 
 // fileFormatPropertySQL renders the FileFormatProperty node as `FORMAT=<fmt>`, matching
@@ -2295,7 +2299,7 @@ func unitToStrValue(unit expressions.Expression) expressions.Expression {
 func unitToVarValue(unit expressions.Expression) expressions.Expression {
 	if unit != nil {
 		switch unit.Kind() {
-		case expressions.KindVar, expressions.KindPlaceholder, expressions.KindColumn:
+		case expressions.KindVar, expressions.KindPlaceholder, expressions.KindColumn, expressions.KindWeekStart:
 			return unit
 		}
 	}

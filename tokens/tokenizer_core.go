@@ -785,9 +785,16 @@ func (c *TokenizerCore) extractString(delimiter string, escapes map[rune]bool, r
 		}
 
 		isValidCustomEscape := len(c.escapeFollowChars) > 0 && c.char == '\\' && !c.escapeFollowChars[c.peek]
-		if (c.stringEscapesAllowedInRawStrings || !rawString) && escapes[c.char] && (c.peek == delimRunes[0] || escapes[c.peek] || isValidCustomEscape) && (!c.isQuote(c.char) || c.char == c.peek) {
-			if c.peek == delimRunes[0] {
-				text += string(c.peek)
+		// tokenizer_core.py:1176-1182: an escaped quote before a multi-char closing delimiter
+		// (\" in """a\"""") is consumed here so it can't end the string early.
+		escapedDelimiter := (delimSize == 1 && c.peek == delimRunes[0]) || (delimSize > 1 && c.peek == delimRunes[0] && c.isQuote(c.peek))
+		if (c.stringEscapesAllowedInRawStrings || !rawString) && escapes[c.char] && (escapedDelimiter || escapes[c.peek] || isValidCustomEscape) && (!c.isQuote(c.char) || c.char == c.peek) {
+			if escapedDelimiter {
+				if rawString {
+					text += string(c.char) + string(c.peek)
+				} else {
+					text += string(c.peek)
+				}
 			} else if isValidCustomEscape && c.char != c.peek {
 				text += string(c.peek)
 			} else {
