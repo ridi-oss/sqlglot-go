@@ -25,6 +25,7 @@ func BigQuery() *Dialect {
 	d.SupportsStructStarExpansion = true
 	d.ExcludesPseudocolumnsFromStar = true
 	d.QueryResultsAreStructs = true
+	d.SetOpDistinctRequired = true
 	d.AliasPostVersion = false
 	d.NormalizationStrategy = CaseInsensitive
 	d.NormalizeFunctions = ""

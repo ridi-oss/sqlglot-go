@@ -29,6 +29,14 @@ func init() {
 		body := replaceLambda(p.parseDisjunction(), params)
 		return p.expression(exp.Lambda(exp.Args{"this": body, "expressions": params}), nil, nil)
 	}
+	// parser.py:1064-1069: named arguments, e.g. `f(x => 1)`.
+	lambdas[tokens.FARROW] = func(p *Parser, params []exp.Expression) exp.Expression {
+		value := p.parseDisjunction()
+		if value == nil {
+			value = p.parseSelect()
+		}
+		return p.expression(exp.New(exp.KindKwarg, exp.Args{"this": exp.Var(exp.Args{"this": params[0].Name()}), "expression": value}), nil, nil)
+	}
 }
 
 // parseLambdaArg ports _parse_lambda_arg (parser.py:7178-7179): a lambda parameter is just

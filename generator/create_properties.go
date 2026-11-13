@@ -189,7 +189,12 @@ func (g *Generator) renderProperties(properties expressions.Expression, prefix, 
 // withPropertiesSQL ports with_properties (generator.py:2064-2065). Base, MySQL, and
 // Postgres all use the base WITH_PROPERTIES_PREFIX of "WITH".
 func (g *Generator) withPropertiesSQL(properties expressions.Expression) string {
-	return g.renderProperties(properties, g.seg("WITH", ""), ", ", "", true)
+	prefix := "WITH"
+	if g.isDialect("bigquery") {
+		// generators/bigquery.py:273 WITH_PROPERTIES_PREFIX = "OPTIONS".
+		prefix = "OPTIONS"
+	}
+	return g.renderProperties(properties, g.seg(prefix, ""), ", ", "", true)
 }
 
 // propertyName ports property_name (generator.py:2078-2081).

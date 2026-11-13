@@ -783,6 +783,8 @@ const (
 	KindTimestampDiff
 	KindUnixDate
 	KindUuid
+	KindJSONArray
+	KindTranslate
 )
 
 type Trait uint32
@@ -1457,6 +1459,8 @@ var argTypes = map[Kind][]argSpec{
 	KindTimestampDiff:          {{"this", true}, {"expression", true}, {"unit", false}},
 	KindUnixDate:               {{"this", true}},
 	KindUuid:                   {{"this", false}, {"name", false}, {"is_string", false}},
+	KindJSONArray:              {{"expressions", false}, {"null_handling", false}, {"return_type", false}, {"strict", false}},
+	KindTranslate:              {{"this", true}, {"from_", true}, {"to", true}},
 }
 
 var traitsOf = map[Kind]Trait{
@@ -1805,6 +1809,8 @@ var traitsOf = map[Kind]Trait{
 	KindTimestampDiff:      TraitCondition | TraitFunc,
 	KindUnixDate:           TraitCondition | TraitFunc,
 	KindUuid:               TraitCondition | TraitFunc,
+	KindJSONArray:          TraitCondition | TraitFunc,
+	KindTranslate:          TraitCondition | TraitFunc,
 }
 
 var primitive = map[Kind]bool{
@@ -2358,6 +2364,8 @@ var className = map[Kind]string{
 	KindTimestampDiff:          "TimestampDiff",
 	KindUnixDate:               "UnixDate",
 	KindUuid:                   "Uuid",
+	KindJSONArray:              "JSONArray",
+	KindTranslate:              "Translate",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func
@@ -2388,6 +2396,7 @@ var varLenArgs = map[Kind]bool{
 	KindAIEmbed:      true,
 	KindAIGenerate:   true,
 	KindAISimilarity: true,
+	KindJSONArray:    true,
 }
 
 // ArgKeys returns the arg keys of a Kind in class-declaration order (mirrors

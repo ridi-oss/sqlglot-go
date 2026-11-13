@@ -262,6 +262,7 @@ var FunctionByName = map[string]func([]Expression) Expression{
 	"TIMESTAMPDIFF":         genericFunction(KindTimestampDiff),
 	"TIMESTAMP_DIFF":        genericFunction(KindTimestampDiff),
 	"UNIX_DATE":             genericFunction(KindUnixDate),
+	"TRANSLATE":             genericFunction(KindTranslate),
 }
 
 // buildMod ports build_mod (parser.py:121-129): MOD(x, y) -> exp.Mod, parenthesizing either

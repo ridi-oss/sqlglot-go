@@ -1,4 +1,16 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"DATE_DIFF('2017-12-18', '2017-12-17', WEEK(SATURDAY))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE START_DATE DATE DEFAULT CURRENT_DATE - 1"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE TS TIMESTAMP DEFAULT CURRENT_TIMESTAMP() - INTERVAL '1' HOUR"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE X FLOAT64 DEFAULT 0.9"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE X INT64"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE X INT64 DEFAULT (SELECT MAX(col) FROM foo)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE X INT64 DEFAULT 1"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE X, Y, Z INT64"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE X, Y, Z INT64 DEFAULT (SELECT 42)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE X, Y, Z INT64 DEFAULT 42"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(1e1000000, 4)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(20, 4)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(76, 38)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_EXTRACT(doc, '$. a b c .d')"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_EXTRACT_ARRAY(doc, '$. a b c .d')"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_EXTRACT_SCALAR(doc, '$. a b c .d')"}
@@ -9,6 +21,20 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SAFE.PARSE_DATE('%Y-%m-%d', '2024-01-15')"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SAFE.PARSE_DATETIME('%Y-%m-%d %H:%M:%S', '2024-01-15 10:30:00')"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SAFE.PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', '2024-01-15 10:30:00')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM AI.GENERATE_TABLE(MODEL `mydataset.gemini_model`, (SELECT 'Q' AS prompt), STRUCT('name STRING' AS output_schema))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM AI.GENERATE_TEXT(MODEL `mydataset.gemini_model`, TABLE `mydataset.prompt_table`, STRUCT(0.15 AS temperature))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.GENERATE_EMBEDDING(MODEL mydataset.mymodel, (SELECT label, column1, column2 FROM mydataset.mytable))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.GENERATE_EMBEDDING(MODEL mydataset.mymodel, TABLE mydataset.mytable, STRUCT(TRUE AS flatten_json_output))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.GENERATE_TEXT(MODEL `mydataset.gemini_model`, TABLE `mydataset.prompt_table`, STRUCT(0.15 AS temperature))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.GENERATE_TEXT_EMBEDDING(MODEL mydataset.mymodel, (SELECT label, column1, column2 FROM mydataset.mytable))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.GENERATE_TEXT_EMBEDDING(MODEL mydataset.mymodel, TABLE mydataset.mytable, STRUCT(TRUE AS flatten_json_output))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.PREDICT(MODEL `my_project`.my_dataset.my_model, (SELECT * FROM input_data))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.PREDICT(MODEL my_dataset.vision_model, (SELECT uri, ML.CONVERT_COLOR_SPACE(ML.RESIZE_IMAGE(ML.DECODE_IMAGE(data), 224, 280, TRUE), 'YIQ') AS input FROM my_dataset.object_table WHERE content_type = 'image/jpeg'))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.PREDICT(MODEL my_dataset.vision_model, (SELECT uri, ML.RESIZE_IMAGE(ML.DECODE_IMAGE(data), 480, 480, FALSE) AS input FROM my_dataset.object_table))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.PREDICT(MODEL mydataset.mymodel, (SELECT custom_label, column1, column2 FROM mydataset.mytable), STRUCT(0.55 AS threshold))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.PREDICT(MODEL mydataset.mymodel, (SELECT label, column1, column2 FROM mydataset.mytable))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.TRANSLATE(MODEL `mydataset.mymodel`, (SELECT comment AS text_content FROM mydataset.mytable), STRUCT('translate_text' AS translate_mode, 'en' AS target_language_code))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM ML.TRANSLATE(MODEL `mydataset.mytranslatemodel`, TABLE `mydataset.mybqtable`, STRUCT('translate_text' AS translate_mode, 'zh-CN' AS target_language_code))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 'semester_1', (Q3, Q4) AS 'semester_2'))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 1, (Q3, Q4) AS 2))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST(ARRAY<STRUCT<x INT64>>[])"}
@@ -16,6 +42,7 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST([1]) WITH OFFSET"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST([1]) WITH OFFSET y"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM UNNEST(x) WITH OFFSET EXCEPT DISTINCT SELECT * FROM UNNEST(y) WITH OFFSET"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM VECTOR_SEARCH(TABLE mydataset.base_table, 'column_to_search', TABLE mydataset.query_table)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM a LEFT JOIN b ON a.key = b.key AND a.val IN UNNEST(b.arr)"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM a WHERE b IN UNNEST([1, 2, 3])"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM a WHERE b NOT IN UNNEST([1, 2, 3])"}
@@ -60,6 +87,7 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT id, mnth + 1 AS a_mnth FROM t CROSS JOIN UNNEST(GENERATE_DATE_ARRAY(start_month, DATE_TRUNC(CURRENT_DATE, MONTH), INTERVAL '1' MONTH)) AS mnth"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT id, mnth AS a_mnth FROM t CROSS JOIN UNNEST(GENERATE_DATE_ARRAY(start_month, DATE_TRUNC(CURRENT_DATE, MONTH), INTERVAL '1' MONTH)) AS mnth"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT id, mnth FROM t CROSS JOIN UNNEST(GENERATE_DATE_ARRAY(start_month, DATE_TRUNC(CURRENT_DATE, MONTH), INTERVAL '1' MONTH)) AS mnth"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT label, predicted_label1, predicted_label AS predicted_label2 FROM ML.PREDICT(MODEL mydataset.mymodel2, (SELECT * EXCEPT (predicted_label), predicted_label AS predicted_label1 FROM ML.PREDICT(MODEL mydataset.mymodel1, TABLE mydataset.mytable)))"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT participant FROM UNNEST([STRUCT('Rudisha' AS name, [23.4, 26.3, 26.4, 26.1] AS laps)]) AS participant"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT r\"\"\"a\\\"b\"\"\""}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT r\"\"\"ends with \\\"\"\"\""}
@@ -79,10 +107,11 @@
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH Races AS (SELECT '800M' AS race) SELECT race, participant FROM Races AS r CROSS JOIN UNNEST([STRUCT('Rudisha' AS name, [23.4, 26.3, 26.4, 26.1] AS laps)]) AS participant"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH cte(c) AS (SELECT * FROM t) SELECT * FROM cte"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH foo AS (SELECT [1, 2, 3] AS array_col) SELECT array_col[offset] FROM foo CROSS JOIN UNNEST(array_col) WITH OFFSET AS offset"}
-{"dialect":"bigquery","category":"gen: canonicalization","sql":"current_datetime"}
 {"dialect":"bigquery","category":"gen: canonicalization","sql":"r'x\\''"}
-{"dialect":"bigquery","category":"gen: cast/type","sql":"CREATE VIEW `d.v` OPTIONS (expiration_timestamp=TIMESTAMP '2020-01-02T04:05:06.007Z') AS SELECT 1 AS c"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"INSERT INTO test (cola, colb) VALUES (CAST(7 AS STRING(10)), CAST(14 AS STRING(10)))"}
+{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT * FROM ML.FORECAST(MODEL `mydataset.mymodel`, (SELECT * FROM mydataset.query_table), STRUCT())"}
+{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT * FROM ML.FORECAST(MODEL `mydataset.mymodel`, STRUCT(2 AS horizon))"}
+{"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT * FROM ML.FORECAST(MODEL `mydataset.mymodel`, TABLE `mydataset.mybqtable`, STRUCT(2 AS horizon, 4 AS confidence_level))"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT * FROM UNNEST(ARRAY<STRUCT<device_id INT64, time DATETIME, signal INT64, state STRING>>[STRUCT(1, DATETIME '2023-11-01 09:34:01', 74, 'INACTIVE'),STRUCT(4, DATETIME '2023-11-01 09:38:01', 80, 'ACTIVE')])"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT CAST('1' AS STRING(10)) UNION ALL SELECT CAST('2' AS STRING(10))"}
 {"dialect":"bigquery","category":"gen: cast/type","sql":"SELECT CAST(1 AS NUMERIC(10, 2))"}
@@ -96,46 +125,51 @@
 {"dialect":"bigquery","category":"gen: ddl/properties","sql":"ALTER TABLE foo DROP PRIMARY KEY IF EXISTS"}
 {"dialect":"bigquery","category":"gen: ddl/properties","sql":"CREATE TABLE IF NOT EXISTS foo AS SELECT * FROM bla EXCEPT DISTINCT (SELECT * FROM bar) LIMIT 0"}
 {"dialect":"bigquery","category":"gen: ddl/properties","sql":"CREATE TABLE db.example_table (x int) PARTITION BY x cluster by x"}
-{"dialect":"bigquery","category":"gen: ddl/properties","sql":"CREATE TEMPORARY FUNCTION string_length_0(strings ARRAY<STRING>) RETURNS FLOAT64 LANGUAGE js AS \"\"\"'use strict'; function string_length(strings) { return _.sum(_.map(strings, ((x) => x.length))); } return string_length(strings);\"\"\" OPTIONS (library=['gs://ibis-testing-libraries/lodash.min.js'])"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"ARRAY_AGG(DISTINCT x IGNORE NULLS HAVING MAX x ORDER BY x LIMIT 1)"}
+{"dialect":"bigquery","category":"generate: error","sql":"ARRAY_AGG(DISTINCT x IGNORE NULLS HAVING MAX x ORDER BY x LIMIT 1)"}
+{"dialect":"bigquery","category":"generate: error","sql":"CONTAINS_SUBSTR(a, b, json_scope => 'JSON_KEYS_AND_VALUES')"}
+{"dialect":"bigquery","category":"generate: error","sql":"EDIT_DISTANCE(col1, col2, max_distance => 3)"}
+{"dialect":"bigquery","category":"generate: error","sql":"EXPORT DATA OPTIONS (URI='gs://bucket/folder/*.csv') AS (SELECT 1)"}
+{"dialect":"bigquery","category":"generate: error","sql":"EXPORT DATA OPTIONS (URI='gs://path*.csv.gz', FORMAT='CSV') AS SELECT * FROM all_rows"}
+{"dialect":"bigquery","category":"generate: error","sql":"EXPORT DATA WITH CONNECTION myproject.us.myconnection OPTIONS (URI='gs://path*.csv.gz', FORMAT='CSV') AS SELECT * FROM all_rows"}
+{"dialect":"bigquery","category":"generate: error","sql":"FLOAT64(PARSE_JSON('9.8'), wide_number_mode => 'exact')"}
+{"dialect":"bigquery","category":"generate: error","sql":"FLOAT64(PARSE_JSON('9.8'), wide_number_mode => 'round')"}
+{"dialect":"bigquery","category":"generate: error","sql":"FOR record IN (SELECT word, word_count FROM bigquery-public-data.samples.shakespeare LIMIT 5) DO SELECT record.word, record.word_count"}
+{"dialect":"bigquery","category":"generate: error","sql":"FOR system_time IN (SELECT 1 AS x) DO SELECT system_time.x"}
+{"dialect":"bigquery","category":"generate: error","sql":"FOR timestamp IN (SELECT 1 AS x) DO SELECT timestamp.x"}
+{"dialect":"bigquery","category":"generate: error","sql":"JSON_ARRAY_APPEND(PARSE_JSON('[\"a\", \"b\", \"c\"]'), '$', [1, 2], append_each_element => FALSE)"}
+{"dialect":"bigquery","category":"generate: error","sql":"JSON_ARRAY_INSERT(PARSE_JSON('[\"a\", \"b\", \"c\"]'), '$[1]', [1, 2], insert_each_element => FALSE)"}
+{"dialect":"bigquery","category":"generate: error","sql":"JSON_KEYS(PARSE_JSON('{\"a\": {\"b\":1}}'), 1, mode => 'lax')"}
+{"dialect":"bigquery","category":"generate: error","sql":"JSON_SET(PARSE_JSON('{\"a\": 1}'), '$.b', 999, create_if_missing => FALSE)"}
+{"dialect":"bigquery","category":"generate: error","sql":"JSON_STRIP_NULLS(PARSE_JSON('[1, null, 2, null]'), include_arrays => FALSE)"}
+{"dialect":"bigquery","category":"generate: error","sql":"JSON_STRIP_NULLS(PARSE_JSON('{\"a\": {\"b\": {\"c\": null}}, \"d\": [null], \"e\": [], \"f\": 1}'), include_arrays => FALSE, remove_empty => TRUE)"}
+{"dialect":"bigquery","category":"generate: error","sql":"PARSE_JSON('{}', wide_number_mode => 'exact')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT * FROM AI.FORECAST((SELECT * FROM citibike_trips), data_col => 'num_trips', timestamp_col => 'date', horizon => 30)"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT * FROM AI.FORECAST(TABLE citibike_trips, data_col => 'num_trips', timestamp_col => 'date', horizon => 30)"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT * FROM ML.FEATURES_AT_TIME((SELECT 1), num_rows => 1)"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT * FROM ML.FEATURES_AT_TIME(TABLE mydataset.feature_table, time => '2022-06-11 10:00:00+00', num_rows => 1, ignore_feature_nulls => TRUE)"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT * FROM VECTOR_SEARCH(TABLE mydataset.base_table, 'column_to_search', TABLE mydataset.query_table, 'query_column_to_search', top_k => 2, distance_type => 'cosine', options => '{\"fraction_lists_to_search\":0.15}')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT * FROM VECTOR_SEARCH(TABLE mydataset.base_table, 'column_to_search', TABLE mydataset.query_table, query_column_to_search => 'query_column_to_search', top_k => 2, distance_type => 'cosine', options => '{\"fraction_lists_to_search\":0.15}')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT ANY_VALUE(fruit HAVING MAX sold) FROM Store"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT ANY_VALUE(fruit HAVING MAX sold) FROM fruits"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT ANY_VALUE(fruit HAVING MIN sold) FROM Store"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT ANY_VALUE(fruit HAVING MIN sold) FROM fruits"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT SEARCH(data_to_search, 'search_query', analyzer => 'PATTERN_ANALYZER')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT SEARCH(data_to_search, 'search_query', analyzer => 'PATTERN_ANALYZER', analyzer_options => 'options')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT SEARCH(data_to_search, 'search_query', analyzer_options => 'analyzer_options_values')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT SEARCH(data_to_search, 'search_query', json_scope => 'JSON_KEYS_AND_VALUES')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT SEARCH(data_to_search, 'search_query', json_scope => 'JSON_VALUES', analyzer => 'LOG_ANALYZER')"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT category, ANY_VALUE(product HAVING MAX price), ANY_VALUE(product HAVING MIN cost), ANY_VALUE(supplier) FROM products GROUP BY category"}
+{"dialect":"bigquery","category":"generate: error","sql":"SELECT ts + MAKE_INTERVAL(1, 2, minute => 5, day => 3)"}
+{"dialect":"bigquery","category":"generate: error","sql":"TO_JSON(9999999999, stringify_wide_numbers => FALSE)"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"CAST(encrypted_value AS STRING FORMAT 'BASE64')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"CONTAINS_SUBSTR(a, b, json_scope => 'JSON_KEYS_AND_VALUES')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"EDIT_DISTANCE(col1, col2, max_distance => 3)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"FLOAT64(PARSE_JSON('9.8'), wide_number_mode => 'exact')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"FLOAT64(PARSE_JSON('9.8'), wide_number_mode => 'round')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"JSON_ARRAY_APPEND(PARSE_JSON('[\"a\", \"b\", \"c\"]'), '$', [1, 2], append_each_element => FALSE)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"JSON_ARRAY_INSERT(PARSE_JSON('[\"a\", \"b\", \"c\"]'), '$[1]', [1, 2], insert_each_element => FALSE)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"JSON_KEYS(PARSE_JSON('{\"a\": {\"b\":1}}'), 1, mode => 'lax')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"JSON_SET(PARSE_JSON('{\"a\": 1}'), '$.b', 999, create_if_missing => FALSE)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"JSON_STRIP_NULLS(PARSE_JSON('[1, null, 2, null]'), include_arrays => FALSE)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"JSON_STRIP_NULLS(PARSE_JSON('{\"a\": {\"b\": {\"c\": null}}, \"d\": [null], \"e\": [], \"f\": 1}'), include_arrays => FALSE, remove_empty => TRUE)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"PARSE_JSON('{}', wide_number_mode => 'exact')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SAFE_CAST(encrypted_value AS STRING FORMAT 'BASE64')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SAFE_CAST(some_date AS DATE FORMAT 'DD MONTH YYYY')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SAFE_CAST(some_date AS DATE FORMAT 'YYYY-MM-DD') AS some_date"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM AI.FORECAST((SELECT * FROM citibike_trips), data_col => 'num_trips', timestamp_col => 'date', horizon => 30)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM AI.FORECAST(TABLE citibike_trips, data_col => 'num_trips', timestamp_col => 'date', horizon => 30)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM AI.GENERATE_TABLE(MODEL `mydataset.gemini_model`, (SELECT 'Q' AS prompt), STRUCT('name STRING' AS output_schema))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM AI.GENERATE_TEXT(MODEL `mydataset.gemini_model`, TABLE `mydataset.prompt_table`, STRUCT(0.15 AS temperature))"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'linear')], ignore_null_values => FALSE) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'locf')]) ORDER BY time"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'null')], origin => CAST('2023-11-01 09:30:01' AS DATETIME)) ORDER BY time"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.FEATURES_AT_TIME((SELECT 1), num_rows => 1)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.FEATURES_AT_TIME(TABLE mydataset.feature_table, time => '2022-06-11 10:00:00+00', num_rows => 1, ignore_feature_nulls => TRUE)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.FORECAST(MODEL `mydataset.mymodel`, (SELECT * FROM mydataset.query_table), STRUCT())"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.FORECAST(MODEL `mydataset.mymodel`, STRUCT(2 AS horizon))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.FORECAST(MODEL `mydataset.mymodel`, TABLE `mydataset.mybqtable`, STRUCT(2 AS horizon, 4 AS confidence_level))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.GENERATE_TEXT(MODEL `mydataset.gemini_model`, TABLE `mydataset.prompt_table`, STRUCT(0.15 AS temperature))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.GENERATE_TEXT_EMBEDDING(MODEL mydataset.mymodel, (SELECT label, column1, column2 FROM mydataset.mytable))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.GENERATE_TEXT_EMBEDDING(MODEL mydataset.mymodel, TABLE mydataset.mytable, STRUCT(TRUE AS flatten_json_output))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.TRANSLATE(MODEL `mydataset.mymodel`, (SELECT comment AS text_content FROM mydataset.mytable), STRUCT('translate_text' AS translate_mode, 'en' AS target_language_code))"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM ML.TRANSLATE(MODEL `mydataset.mytranslatemodel`, TABLE `mydataset.mybqtable`, STRUCT('translate_text' AS translate_mode, 'zh-CN' AS target_language_code))"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT AI.GENERATE_BOOL(MODEL `mydataset.gemini_model`, 'Is sky blue?')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT ANY_VALUE(fruit HAVING MAX sold) FROM Store"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT ANY_VALUE(fruit HAVING MAX sold) FROM fruits"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT ANY_VALUE(fruit HAVING MIN sold) FROM Store"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT ANY_VALUE(fruit HAVING MIN sold) FROM fruits"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST('20201225' AS TIMESTAMP FORMAT 'YYYYMMDD' AT TIME ZONE 'America/New_York')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST('20201225' AS TIMESTAMP FORMAT 'YYYYMMDD')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST('2026-03-24' AS STRING FORMAT ('YYYY'))"}
@@ -146,77 +180,14 @@
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(date AS STRING FORMAT ('YYYY-MM-DD'))"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(date AS TIMESTAMP FORMAT ('YYYY-MM-DD HH24:MI:SS'))"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT CAST(timestamp AS STRING FORMAT ('YYYY-MM-DD') AT TIME ZONE 'UTC')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT SEARCH(data_to_search, 'search_query', analyzer => 'PATTERN_ANALYZER')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT SEARCH(data_to_search, 'search_query', analyzer => 'PATTERN_ANALYZER', analyzer_options => 'options')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT SEARCH(data_to_search, 'search_query', analyzer_options => 'analyzer_options_values')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT SEARCH(data_to_search, 'search_query', json_scope => 'JSON_KEYS_AND_VALUES')"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT SEARCH(data_to_search, 'search_query', json_scope => 'JSON_VALUES', analyzer => 'LOG_ANALYZER')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT a, b, c, d, e FROM GAP_FILL(TABLE foo, ts_column => 'b', partitioning_columns => ['a'], value_columns => [('c', 'bar'), ('d', 'baz'), ('e', 'bla')], bucket_width => INTERVAL '1' DAY)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT category, ANY_VALUE(product HAVING MAX price), ANY_VALUE(product HAVING MIN cost), ANY_VALUE(supplier) FROM products GROUP BY category"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT ts + MAKE_INTERVAL(1, 2, minute => 5, day => 3)"}
-{"dialect":"bigquery","category":"parse: Expecting )","sql":"TO_JSON(9999999999, stringify_wide_numbers => FALSE)"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"cast(x as date format 'MM/DD/YYYY')"}
 {"dialect":"bigquery","category":"parse: Expecting )","sql":"cast(x as time format 'YYYY.MM.DD HH:MI:SSTZH')"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE START_DATE DATE DEFAULT CURRENT_DATE - 1"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE TS TIMESTAMP DEFAULT CURRENT_TIMESTAMP() - INTERVAL '1' HOUR"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE X FLOAT64 DEFAULT 0.9"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE X INT64"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE X INT64 DEFAULT (SELECT MAX(col) FROM foo)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE X INT64 DEFAULT 1"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE X, Y, Z INT64"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE X, Y, Z INT64 DEFAULT (SELECT 42)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE X, Y, Z INT64 DEFAULT 42"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE x BIGDECIMAL(1e1000000, 4)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE x BIGDECIMAL(20, 4)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE x BIGDECIMAL(76, 38)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE x BIGNUMERIC(1e1000000, 4)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE x BIGNUMERIC(20, 4)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"DECLARE x BIGNUMERIC(76, 38)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"EXPORT DATA OPTIONS (URI='gs://bucket/folder/*.csv') AS (SELECT 1)"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"EXPORT DATA OPTIONS (URI='gs://path*.csv.gz', FORMAT='CSV') AS SELECT * FROM all_rows"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"EXPORT DATA WITH CONNECTION myproject.us.myconnection OPTIONS (URI='gs://path*.csv.gz', FORMAT='CSV') AS SELECT * FROM all_rows"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"FOR record IN (SELECT word, word_count FROM bigquery-public-data.samples.shakespeare LIMIT 5) DO SELECT record.word, record.word_count"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"FOR system_time IN (SELECT 1 AS x) DO SELECT system_time.x"}
-{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"FOR timestamp IN (SELECT 1 AS x) DO SELECT timestamp.x"}
 {"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INTO TABLE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
 {"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INTO TEMP TABLE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
 {"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA OVERWRITE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
 {"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"SELECT GRANT FROM (SELECT 'input' AS GRANT)"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"ARRAY(SELECT AS STRUCT e.x AS y, e.z AS bla FROM UNNEST(bob))::ARRAY<STRUCT<y STRING, bro NUMERIC>>"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM ML.GENERATE_EMBEDDING(MODEL mydataset.mymodel, (SELECT label, column1, column2 FROM mydataset.mytable))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM ML.GENERATE_EMBEDDING(MODEL mydataset.mymodel, TABLE mydataset.mytable, STRUCT(TRUE AS flatten_json_output))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM ML.PREDICT(MODEL `my_project`.my_dataset.my_model, (SELECT * FROM input_data))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM ML.PREDICT(MODEL my_dataset.vision_model, (SELECT uri, ML.CONVERT_COLOR_SPACE(ML.RESIZE_IMAGE(ML.DECODE_IMAGE(data), 224, 280, TRUE), 'YIQ') AS input FROM my_dataset.object_table WHERE content_type = 'image/jpeg'))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM ML.PREDICT(MODEL my_dataset.vision_model, (SELECT uri, ML.RESIZE_IMAGE(ML.DECODE_IMAGE(data), 480, 480, FALSE) AS input FROM my_dataset.object_table))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM ML.PREDICT(MODEL mydataset.mymodel, (SELECT custom_label, column1, column2 FROM mydataset.mytable), STRUCT(0.55 AS threshold))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM ML.PREDICT(MODEL mydataset.mymodel, (SELECT label, column1, column2 FROM mydataset.mytable))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM VECTOR_SEARCH(TABLE mydataset.base_table, 'column_to_search', TABLE mydataset.query_table)"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM VECTOR_SEARCH(TABLE mydataset.base_table, 'column_to_search', TABLE mydataset.query_table, 'query_column_to_search', top_k => 2, distance_type => 'cosine', options => '{\"fraction_lists_to_search\":0.15}')"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT * FROM VECTOR_SEARCH(TABLE mydataset.base_table, 'column_to_search', TABLE mydataset.query_table, query_column_to_search => 'query_column_to_search', top_k => 2, distance_type => 'cosine', options => '{\"fraction_lists_to_search\":0.15}')"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS foo FULL OUTER UNION ALL BY NAME ON (foo, bar) SELECT 3 AS foo, 4 AS bar"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS foo FULL UNION ALL BY NAME ON (foo, bar) SELECT 3 AS foo, 4 AS bar"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS foo LEFT OUTER UNION ALL BY NAME ON (foo, bar) SELECT 3 AS foo, 4 AS bar"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS foo LEFT UNION ALL BY NAME ON (foo, bar) SELECT 3 AS foo, 4 AS bar"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS foo OUTER UNION ALL BY NAME ON (foo, bar) SELECT 3 AS foo, 4 AS bar"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS foo UNION ALL BY NAME ON (foo, bar) SELECT 3 AS foo, 4 AS bar"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS x LEFT UNION ALL CORRESPONDING SELECT 2 AS x"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS x UNION ALL CORRESPONDING BY (foo, bar) SELECT 2 AS x"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS x UNION ALL CORRESPONDING SELECT 2 AS x"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS x UNION ALL STRICT CORRESPONDING BY (foo, bar) SELECT 2 AS x"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT 1 AS x UNION ALL STRICT CORRESPONDING SELECT 2 AS x"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT ARRAY((SELECT AS STRUCT 1 AS a, 2 AS b) LIMIT 10)"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT ARRAY((SELECT AS STRUCT 1 AS a, 2 AS b))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT ARRAY(SELECT AS STRUCT 1 a, 2 b)"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT ARRAY(SELECT AS STRUCT x1 AS x1, x2 AS x2 FROM t) AS array_col"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT AS STRUCT 1 AS a, 2 AS b"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT AS STRUCT ARRAY(SELECT AS STRUCT 1 AS b FROM x) AS y FROM z"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT AS VALUE STRUCT(1 AS a, 2 AS b)"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT DISTINCT AS STRUCT 1 AS a, 2 AS b"}
 {"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT a overlaps"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"SELECT label, predicted_label1, predicted_label AS predicted_label2 FROM ML.PREDICT(MODEL mydataset.mymodel2, (SELECT * EXCEPT (predicted_label), predicted_label AS predicted_label1 FROM ML.PREDICT(MODEL mydataset.mymodel1, TABLE mydataset.mytable)))"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"WITH t1 AS (SELECT ARRAY(SELECT AS STRUCT 1 AS a, 2 AS b) AS array_col) SELECT array_col[0].a, array_col[0].b FROM t1"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"WITH t1 AS (SELECT ARRAY(SELECT AS STRUCT x1 AS alias_x1, x2 /* test */ FROM t2 WHERE x2 = 4) AS array_col) SELECT array_col[0].alias_x1, array_col[0].x2 FROM t1"}
-{"dialect":"bigquery","category":"parse: Required keyword","sql":"WITH t1 AS (SELECT ARRAY(SELECT AS STRUCT x1 AS alias_x1, x2 /* test */ FROM t2) AS array_col) SELECT array_col[0].alias_x1, array_col[0].x2 FROM t1"}
 {"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"PARSE_TIMESTAMP('%FT%H:%M:%E*S%z', x)"}
 {"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E6S%z', x)"}
 {"dialect":"bigquery","category":"parse: Unexpected keyword","sql":"SELECT PARSE_DATE('%A %b %e %Y', 'Thursday Dec 25 2008')"}

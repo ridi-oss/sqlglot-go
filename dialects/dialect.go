@@ -126,8 +126,11 @@ type Dialect struct {
 	SupportsStructStarExpansion        bool
 	ExcludesPseudocolumnsFromStar      bool
 	QueryResultsAreStructs             bool
-	RequiresParenthesizedStructAccess  bool
-	IndexOffset                        int
+	// SetOpDistinctRequired ports SET_OP_DISTINCT_BY_DEFAULT = None (dialects/bigquery.py:151):
+	// UNION/EXCEPT/INTERSECT must spell out DISTINCT or ALL.
+	SetOpDistinctRequired             bool
+	RequiresParenthesizedStructAccess bool
+	IndexOffset                       int
 	// RenameTableWithDB ports the generator flag of the same name (generator.py:344): base
 	// allows `ALTER TABLE db.a RENAME TO db.b`, some dialects (e.g. postgres, generators/
 	// postgres.py:234) only allow renaming within the same db and drop the db qualifier.

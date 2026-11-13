@@ -806,17 +806,30 @@ func (p *Parser) parseSetOperation(this exp.Expression, consumePipe bool) exp.Ex
 		constructor = exp.Intersect
 	}
 	comments := p.prev.Comments
-	distinct := true // TODO(slice 5): dialect SET_OP_DISTINCT_BY_DEFAULT overrides.
+	distinct := true
 	if p.match(tokens.DISTINCT) {
 		distinct = true
 	} else if p.match(tokens.ALL) {
 		distinct = false
+	} else if p.dialect.SetOpDistinctRequired {
+		// dialects/bigquery.py:151 SET_OP_DISTINCT_BY_DEFAULT maps every set operation to None.
+		p.raiseError("Expected DISTINCT or ALL for " + exp.ClassName(constructor(exp.Args{}).Kind()))
 	}
-	// Upstream stores by_name only when matched (parser.py:5738-5742 uses `... or None`),
+	// Upstream stores by_name only when matched (parser.py:5922-5926 uses `... or None`),
 	// so leave it nil when absent (like symmetric/siblings) rather than storing False.
 	var byName any
-	if p.matchTextSeq("BY", "NAME") {
+	if p.matchTextSeq("BY", "NAME") || p.matchTextSeq("STRICT", "CORRESPONDING") {
 		byName = true
+	}
+	if p.matchTextSeq("CORRESPONDING") {
+		byName = true
+		if side == nil && kind == nil {
+			kind = "INNER"
+		}
+	}
+	var onColumns any
+	if byName != nil && p.matchTexts(map[string]bool{"ON": true, "BY": true}) {
+		onColumns = p.parseWrappedCsv(p.parseColumn)
 	}
 	expression := p.parseSelect(true, false, true, false)
 	// Wrap VALUES operands in selects (parser.py:5941-5945, v30.17.0), for consistency with
@@ -834,6 +847,7 @@ func (p *Parser) parseSetOperation(this exp.Expression, consumePipe bool) exp.Ex
 		"expression": expression,
 		"side":       side,
 		"kind":       kind,
+		"on":         onColumns,
 	}), nil, comments)
 }
 
@@ -892,6 +906,13 @@ func (p *Parser) parseSelect(opts ...bool) exp.Expression {
 			all = p.match(tokens.ALL)
 			matchedDistinct = p.matchSet(distinctTokens)
 		}
+		// parser.py:4057-4061: BigQuery's SELECT AS STRUCT / AS VALUE.
+		var kind any
+		if p.match(tokens.ALIAS) {
+			if p.matchTexts(map[string]bool{"STRUCT": true, "VALUE": true}) {
+				kind = stringsUpper(p.prev.Text)
+			}
+		}
 		var distinct exp.Expression
 		if matchedDistinct {
 			args := exp.Args{}
@@ -916,7 +937,7 @@ func (p *Parser) parseSelect(opts ...bool) exp.Expression {
 		// but wire the parser shape to match upstream.
 		top := p.parseLimit(nil, true, false)
 		projections := p.parseCsv(p.parseProjection)
-		selectArgs := exp.Args{"distinct": distinct, "expressions": projections, "hint": hint}
+		selectArgs := exp.Args{"kind": kind, "distinct": distinct, "expressions": projections, "hint": hint}
 		if top != nil {
 			selectArgs["limit"] = top
 		}
@@ -3698,11 +3719,7 @@ func (p *Parser) parseLambda(alias bool) exp.Expression {
 		this = p.parseSelectOrExpression(alias)
 	}
 
-	// Upstream also threads this through _parse_having_max (BigQuery's ARRAY_AGG(x HAVING
-	// MAX y)) between the two _parse_respect_or_ignore_nulls calls; that's out of this
-	// part's scope (no exp.HavingMax Kind ported), so it's omitted here - a no-op for every
-	// dialect that doesn't parse a HAVING MAX/MIN clause at this position anyway.
-	this = p.parseRespectOrIgnoreNulls(this)
+	this = p.parseHavingMax(p.parseRespectOrIgnoreNulls(this))
 	this = p.parseOrder(this, false)
 	this = p.parseRespectOrIgnoreNulls(this)
 	return p.parseLimit(this, false, false)
@@ -4487,4 +4504,15 @@ func stringsLower(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// parseHavingMax ports _parse_having_max (parser.py:8595-8603): BigQuery's
+// ANY_VALUE(x HAVING MAX y).
+func (p *Parser) parseHavingMax(this exp.Expression) exp.Expression {
+	if !p.match(tokens.HAVING) {
+		return this
+	}
+	p.matchTexts(map[string]bool{"MAX": true, "MIN": true})
+	isMax := stringsUpper(p.prev.Text) != "MIN"
+	return p.expression(exp.New(exp.KindHavingMax, exp.Args{"this": this, "expression": p.parseColumn(), "max": isMax}), nil, nil)
 }

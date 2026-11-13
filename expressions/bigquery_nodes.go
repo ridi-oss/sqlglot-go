@@ -212,3 +212,9 @@ func UnixDate(args Args) Expression { return newNode(KindUnixDate, args) }
 
 // Uuid ports exp.Uuid.
 func Uuid(args Args) Expression { return newNode(KindUuid, args) }
+
+// JSONArray ports exp.JSONArray.
+func JSONArray(args Args) Expression { return newNode(KindJSONArray, args) }
+
+// Translate ports exp.Translate.
+func Translate(args Args) Expression { return newNode(KindTranslate, args) }

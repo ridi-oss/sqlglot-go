@@ -329,3 +329,24 @@ func (g *Generator) bigqueryTableParts(e exp.Expression) string {
 	}
 	return g.gen(exp.Identifier(exp.Args{"this": strings.Join(names, "."), "quoted": true}))
 }
+
+func init() {
+	// generator.py:3860-3868 jsonarray_sql.
+	dispatch[exp.KindJSONArray] = func(g *Generator, e exp.Expression) string {
+		suffix := ""
+		if nh := e.Text("null_handling"); nh != "" {
+			suffix += " " + nh
+		}
+		if rt := g.sqlKey(e, "return_type"); rt != "" {
+			suffix += " RETURNING " + rt
+		}
+		if truthy(e.Arg("strict")) {
+			suffix += " STRICT"
+		}
+		args := []any{}
+		for _, x := range listFromValue(e.Arg("expressions")) {
+			args = append(args, x)
+		}
+		return g.funcCall("JSON_ARRAY", args, "(", suffix+")", true)
+	}
+}
