@@ -120,6 +120,13 @@ func newNode(k Kind, args Args) *Node {
 	if args == nil {
 		args = Args{}
 	}
+	// TimeUnit.__init__ (expressions/core.py:2055-2066): a bare date part becomes an uppercase Var.
+	// An existing Var is kept: Go rebuilds nodes where Python runs __init__ once.
+	if timeUnitKinds[k] {
+		if unit, ok := args["unit"].(Expression); ok && unit != nil && unit.Kind() != KindVar {
+			args["unit"] = TimeUnitVar(unit)
+		}
+	}
 	n := &Node{kind: k, args: map[string]any{}, index: -1}
 	seen := map[string]bool{}
 	for _, spec := range argTypesFor(k) {
@@ -378,7 +385,7 @@ func (n *Node) AliasOrName() string {
 
 func (n *Node) OutputName() string {
 	switch n.kind {
-	case KindColumn, KindLiteral, KindIdentifier, KindStar, KindDot, KindTableColumn:
+	case KindColumn, KindPseudocolumn, KindLiteral, KindIdentifier, KindStar, KindDot, KindTableColumn:
 		return n.Name()
 	case KindAlias:
 		return n.Alias()
@@ -1049,7 +1056,7 @@ func (n *Node) ToPy() any {
 
 func (n *Node) Parts() []Expression {
 	switch n.kind {
-	case KindColumn:
+	case KindColumn, KindPseudocolumn:
 		parts := []Expression{}
 		for _, key := range []string{"catalog", "schema", "table", "this"} {
 			if expr := asExpression(n.args[key]); expr != nil {
@@ -1484,4 +1491,12 @@ func DotBuild(expressions []Expression) Expression {
 		current = Dot(Args{"this": current, "expression": expression})
 	}
 	return current
+}
+
+// timeUnitKinds are the exp.TimeUnit subclasses ported so far (DateTrunc normalizes its own unit).
+var timeUnitKinds = map[Kind]bool{
+	KindDateAdd: true, KindDateDiff: true, KindDateSub: true, KindDatetimeAdd: true, KindDatetimeDiff: true,
+	KindDatetimeSub: true, KindDatetimeTrunc: true, KindLastDay: true, KindTimeAdd: true, KindTimeSub: true,
+	KindTimestampAdd: true, KindTimestampDiff: true, KindTimestampSub: true, KindTimestampTrunc: true,
+	KindTsOrDsAdd: true,
 }

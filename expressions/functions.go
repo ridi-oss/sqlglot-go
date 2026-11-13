@@ -27,6 +27,9 @@ func FromArgList(kind Kind, args []Expression) Expression {
 }
 
 var FunctionByName = map[string]func([]Expression) Expression{
+	"STRUCT": func(args []Expression) Expression {
+		return newNode(KindStruct, Args{"expressions": args})
+	},
 	"ARRAY": func(args []Expression) Expression {
 		return newNode(KindArray, Args{"expressions": args})
 	},

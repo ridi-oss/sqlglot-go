@@ -218,3 +218,6 @@ func JSONArray(args Args) Expression { return newNode(KindJSONArray, args) }
 
 // Translate ports exp.Translate.
 func Translate(args Args) Expression { return newNode(KindTranslate, args) }
+
+// Pseudocolumn ports exp.Pseudocolumn.
+func Pseudocolumn(args Args) Expression { return newNode(KindPseudocolumn, args) }

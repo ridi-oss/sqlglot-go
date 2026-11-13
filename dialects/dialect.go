@@ -129,6 +129,9 @@ type Dialect struct {
 	// SetOpDistinctRequired ports SET_OP_DISTINCT_BY_DEFAULT = None (dialects/bigquery.py:151):
 	// UNION/EXCEPT/INTERSECT must spell out DISTINCT or ALL.
 	SetOpDistinctRequired bool
+	// PreserveOriginalNames ports PRESERVE_ORIGINAL_NAMES (dialect.py:405, bigquery.py:31): a
+	// known function keeps the name it was written with (SUBSTR, not SUBSTRING).
+	PreserveOriginalNames bool
 	// CastFormatToTime ports format_time over FORMAT_MAPPING (or TIME_MAPPING) for
 	// CAST(x AS <temporal> FORMAT '...') (parser.py:8147-8157); nil keeps the format as written.
 	CastFormatToTime                  func(string) string

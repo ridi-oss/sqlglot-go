@@ -15,6 +15,9 @@ func NormalizeIdentifiers(expression exp.Expression, dialect dialects.DialectTyp
 	if expression == nil {
 		return nil
 	}
+	if d.Name == "bigquery" {
+		markBigQueryTableNames(expression)
+	}
 	// Ports normalize_identifiers.py:66-78: prune subtrees under a case_sensitive-marked node
 	// and skip such nodes, normalizing only the rest. (store_original_column_identifiers is off
 	// by default, so its dot_parts branch is not ported here.) NB: the only upstream producer of

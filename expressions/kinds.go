@@ -785,6 +785,7 @@ const (
 	KindUuid
 	KindJSONArray
 	KindTranslate
+	KindPseudocolumn
 )
 
 type Trait uint32
@@ -845,7 +846,7 @@ func withQueryModifiers(prefix ...argSpec) []argSpec {
 
 var argTypes = map[Kind][]argSpec{
 	KindExpression: defaultArgTypes,
-	KindColumn:     {{"this", true}, {"table", false}, {"schema", false}, {"catalog", false}, {"join_mark", false}},
+	KindColumn:     {{"this", true}, {"table", false}, {"schema", false}, {"catalog", false}, {"join_mark", false}, {"shadow", false}},
 	KindLiteral:    {{"this", true}, {"is_string", true}},
 	KindIdentifier: {{"this", true}, {"quoted", false}, {"global_", false}, {"temporary", false}},
 	KindStar:       {{"except_", false}, {"replace", false}, {"rename", false}, {"ilike", false}},
@@ -1461,6 +1462,7 @@ var argTypes = map[Kind][]argSpec{
 	KindUuid:                   {{"this", false}, {"name", false}, {"is_string", false}},
 	KindJSONArray:              {{"expressions", false}, {"null_handling", false}, {"return_type", false}, {"strict", false}},
 	KindTranslate:              {{"this", true}, {"from_", true}, {"to", true}},
+	KindPseudocolumn:           {{"this", true}, {"table", false}, {"schema", false}, {"catalog", false}, {"join_mark", false}, {"shadow", false}},
 }
 
 var traitsOf = map[Kind]Trait{
@@ -1811,6 +1813,7 @@ var traitsOf = map[Kind]Trait{
 	KindUuid:               TraitCondition | TraitFunc,
 	KindJSONArray:          TraitCondition | TraitFunc,
 	KindTranslate:          TraitCondition | TraitFunc,
+	KindPseudocolumn:       TraitCondition,
 }
 
 var primitive = map[Kind]bool{
@@ -2366,6 +2369,7 @@ var className = map[Kind]string{
 	KindUuid:                   "Uuid",
 	KindJSONArray:              "JSONArray",
 	KindTranslate:              "Translate",
+	KindPseudocolumn:           "Pseudocolumn",
 }
 
 // varLenArgs is the authoritative is_var_len_args=True set (mirroring the upstream Func

@@ -204,7 +204,11 @@ func (r *Resolver) GetSourceColumns(name string, onlyVisible ...bool) []string {
 		sourceExpr := source.Expression
 		if sourceExpr != nil && sourceExpr.Is(exp.TraitUDTF) {
 			columns = copyStringSlice(sourceExpr.NamedSelects())
-			// TODO(slice 4c): port UNNEST_COLUMN_ONLY / Explode / Lateral Query type-aware branches.
+			// resolver.py:159-172: BigQuery scopes the fields of an unnested struct as columns.
+			if r.dialect != nil && r.dialect.UnnestColumnOnly && sourceExpr.Kind() == exp.KindUnnest {
+				columns = append(columns, r.structFieldNames(r.unnestElementType(sourceExpr, source))...)
+			}
+			// TODO(slice 4c): port the Explode / Lateral Query type-aware branches.
 		} else if sourceExpr != nil && sourceExpr.Is(exp.TraitSetOperation) {
 			columns = r.GetSourceColumnsFromSetOp(sourceExpr)
 		} else if sourceExpr != nil {
@@ -418,17 +422,184 @@ func (r *Resolver) getUnambiguousColumns(sourceColumns map[string][]string, orde
 	return unambiguousColumns
 }
 
+// structFieldNames ports _struct_field_names (resolver.py:360-368).
 func (r *Resolver) structFieldNames(colType exp.Expression) []string {
-	// TODO(slice 4c): port resolver.py:359-367 once TypeAnnotator/DataType inference is live.
+	if exp.IsType(colType, exp.DTypeArray) {
+		colType = firstExpr(colType)
+	}
+	if !exp.IsType(colType, exp.DTypeStruct) {
+		return nil
+	}
+	var names []string
+	for _, field := range expressionsFor(colType, "expressions") {
+		names = append(names, field.Name())
+	}
+	return names
+}
+
+func firstExpr(e exp.Expression) exp.Expression {
+	if list := expressionsFor(e, "expressions"); len(list) > 0 {
+		return list[0]
+	}
 	return nil
 }
 
+// getUnnestColumnType ports _get_unnest_column_type (resolver.py:370-393).
 func (r *Resolver) getUnnestColumnType(column exp.Expression, scope *Scope) exp.Expression {
-	// TODO(slice 4c): port resolver.py:369-392.
+	tableName := column.Text("table")
+	if tableName == "" {
+		tableIdentifier := NewResolver(scope, r.schema, r.inferSchema).GetTable(column)
+		if tableIdentifier == nil {
+			return nil
+		}
+		tableName = tableIdentifier.Name()
+	}
+	source, ok := scope.Sources[tableName]
+	if !ok {
+		return nil
+	}
+	return r.getColumnTypeFromScope(source, column)
+}
+
+// getColumnTypeFromScope ports _get_column_type_from_scope (resolver.py:395-432), uncached.
+func (r *Resolver) getColumnTypeFromScope(source any, column exp.Expression) exp.Expression {
+	switch src := source.(type) {
+	case exp.Expression:
+		if src == nil || src.Kind() != exp.KindTable {
+			return nil
+		}
+		colType, err := r.schema.GetColumnType(src, column, nil, nil)
+		if err != nil || colType == nil || exp.IsType(colType, exp.DTypeUnknown) {
+			return nil
+		}
+		return colType
+	case *Scope:
+		// divergence: upstream (resolver.py:423-428) searches nested sources by the output name,
+		// which picks the wrong column under a rename (`SELECT o AS s FROM t`). Follow the
+		// projection instead; anything but a pass-through column gives no type.
+		expression := src.Expression
+		if expression == nil || expression.Kind() != exp.KindSelect {
+			return nil
+		}
+		for _, selection := range expression.Selects() {
+			if selection.AliasOrName() != column.Name() {
+				continue
+			}
+			inner := selection
+			if inner.Kind() == exp.KindAlias {
+				inner = inner.This()
+			}
+			if inner != nil && inner.Kind() != exp.KindColumn {
+				return literalType(inner)
+			}
+			if inner == nil || inner.Text("table") == "" {
+				return nil
+			}
+			if nested, ok := src.Sources[inner.Text("table")]; ok {
+				return r.getColumnTypeFromScope(nested, inner)
+			}
+			return nil
+		}
+	}
 	return nil
 }
 
-func (r *Resolver) getColumnTypeFromScope(source any, column exp.Expression) exp.Expression {
-	// TODO(slice 4c): port resolver.py:394-419.
+// unnestElementType resolves (and caches in meta, standing in for Unnest.type) the element
+// type of an UNNEST over a single column (resolver.py:162-171). Upstream's ANNOTATE_ALL_SCOPES
+// pass types an UNNEST from its own scope's lateral sources first; the parent scope covers a
+// correlated `(SELECT ... FROM UNNEST(col))`.
+func (r *Resolver) unnestElementType(unnest exp.Expression, unnestScope *Scope) exp.Expression {
+	if t, ok := unnest.MetaGet("type").(exp.Expression); ok && t != nil && !exp.IsType(t, exp.DTypeUnknown) {
+		return t
+	}
+	exprs := expressionsFor(unnest, "expressions")
+	if len(exprs) == 0 {
+		return nil
+	}
+	if exprs[0].Kind() != exp.KindColumn {
+		colType := literalType(exprs[0])
+		if exp.IsType(colType, exp.DTypeArray) {
+			colType = firstExpr(colType)
+		}
+		if colType != nil {
+			unnest.Meta()["type"] = colType
+		}
+		return colType
+	}
+	var colType exp.Expression
+	if exprs[0].Text("table") != "" {
+		if _, ok := unnestScope.Sources[exprs[0].Text("table")]; ok {
+			colType = r.getUnnestColumnType(exprs[0], unnestScope)
+		}
+	}
+	if colType == nil && r.scope.Parent != nil {
+		colType = r.getUnnestColumnType(exprs[0], r.scope.Parent)
+	}
+	if exp.IsType(colType, exp.DTypeArray) {
+		colType = firstExpr(colType)
+		if colType == nil {
+			return nil
+		}
+	}
+	if colType != nil {
+		colType = colType.Copy()
+		unnest.Meta()["type"] = colType
+	}
+	return colType
+}
+
+// literalType infers the STRUCT/ARRAY type of a literal from its syntax, standing in for the
+// annotate_types results upstream reads: `STRUCT(1 AS a)`, `[STRUCT(...)]`, `ARRAY<T>[...]`,
+// and a parenthesized single-projection query over those. Anything else gives nil.
+func literalType(e exp.Expression) exp.Expression {
+	switch e.Kind() {
+	case exp.KindCast:
+		return asExpression(e.Arg("to"))
+	case exp.KindParen, exp.KindSubquery:
+		if inner := e.This(); inner != nil {
+			return literalType(inner)
+		}
+	case exp.KindSelect:
+		if selects := e.Selects(); len(selects) == 1 {
+			return literalType(selects[0])
+		}
+	case exp.KindAlias:
+		if inner := e.This(); inner != nil {
+			return literalType(inner)
+		}
+	case exp.KindArray:
+		elems := expressionsFor(e, "expressions")
+		if len(elems) == 0 {
+			return nil
+		}
+		elem := literalType(elems[0])
+		if elem == nil {
+			return nil
+		}
+		return exp.DataType(exp.Args{"this": exp.DTypeArray, "expressions": []exp.Expression{elem}, "nested": true})
+	case exp.KindStruct:
+		var fields []exp.Expression
+		for _, field := range expressionsFor(e, "expressions") {
+			var name, value exp.Expression
+			switch field.Kind() {
+			case exp.KindAlias:
+				name, value = asExpression(field.Arg("alias")), field.This()
+			case exp.KindPropertyEQ:
+				name, value = field.This(), field.Expr()
+			}
+			if name == nil {
+				// An anonymous field: the struct cannot be expanded by name.
+				return nil
+			}
+			kind := exp.DTypeUnknown.IntoExpr(nil)
+			if value != nil {
+				if t := literalType(value); t != nil {
+					kind = t
+				}
+			}
+			fields = append(fields, exp.ColumnDef(exp.Args{"this": exp.ToIdentifier(name.Name()), "kind": kind}))
+		}
+		return exp.DataType(exp.Args{"this": exp.DTypeStruct, "expressions": fields, "nested": true})
+	}
 	return nil
 }
