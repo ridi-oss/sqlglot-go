@@ -11,6 +11,8 @@ import (
 func init() {
 	table := map[exp.Kind]func(*Generator, exp.Expression) string{
 		exp.KindTimeToStr: (*Generator).prestoTimeToStrSQL,
+		exp.KindLastDay:   prestoCall("LAST_DAY_OF_MONTH", "this"),
+		exp.KindSHA:       prestoCall("SHA1", "this"),
 		exp.KindStrToTime: (*Generator).prestoStrToTimeSQL,
 		exp.KindStrToDate: func(g *Generator, e exp.Expression) string { return "CAST(" + g.prestoStrToTimeSQL(e) + " AS DATE)" },
 		exp.KindTimestampTrunc: func(g *Generator, e exp.Expression) string {
@@ -362,6 +364,9 @@ func prestoUnit(e exp.Expression) exp.Expression {
 	}
 	if unit.Kind() == exp.KindLiteral || unit.Kind() == exp.KindVar {
 		return exp.LiteralString(strings.ToUpper(unit.Name()))
+	}
+	if unit.Kind() == exp.KindWeekStart {
+		return exp.LiteralString("WEEK")
 	}
 	return unit
 }

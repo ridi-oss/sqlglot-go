@@ -45,6 +45,10 @@ func sameSource(a, b any) bool {
 }
 
 func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, catalog exp.IdentifierName, dialect dialects.DialectType, canonicalizeTableAliases bool, onQualify func(exp.Expression), searchPath []string, s schema.Schema) exp.Expression {
+	return qualifyTables(expression, schemaName, catalog, nil, dialect, canonicalizeTableAliases, onQualify, searchPath, s)
+}
+
+func qualifyTables(expression exp.Expression, schemaName exp.IdentifierName, catalog exp.IdentifierName, defaultSchemaCatalog exp.IdentifierName, dialect dialects.DialectType, canonicalizeTableAliases bool, onQualify func(exp.Expression), searchPath []string, s schema.Schema) exp.Expression {
 	d, err := dialects.GetOrRaise(dialect)
 	if err != nil {
 		panic(err)
@@ -58,6 +62,11 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 	var catalogIdentifier exp.Expression
 	if present(catalog) {
 		catalogIdentifier = normalizeRelationIdentifier(catalog, "catalog", d)
+	}
+
+	defaultSchemaCatalogIdentifier := catalogIdentifier
+	if present(defaultSchemaCatalog) {
+		defaultSchemaCatalogIdentifier = normalizeRelationIdentifier(defaultSchemaCatalog, "catalog", d)
 	}
 
 	searchPathMode := len(searchPath) > 0
@@ -114,6 +123,9 @@ func QualifyTables(expression exp.Expression, schemaName exp.IdentifierName, cat
 					}
 				} else if schemaIdentifier != nil {
 					table.Set("schema", schemaIdentifier.Copy())
+					if defaultSchemaCatalogIdentifier != nil && table.Arg("catalog") == nil {
+						table.Set("catalog", defaultSchemaCatalogIdentifier.Copy())
+					}
 				}
 			}
 			if !searchPathMode && catalogIdentifier != nil && table.Arg("catalog") == nil && table.Arg("schema") != nil {

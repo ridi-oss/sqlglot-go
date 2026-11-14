@@ -110,7 +110,7 @@ func stringToBool(value string) bool {
 
 func dialectInScope(meta map[string]string) bool {
 	switch meta["dialect"] {
-	case "", "mysql", "postgres":
+	case "", "mysql", "postgres", "bigquery":
 		return true
 	default:
 		return false

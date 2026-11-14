@@ -285,13 +285,9 @@ func hiveBuildGetJSONObject(args []exp.Expression) exp.Expression {
 }
 
 func hiveBuildTimestampTrunc(args []exp.Expression) exp.Expression {
-	return exp.New(exp.KindTimestampTrunc, exp.Args{
-		"this": hiveSeqGet(args, 0),
-		"unit": hiveTimeUnit(hiveSeqGet(args, 1)),
-	})
+	unit := hiveSeqGet(args, 1)
+	return withColumnUnit(exp.New(exp.KindTimestampTrunc, exp.Args{"this": hiveSeqGet(args, 0), "unit": unit}), unit)
 }
-
-func hiveTimeUnit(unit exp.Expression) exp.Expression { return exp.TimeUnitVar(unit) }
 
 func hiveBuildDateFormat(args []exp.Expression) exp.Expression {
 	this := exp.New(exp.KindTimeStrToTime, exp.Args{"this": hiveSeqGet(args, 0)})

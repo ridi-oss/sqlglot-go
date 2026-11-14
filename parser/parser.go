@@ -347,7 +347,13 @@ func (p *Parser) Parse(rawTokens []tokens.Token, sql string) (expressions []exp.
 	if p.isAthenaRouter() {
 		return p.parseAthena(rawTokens, sql)
 	}
-	return p.parse(p.parseStatement, rawTokens, sql), nil
+	statements := p.parse(p.parseStatement, rawTokens, sql)
+	if p.isBigQuery() {
+		for _, statement := range statements {
+			bigqueryCorrelatedUnnests(statement)
+		}
+	}
+	return statements, nil
 }
 
 func (p *Parser) ParseInto(rawTokens []tokens.Token, sql string, into exp.Kind) (out []exp.Expression, err error) {
@@ -806,17 +812,30 @@ func (p *Parser) parseSetOperation(this exp.Expression, consumePipe bool) exp.Ex
 		constructor = exp.Intersect
 	}
 	comments := p.prev.Comments
-	distinct := true // TODO(slice 5): dialect SET_OP_DISTINCT_BY_DEFAULT overrides.
+	distinct := true
 	if p.match(tokens.DISTINCT) {
 		distinct = true
 	} else if p.match(tokens.ALL) {
 		distinct = false
+	} else if p.dialect.SetOpDistinctRequired {
+		// dialects/bigquery.py:151 SET_OP_DISTINCT_BY_DEFAULT maps every set operation to None.
+		p.raiseError("Expected DISTINCT or ALL for " + exp.ClassName(constructor(exp.Args{}).Kind()))
 	}
-	// Upstream stores by_name only when matched (parser.py:5738-5742 uses `... or None`),
+	// Upstream stores by_name only when matched (parser.py:5922-5926 uses `... or None`),
 	// so leave it nil when absent (like symmetric/siblings) rather than storing False.
 	var byName any
-	if p.matchTextSeq("BY", "NAME") {
+	if p.matchTextSeq("BY", "NAME") || p.matchTextSeq("STRICT", "CORRESPONDING") {
 		byName = true
+	}
+	if p.matchTextSeq("CORRESPONDING") {
+		byName = true
+		if side == nil && kind == nil {
+			kind = "INNER"
+		}
+	}
+	var onColumns any
+	if byName != nil && p.matchTexts(map[string]bool{"ON": true, "BY": true}) {
+		onColumns = p.parseWrappedCsv(p.parseColumn)
 	}
 	expression := p.parseSelect(true, false, true, false)
 	// Wrap VALUES operands in selects (parser.py:5941-5945, v30.17.0), for consistency with
@@ -834,6 +853,7 @@ func (p *Parser) parseSetOperation(this exp.Expression, consumePipe bool) exp.Ex
 		"expression": expression,
 		"side":       side,
 		"kind":       kind,
+		"on":         onColumns,
 	}), nil, comments)
 }
 
@@ -892,6 +912,13 @@ func (p *Parser) parseSelect(opts ...bool) exp.Expression {
 			all = p.match(tokens.ALL)
 			matchedDistinct = p.matchSet(distinctTokens)
 		}
+		// parser.py:4057-4061: BigQuery's SELECT AS STRUCT / AS VALUE.
+		var kind any
+		if p.match(tokens.ALIAS) {
+			if p.matchTexts(map[string]bool{"STRUCT": true, "VALUE": true}) {
+				kind = stringsUpper(p.prev.Text)
+			}
+		}
 		var distinct exp.Expression
 		if matchedDistinct {
 			args := exp.Args{}
@@ -916,7 +943,7 @@ func (p *Parser) parseSelect(opts ...bool) exp.Expression {
 		// but wire the parser shape to match upstream.
 		top := p.parseLimit(nil, true, false)
 		projections := p.parseCsv(p.parseProjection)
-		selectArgs := exp.Args{"distinct": distinct, "expressions": projections, "hint": hint}
+		selectArgs := exp.Args{"kind": kind, "distinct": distinct, "expressions": projections, "hint": hint}
 		if top != nil {
 			selectArgs["limit"] = top
 		}
@@ -1061,6 +1088,10 @@ func (p *Parser) parseQueryModifiers(this exp.Expression) exp.Expression {
 				}
 			}
 		}
+	}
+	// parser.py:4385-4386 SUPPORTS_IMPLICIT_UNNEST (parsers/bigquery.py:192).
+	if p.isBigQuery() && this != nil && asExpr(this.Arg("from_")) != nil {
+		this = p.implicitUnnestsToExplicit(this)
 	}
 	return this
 }
@@ -1423,6 +1454,13 @@ func (p *Parser) parseTable(schema bool, joins bool, aliasTokens map[tokens.Toke
 }
 
 func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool, fast bool) exp.Expression {
+	if p.isBigQuery() {
+		return p.bigqueryParseTableParts(schema, isDBReference, fast)
+	}
+	return p.parseTablePartsBase(schema, isDBReference, wildcard, fast)
+}
+
+func (p *Parser) parseTablePartsBase(schema bool, isDBReference bool, wildcard bool, fast bool) exp.Expression {
 	var catalog exp.Expression
 	// schemaPart holds the ANSI-schema-level qualifier (upstream's "db" arg — the port renames
 	// this arg to "schema"; the local can't be named "schema" here as that is already the
@@ -1439,6 +1477,14 @@ func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool,
 			if table == nil {
 				table = exp.Identifier(exp.Args{"this": "", "quoted": false})
 			}
+		}
+	}
+	// parser.py:4935-4944: `events_*` wildcard table names.
+	if wildcard && p.isConnected() && (table == nil || table.Kind() == exp.KindIdentifier) && p.match(tokens.STAR) {
+		if table != nil {
+			table.Set("this", table.Name()+"*")
+		} else {
+			table = exp.Identifier(exp.Args{"this": "*"})
 		}
 	}
 	if isDBReference {
@@ -1462,6 +1508,13 @@ func (p *Parser) parseTableParts(schema bool, isDBReference bool, wildcard bool,
 }
 
 func (p *Parser) parseTablePart(schema bool) exp.Expression {
+	if p.isBigQuery() {
+		return p.bigqueryParseTablePart(schema)
+	}
+	return p.parseTablePartBase(schema)
+}
+
+func (p *Parser) parseTablePartBase(schema bool) exp.Expression {
 	// Table-valued function sources (parser.py:4664-4670), e.g. `FROM generate_series(1, 10)`
 	// or `FROM JSON_TABLE(...)`: outside schema position, a function call takes priority over
 	// a plain identifier so the parsed Func node becomes exp.Table's "this" arg.
@@ -1911,6 +1964,11 @@ func (p *Parser) parseRange(this exp.Expression) exp.Expression {
 			p.advance()
 			this = p.parseEscape(p.expression(exp.Glob(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
 		case tokens.OVERLAPS:
+			// parsers/bigquery.py:368-370 drops OVERLAPS from RANGE_PARSERS.
+			if p.isBigQuery() {
+				matched = false
+				break
+			}
 			// binary_range_parser(exp.Overlaps) (parser.py:1195).
 			p.advance()
 			this = p.parseEscape(p.expression(exp.Overlaps(exp.Args{"this": this, "expression": p.parseBitwise()}), nil, nil))
@@ -2570,6 +2628,9 @@ func (p *Parser) parseColumn() exp.Expression {
 		}
 		column = p.parseColumnOps(this)
 	}
+	if p.isBigQuery() {
+		return p.bigqueryParseColumn(column)
+	}
 	return column
 }
 
@@ -2702,6 +2763,13 @@ var jsonOperatorTokens = map[tokens.TokenType]bool{
 }
 
 func (p *Parser) parseColumnOps(this exp.Expression) exp.Expression {
+	if p.isBigQuery() {
+		return p.bigqueryParseColumnOps(this)
+	}
+	return p.parseColumnOpsBase(this)
+}
+
+func (p *Parser) parseColumnOpsBase(this exp.Expression) exp.Expression {
 	for bracketsTokens[p.curr.TokenType] {
 		this = p.parseBracket(this)
 	}
@@ -2812,12 +2880,14 @@ func (p *Parser) parsePrimary() exp.Expression {
 		p.advance()
 		primary := primaryParser(p, token)
 		if token.TokenType == tokens.STRING {
-			// _parse_primary's adjacent-string-literal rewrite (parser.py:6871-6885):
-			// 'a' 'b' 'c' -> Concat('a', 'b', 'c'). ADJACENT_STRINGS_CANNOT_BE_CONNECTED
-			// defaults false and isn't overridden by base/mysql/postgres, so the
-			// _is_connected() raise-error branch never fires and is omitted here.
+			// _parse_primary's adjacent-string-literal rewrite (parser.py:7107-7118):
+			// 'a' 'b' 'c' -> Concat('a', 'b', 'c').
 			concatExpressions := []exp.Expression{primary}
 			for p.curr.TokenType == tokens.STRING {
+				// parsers/bigquery.py:194 ADJACENT_STRINGS_CANNOT_BE_CONNECTED: 'can''t' is an error.
+				if p.isBigQuery() && p.isConnected() {
+					p.raiseError("Adjacent string literals need to be separated by whitespace or comments")
+				}
 				p.advance()
 				concatExpressions = append(concatExpressions, exp.LiteralString(p.prev.Text))
 			}
@@ -3044,7 +3114,7 @@ func (p *Parser) parsePGTypedLiteralValue() exp.Expression {
 func (p *Parser) parseIdVar(anyToken bool, toks map[tokens.TokenType]bool) exp.Expression {
 	expression := p.parseIdentifier()
 	if expression == nil {
-		if (anyToken && p.advanceAny(false) != nil) || p.matchSet(tokensOrDefault(toks, idVarTokens)) {
+		if (anyToken && p.advanceAny(false) != nil) || p.matchIDToken(tokensOrDefault(toks, idVarTokens)) {
 			quoted := p.prev.TokenType == tokens.STRING
 			expression = p.identifierExpression(quoted)
 		}
@@ -3592,10 +3662,22 @@ func (p *Parser) parseFunctionCall(functions map[string]func([]exp.Expression) e
 		}
 		function := functions[upper]
 		knownFunction := function != nil && !anonymous && !opaque
-		alias := !knownFunction
+		// parser.py:7257 FUNCTIONS_WITH_ALIASED_ARGS = {"STRUCT"}.
+		alias := !knownFunction || upper == "STRUCT"
 		args := p.parseFunctionArgs(alias)
+		if alias && knownFunction {
+			args = p.kvToPropEq(args)
+		}
 		if knownFunction {
-			result = p.validateExpression(function(args), exprArgs(args))
+			built := function(args)
+			if built == nil {
+				p.raiseError("Invalid arguments for " + upper)
+				return nil
+			}
+			result = p.validateExpression(built, exprArgs(args))
+			if p.dialect.PreserveOriginalNames {
+				result.Meta()["name"] = this
+			}
 		} else {
 			var name any = this
 			if tokenType == tokens.IDENTIFIER {
@@ -3668,11 +3750,7 @@ func (p *Parser) parseLambda(alias bool) exp.Expression {
 		this = p.parseSelectOrExpression(alias)
 	}
 
-	// Upstream also threads this through _parse_having_max (BigQuery's ARRAY_AGG(x HAVING
-	// MAX y)) between the two _parse_respect_or_ignore_nulls calls; that's out of this
-	// part's scope (no exp.HavingMax Kind ported), so it's omitted here - a no-op for every
-	// dialect that doesn't parse a HAVING MAX/MIN clause at this position anyway.
-	this = p.parseRespectOrIgnoreNulls(this)
+	this = p.parseHavingMax(p.parseRespectOrIgnoreNulls(this))
 	this = p.parseOrder(this, false)
 	this = p.parseRespectOrIgnoreNulls(this)
 	return p.parseLimit(this, false, false)
@@ -4305,6 +4383,15 @@ func init() {
 		"IF": func(p *Parser) exp.Expression { return p.parseIf() },
 	}
 	functionParsers = map[string]func(*Parser) exp.Expression{
+		// parser.py:9944-9949.
+		"NORMALIZE": func(p *Parser) exp.Expression {
+			this := p.parseBitwise()
+			var form exp.Expression
+			if p.match(tokens.COMMA) {
+				form = p.parseVar(false, nil, false)
+			}
+			return p.expression(exp.New(exp.KindNormalize, exp.Args{"this": this, "form": form}), nil, nil)
+		},
 		"CAST":        func(p *Parser) exp.Expression { return p.parseCast(p.strictCast, nil) },
 		"TRY_CAST":    func(p *Parser) exp.Expression { return p.parseCast(false, true) },
 		"SAFE_CAST":   func(p *Parser) exp.Expression { return p.parseCast(false, true) },
@@ -4457,4 +4544,38 @@ func stringsLower(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// parseHavingMax ports _parse_having_max (parser.py:8595-8603): BigQuery's
+// ANY_VALUE(x HAVING MAX y).
+func (p *Parser) parseHavingMax(this exp.Expression) exp.Expression {
+	if !p.match(tokens.HAVING) {
+		return this
+	}
+	p.matchTexts(map[string]bool{"MAX": true, "MIN": true})
+	isMax := stringsUpper(p.prev.Text) != "MIN"
+	return p.expression(exp.New(exp.KindHavingMax, exp.Args{"this": this, "expression": p.parseColumn(), "max": isMax}), nil, nil)
+}
+
+// kvToPropEq ports _kv_to_prop_eq (parser.py:7308-7333) without parse_map: key-value
+// arguments (`1 AS a`, `a = 1`) become PropertyEQ(this=name, expression=value).
+func (p *Parser) kvToPropEq(args []exp.Expression) []exp.Expression {
+	out := make([]exp.Expression, 0, len(args))
+	for _, e := range args {
+		if e != nil {
+			switch e.Kind() {
+			case exp.KindAlias:
+				e = p.expression(exp.PropertyEQ(exp.Args{"this": e.Arg("alias"), "expression": e.This()}), nil, nil)
+			case exp.KindEQ, exp.KindSlice:
+				e = p.expression(exp.PropertyEQ(exp.Args{"this": exp.ToIdentifier(e.This().Name()), "expression": e.Expr()}), nil, nil)
+			}
+			if e.Kind() == exp.KindPropertyEQ {
+				if this := e.This(); this != nil && this.Kind() == exp.KindColumn {
+					this.Replace(this.This())
+				}
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }

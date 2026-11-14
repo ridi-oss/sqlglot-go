@@ -126,8 +126,17 @@ type Dialect struct {
 	SupportsStructStarExpansion        bool
 	ExcludesPseudocolumnsFromStar      bool
 	QueryResultsAreStructs             bool
-	RequiresParenthesizedStructAccess  bool
-	IndexOffset                        int
+	// SetOpDistinctRequired ports SET_OP_DISTINCT_BY_DEFAULT = None (dialects/bigquery.py:151):
+	// UNION/EXCEPT/INTERSECT must spell out DISTINCT or ALL.
+	SetOpDistinctRequired bool
+	// PreserveOriginalNames ports PRESERVE_ORIGINAL_NAMES (dialect.py:405, bigquery.py:31): a
+	// known function keeps the name it was written with (SUBSTR, not SUBSTRING).
+	PreserveOriginalNames bool
+	// CastFormatToTime ports format_time over FORMAT_MAPPING (or TIME_MAPPING) for
+	// CAST(x AS <temporal> FORMAT '...') (parser.py:8147-8157); nil keeps the format as written.
+	CastFormatToTime                  func(string) string
+	RequiresParenthesizedStructAccess bool
+	IndexOffset                       int
 	// RenameTableWithDB ports the generator flag of the same name (generator.py:344): base
 	// allows `ALTER TABLE db.a RENAME TO db.b`, some dialects (e.g. postgres, generators/
 	// postgres.py:234) only allow renaming within the same db and drop the db qualifier.
@@ -624,6 +633,8 @@ func dialectByName(name string) (*Dialect, error) {
 		return Hive(), nil
 	case "athena":
 		return Athena(), nil
+	case "bigquery":
+		return BigQuery(), nil
 	default:
 		return nil, fmt.Errorf("unknown dialect %q", name)
 	}
@@ -977,12 +988,22 @@ func isInformationSchemaRelationPart(e exp.Expression) bool {
 // callers that must fold a detached name (e.g. a catalog/schema key) where no AST context
 // exists. isTable selects the role for the role-aware MySQLCaseSensitiveTableNames strategy
 // (lctn=0): true = a relation-level name (table/schema/catalog/alias/CTE) that stays case-sensitive;
-// false = a column-level name that folds. It is ignored by the other strategies.
+// false = a column-level name that folds. BigQuery also reads it: true = a part of a
+// dataset-qualified table path (project/dataset/table, case-sensitive); table aliases and CTE
+// names are case-insensitive there, so pass false for them. It is ignored by the other strategies.
 //
 // The input is treated as an UNQUOTED name (folding is unconditional): callers pass a name they
 // have already decided is unquoted, matching how schema normalization builds identifiers with
 // quoted=false. A quoted name must not be folded and should not be passed here.
 func (d *Dialect) FoldIdentifierName(name string, isTable bool) string {
+	if d.Name == "bigquery" && d.NormalizationStrategy == CaseInsensitive {
+		// Dataset-qualified table paths are case-sensitive; columns, aliases and CTEs fold
+		// (dialects/bigquery.py:153-174).
+		if isTable {
+			return name
+		}
+		return asciiLower(name)
+	}
 	switch d.NormalizationStrategy {
 	case CaseSensitive:
 		return name
@@ -1036,6 +1057,10 @@ func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
 		return e
 	}
 
+	if d.Name == "bigquery" && s == CaseInsensitive {
+		return bigqueryNormalizeIdentifier(e)
+	}
+
 	// Upstream strategies: ASCII-only fold; quoted identifiers are protected unless the
 	// strategy is case-insensitive (see DEVIATIONS.md §1.1).
 	quoted, _ := e.Arg("quoted").(bool)
@@ -1054,7 +1079,7 @@ func (d *Dialect) NormalizeIdentifier(e exp.Expression) exp.Expression {
 // cannot be an unquoted identifier. It is the case-safe accessor for ReservedKeywords (which is
 // stored lowercase-keyed): a consumer folding keyword case must fold ONLY reserved words, since a
 // non-reserved keyword can be a case-sensitive identifier (e.g. on MySQL lower_case_table_names=0).
-// Only MySQL populates a reserved set today; other dialects return false.
+// Dialects without a reserved set return false.
 func (d *Dialect) IsReservedKeyword(word string) bool {
 	if d.ReservedKeywords == nil {
 		return false

@@ -30,12 +30,17 @@ func (g *Generator) structSQL(e expressions.Expression) string {
 		}
 		args = append(args, field)
 	}
-	return g.funcCall(g.sqlName(e.Kind()), args, "(", ")", true)
+	return g.funcCall(g.funcName(e), args, "(", ")", true)
 }
 
 // versionSQL ports version_sql (generator.py:2649-2653).
 func (g *Generator) versionSQL(e expressions.Expression) string {
-	sql := "FOR " + e.Name() + " " + e.Text("kind")
+	name := e.Name()
+	if g.isDialect("bigquery") && name == "TIMESTAMP" {
+		// generators/bigquery.py:701-704.
+		name = "SYSTEM_TIME"
+	}
+	sql := "FOR " + name + " " + e.Text("kind")
 	if expression := g.sqlKey(e, "expression"); expression != "" {
 		sql += " " + expression
 	}

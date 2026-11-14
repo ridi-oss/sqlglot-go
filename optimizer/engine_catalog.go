@@ -11,7 +11,8 @@ import (
 // (DEVIATIONS: opaque_functions companion). It is a PURE consumer input, introspected from the
 // live target instance — sqlglot-go ships no name sets, only the resolution algorithm. All name
 // keys are expected pre-folded: function names lowercase (function identifiers are
-// case-insensitive in all supported engines), relation names folded per the dialect's strategy.
+// case-insensitive in MySQL/PG/Athena; BigQuery UDF names are case-sensitive, so its UDFSchemas
+// hold them as defined), relation names folded per the dialect's strategy.
 // A name missing from the catalog resolves Unknown (fail-closed).
 type EngineCatalog struct {
 	// BuiltinFunctions is the priority builtin name set: MySQL natives (builtin > loadable >
@@ -123,8 +124,16 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 		panic(err)
 	}
 	name := strings.ToLower(d.Name)
-	supported := name == "mysql" || name == "postgres" || name == "athena"
+	supported := name == "mysql" || name == "postgres" || name == "athena" || name == "bigquery"
 	r := &engineResolver{catalog: catalog, dialect: d, searchPath: searchPath, ctes: cteNames(expression)}
+	if name == "bigquery" {
+		folded := make(map[string]bool, len(r.ctes))
+		for alias := range r.ctes {
+			folded[asciiLowerName(alias)] = true
+		}
+		r.ctes = folded
+		r.tempFunctions = bigqueryTempFunctions(expression)
+	}
 	if name == "athena" {
 		folded := make(map[string]bool, len(r.ctes))
 		for alias := range r.ctes {
@@ -143,6 +152,8 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 				}
 				if name == "athena" {
 					calls[node] = r.resolveAthenaCall(node)
+				} else if name == "bigquery" {
+					calls[node] = r.resolveBigQueryCall(node)
 				} else {
 					calls[node] = r.resolveCall(node)
 				}
@@ -155,6 +166,8 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 				}
 				if name == "athena" {
 					relations[node] = r.resolveAthenaRelation(node)
+				} else if name == "bigquery" {
+					relations[node] = r.resolveBigQueryRelation(node)
 				} else {
 					relations[node] = r.resolveRelation(node)
 				}
@@ -164,10 +177,11 @@ func ResolveEngineIdentities(expression exp.Expression, catalog *EngineCatalog, 
 }
 
 type engineResolver struct {
-	catalog    *EngineCatalog
-	dialect    *dialects.Dialect
-	searchPath []string
-	ctes       map[string]bool
+	catalog       *EngineCatalog
+	dialect       *dialects.Dialect
+	searchPath    []string
+	ctes          map[string]bool
+	tempFunctions map[string]bool
 }
 
 func (r *engineResolver) isMySQL() bool { return strings.ToLower(r.dialect.Name) == "mysql" }

@@ -1,6 +1,8 @@
 package optimizer
 
 import (
+	"strings"
+
 	"github.com/ridi-oss/sqlglot-go/dialects"
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 	"github.com/ridi-oss/sqlglot-go/schema"
@@ -18,6 +20,11 @@ type QualifyOpts struct {
 	DefaultSchema exp.IdentifierName
 	// Catalog is the fixed catalog-level qualifier; a name-or-identifier, see expressions.IdentifierName.
 	Catalog exp.IdentifierName
+	// DefaultSchemaCatalog, when set, is the catalog stamped on a table that received
+	// DefaultSchema, while Catalog stays the catalog for tables that were already
+	// schema-qualified. BigQuery needs both: `t` resolves to the job's defaultDataset
+	// (its own project), `ds.t` to the job's project.
+	DefaultSchemaCatalog exp.IdentifierName
 	// SearchPath is an ordered, opt-in schema search path. Its zero value preserves
 	// upstream-compatible fixed DefaultSchema/Catalog qualification.
 	SearchPath []string
@@ -71,7 +78,7 @@ func Qualify(expression exp.Expression, opts QualifyOpts) exp.Expression {
 
 	// TODO(slice 4c): store_original_column_identifiers needs Node meta.
 	expression = NormalizeIdentifiers(expression, dialect)
-	expression = QualifyTables(expression, opts.DefaultSchema, opts.Catalog, dialect, opts.CanonicalizeTableAliases, opts.OnQualify, opts.SearchPath, s)
+	expression = qualifyTables(expression, opts.DefaultSchema, opts.Catalog, opts.DefaultSchemaCatalog, dialect, opts.CanonicalizeTableAliases, opts.OnQualify, opts.SearchPath, s)
 
 	if opts.IsolateTables {
 		expression = IsolateTableSelects(expression, s, dialect)
@@ -96,4 +103,46 @@ func Qualify(expression exp.Expression, opts QualifyOpts) exp.Expression {
 	}
 
 	return expression
+}
+
+// markBigQueryTableNames keeps an unqualified BigQuery table name case-sensitive.
+// divergence: upstream's normalize_identifier (dialects/bigquery.py:153-174) folds every
+// unqualified name, treating it as a possible CTE; BigQuery table names are case-sensitive
+// (DEVIATIONS §1.22). A name that matches a CTE visible from the table (case-insensitively) still folds.
+func markBigQueryTableNames(expression exp.Expression) {
+	for _, table := range expression.FindAll(exp.KindTable) {
+		this := table.This()
+		if this == nil || this.Kind() != exp.KindIdentifier || table.Arg("schema") != nil {
+			continue
+		}
+		if !cteVisible(table, strings.ToLower(this.Name())) {
+			this.Meta()["is_table"] = true
+		}
+	}
+}
+
+// cteVisible reports whether a WITH clause on an enclosing query defines name. Inside a CTE's
+// own body only the earlier CTEs are visible, unless the WITH is RECURSIVE.
+func cteVisible(node exp.Expression, name string) bool {
+	var via exp.Expression
+	for n := node.Parent(); n != nil; n = n.Parent() {
+		if n.Kind() == exp.KindCTE {
+			via = n
+		}
+		with := asExpression(n.Arg("with_"))
+		if with == nil {
+			continue
+		}
+		recursive := truthy(with.Arg("recursive"))
+		for _, cte := range with.Expressions() {
+			if cte == via && !recursive {
+				break
+			}
+			if strings.ToLower(cte.AliasOrName()) == name {
+				return true
+			}
+		}
+		via = nil
+	}
+	return false
 }

@@ -1,3 +1,37 @@
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(1e1000000, 4)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(20, 4)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"DECLARE x BIGDECIMAL(76, 38)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_EXTRACT(doc, '$. a b c .d')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_EXTRACT_ARRAY(doc, '$. a b c .d')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_EXTRACT_SCALAR(doc, '$. a b c .d')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_QUERY(doc, '$. a b c .d')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_QUERY_ARRAY(doc, '$. a b c .d')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"JSON_VALUE(doc, '$. a b c .d')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"LOWER(TO_HEX(x))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 'semester_1', (Q3, Q4) AS 'semester_2'))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM Produce UNPIVOT((first_half_sales, second_half_sales) FOR semesters IN ((Q1, Q2) AS 1, (Q3, Q4) AS 2))"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT * FROM t AS t(c1, c2)"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT GENERATE_DATE_ARRAY('2016-10-05', '2016-10-08')"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT('a', 10, 'a', 'foo') AS json_data"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT('foo', 10, 'bar', TRUE) AS json_data"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT('foo', 10, 'bar', ['a', 'b']) AS json_data"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT(['a', 'b'], [10, NULL]) AS json_data"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT(['a', 'b'], [JSON '10', JSON '\"foo\"']) AS json_data"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT(['a', 'b'], [STRUCT(10 AS id, 'Red' AS color), STRUCT(20 AS id, 'Blue' AS color)]) AS json_data"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT JSON_OBJECT(['a', 'b'], [TO_JSON(10), TO_JSON(['foo', 'bar'])]) AS json_data"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"SELECT y + 1 z FROM x GROUP BY y + 1 ORDER BY z"}
+{"dialect":"bigquery","category":"gen: canonicalization","sql":"WITH cte(c) AS (SELECT * FROM t) SELECT * FROM cte"}
+{"dialect":"bigquery","category":"gen: ddl/properties","sql":"ALTER TABLE foo DROP PRIMARY KEY IF EXISTS"}
+{"dialect":"bigquery","category":"gen: ddl/properties","sql":"CREATE TABLE db.example_table (x int) PARTITION BY x cluster by x"}
+{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE) ORDER BY time"}
+{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'linear')], ignore_null_values => FALSE) ORDER BY time"}
+{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'locf')]) ORDER BY time"}
+{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT * FROM GAP_FILL(TABLE device_data, ts_column => 'time', bucket_width => INTERVAL '1' MINUTE, value_columns => [('signal', 'null')], origin => CAST('2023-11-01 09:30:01' AS DATETIME)) ORDER BY time"}
+{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT AI.GENERATE_BOOL(MODEL `mydataset.gemini_model`, 'Is sky blue?')"}
+{"dialect":"bigquery","category":"parse: Expecting )","sql":"SELECT a, b, c, d, e FROM GAP_FILL(TABLE foo, ts_column => 'b', partitioning_columns => ['a'], value_columns => [('c', 'bar'), ('d', 'baz'), ('e', 'bla')], bucket_width => INTERVAL '1' DAY)"}
+{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INTO TABLE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
+{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA INTO TEMP TABLE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
+{"dialect":"bigquery","category":"parse: Invalid expression / Unexpected token","sql":"LOAD DATA OVERWRITE mydataset.table1 FROM FILES(FORMAT='AVRO', uris=['gs://bucket/path/file.avro'])"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION count_evens(n BIGINT) RETURNS BIGINT BEGIN DECLARE total BIGINT DEFAULT 0; DECLARE i BIGINT DEFAULT 0; WHILE i < n DO SET total = total + 1; IF i = 0 THEN SET total = total + 1; END IF; SET i = i + 1; END WHILE; RETURN total; END SELECT COUNT_EVENS(3)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION custom_sqrt(a INTEGER) RETURNS DOUBLE COMMENT 'Custom sqrt function' RETURNS NULL ON NULL INPUT NOT DETERMINISTIC LANGUAGE SQL SECURITY DEFINER WITH (weight=42, cost='low') RETURN a SELECT CUSTOM_SQRT(4)"}
 {"dialect":"trino","category":"parse: Expecting","sql":"WITH FUNCTION declare() RETURNS INTEGER RETURN 1 SELECT DECLARE()"}

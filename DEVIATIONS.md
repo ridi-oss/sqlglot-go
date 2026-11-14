@@ -178,6 +178,102 @@ AST cannot tell a parsed `WITH OFFSET` from `WITH ORDINALITY AS u(v, n)`, whose 
 upstream pops into the same `Identifier` offset, so the check is parser-only. Test
 `parser/postgres_unnest_test.go`.
 
+### 1.22 BigQuery table, dataset and UDF names keep their case
+
+Upstream bug: `normalize_identifier` (`dialects/bigquery.py:153-174`) lowercases every table name
+that has no dataset in front, guessing it may be a CTE. With a default dataset, `FROM Users`
+becomes `ds.users`, but BigQuery dataset and table names are case-sensitive (unless the dataset sets
+`is_case_insensitive`), so a lookup binds the wrong table (or none) when both `Users` and `users`
+exist. It also lowercases the dataset in a UDF call (`Sales.f()` -> `sales.f()`) and a backticked
+UDF name (`` `MyFn`() ``), though BigQuery UDF names are case-sensitive and its own comment says
+so. (BigQuery case rules: GoogleSQL lexical structure, "Case sensitivity".)
+
+Fixed: `NormalizeIdentifiers` (and so `Qualify`) keeps the case of an unqualified table name unless
+a CTE visible from that table has the same name (CTE names are case-insensitive). Visibility follows
+BigQuery: a CTE body sees only the CTEs defined before it, unless the WITH is RECURSIVE, so in
+`WITH Users AS (SELECT * FROM Users)` the inner `Users` is the table. A UDF call's dataset path and
+a backticked UDF name keep their case. Tests `bigquery_test.go`
+(`TestBigQueryUnqualifiedTableNameCase`, `TestBigQueryNormalizeKeepsTableNameCase`,
+`TestBigQueryNormalizeCTEVisibility`), `optimizer/engine_catalog_bigquery_test.go`.
+
+### 1.23 BigQuery struct and UNNEST types
+
+Not ported yet (not an upstream bug): upstream reads a column's STRUCT type from `annotate_types`.
+We skipped porting it (`optimizer/annotate_types.go` is an empty stub, ROADMAP slice 4c) and should
+port it; it is a high-priority backlog item. Until then the resolver takes the type from the schema for a base-table
+column, follows a pass-through column through a derived table or CTE (`SELECT o AS s` gives `s` the
+type of `o`, as upstream's annotator does), and reads STRUCT/ARRAY literals. When none applies
+(e.g. a function result), the type is unknown and `s.*` stays unexpanded; a consumer must treat an
+unexpanded struct star as unresolved.
+
+Upstream bug: `s.* EXCEPT (...)` / `s.* REPLACE (...)` on a struct column expands every field and
+drops the modifier, so a REPLACE expression's source columns vanish from lineage. Fixed by leaving
+such a star unexpanded. Table stars (`* EXCEPT`, `t.* REPLACE`) are unaffected and expand normally.
+Tests `bigquery_test.go`, the BigQuery cases of `qualify_columns.sql`.
+
+### 1.24 BigQuery pseudo-columns exclude `_DBT_MAX_PARTITION`
+
+Upstream bug: `PSEUDOCOLUMNS` (`dialects/bigquery.py:104-110`) includes `_DBT_MAX_PARTITION`, a dbt
+template variable, not a reserved name (BigQuery's reserved column prefixes are `_TABLE_`,
+`_FILE_`, `_PARTITION`, `_ROW_TIMESTAMP`, `__ROOT__`, `_COLIDENTIFIER` and `_CHANGE_*`). A real column with that name becomes a
+`Pseudocolumn` with no source table, so its read is lost from lineage. Fixed: it is an ordinary
+Column. The other four (`_PARTITIONTIME`, `_PARTITIONDATE`, `_TABLE_SUFFIX`, `_FILE_NAME`) use
+reserved prefixes, so no user column can have them. Test `bigquery_test.go`
+(`TestBigQueryDbtMaxPartitionIsAColumn`).
+
+### 1.25 BigQuery implicit UNNEST of range-variable paths
+
+Upstream bugs: BigQuery resolves the first name of a FROM path against the range variables in scope,
+including those of enclosing queries, before datasets; an unaliased path's implicit alias is its last
+name. Upstream (`parser.py:4305-4330`) converts a path to UNNEST only when its first name is an
+earlier source of the same SELECT, skips joins with ON, compares case-kept table names, reads
+`u.s.arr` as schema `u`, table `s`, and drops the implicit alias. So
+`SELECT (SELECT ... FROM u.tags) FROM Sales.Users AS u`, `FROM Sales.Users AS u JOIN u.tags ON TRUE`
+and `FROM Sales.Users JOIN users.tags` read `u.tags` as table `tags` in dataset `u`, losing the read
+of `Users.tags`, and `FROM t JOIN t.tags ... SELECT tags` binds the array, not the element.
+
+Fixed: a plain name path (any length, not backticked, not a function) becomes
+`UNNEST(u.s.arr) AS arr`, reading column `s` of `u` then field `arr`, with the alias as written or the
+implicit last name, when `u` (case-insensitive) is a range variable visible at that point:
+- same SELECT: an earlier FROM item, including an UNNEST alias and a converted path's alias; not on
+  the right side of a RIGHT or FULL join, which cannot see the left;
+- enclosing SELECT: a subquery or table function in FROM/JOIN sees no item of that FROM; an UNNEST
+  sees the items before it; a JOIN's ON sees the items up to that join; other
+  clauses see all items;
+- UPDATE/DELETE: SET/WHERE see the target (including `DELETE ds.t AS t WHERE ...`) and its
+  FROM/USING items and joins; a FROM/USING/join item itself does not see the target;
+- MERGE: the USING source sees neither side; ON and WHEN MATCHED see both; WHEN NOT MATCHED
+  [BY TARGET] sees the source; WHEN NOT MATCHED BY SOURCE sees the target;
+- nothing crosses into a CTE body.
+
+The resolver also ports upstream's UNNEST-alias shadowing (`resolver.py:326-353`): an UNNEST alias
+wins over a same-named column of another source. Upstream bug, fixed: it applies the shadowing in a
+JOIN's ON and in FROM items too, binding such a column (or a correlated subquery's column there) to
+an UNNEST joined later and losing the read of the earlier column; here no shadowing applies to a
+column that reaches the resolving query through that query's own JOIN or FROM clause, so a name two
+sources have is ambiguous there and fails; a subquery in the SELECT list or WHERE still sees the
+UNNEST alias win. Two UNNESTs with one alias stay ambiguous. Tests `bigquery_test.go`
+(`TestBigQueryCorrelatedImplicitUnnest`, `TestBigQueryRangeVariablePathShape`,
+`TestBigQueryImplicitUnnestAlias`, `TestBigQueryOnNeverShadowedByUnnest`).
+
+### 1.26 Date-unit and NORMALIZE arguments of user functions stay columns
+
+Upstream bug: `TimeUnit.__init__` turns any one-part column `unit` argument into a keyword, and the
+base parser reads `NORMALIZE(a, b)`'s `b` as a keyword. In MySQL and Hive, which have no builtin
+`NORMALIZE`, `TIME_DIFF`, `TIME_TRUNC`, `DATETIME_*` or `LAST_DAY(x, unit)`, such a call is a user
+function, so a real column argument (`NORMALIZE(a, secret)`) drops out of lineage. Fixed (including BigQuery `DATE_TRUNC` and Presto/Trino/Athena
+`DATE_TRUNC(unit, ts)`, where Trino accepts a column holding the unit, and Hive `TRUNC(ts, unit)`): a bare column becomes a unit
+only when it is unquoted and names a date part (`HOUR`, `DAY`, `WEEK`, ...; anything else,
+including `"day"`, stays a column and must resolve; abbreviations such as `d` do not count; in
+Presto/Trino/Athena `DATE_TRUNC`, `DATE_ADD`, `DATE_DIFF`, Hive `TRUNC` and Postgres `DATE_PART`,
+whose unit is a string, a column never becomes a unit; `DATE_PART` with a column part stays a
+`DATE_PART` call, since `EXTRACT` would read the name as a field); `TIME_DIFF`, `TIME_TRUNC`,
+`TIMESTAMP_DIFF`, `DATETIME_*`, `TIME_ADD/SUB`, `TIMESTAMP_ADD/SUB`, `LAST_DAY` and `DATE_SUB` are
+typed functions only for BigQuery (elsewhere plain calls, as before the BigQuery port), and
+`TIMESTAMPDIFF` only for MySQL; MySQL and
+Hive do not use the NORMALIZE keyword parser. Tests `bigquery_test.go`
+(`TestUDFArgumentsStayColumns`, `TestAthenaDateTruncColumnUnit`).
+
 ## Opt-in behavioral extensions beyond upstream
 
 Additive analysis features; default behavior and fixture output unchanged.
@@ -185,6 +281,11 @@ Additive analysis features; default behavior and fixture output unchanged.
 - **Search-path table qualification** (`QualifyOpts.SearchPath`): resolves the schema part by proven
   existence against the supplied schema, in order; no fallback to `DefaultSchema`, no catalog stamp,
   unproven stays unqualified (fail-closed). Names fold role-aware (§1.2). Empty path = upstream path.
+- **Default-dataset catalog** (`QualifyOpts.DefaultSchemaCatalog`): new option, no upstream
+  equivalent (upstream's `qualify` takes one `db` and one `catalog`). The catalog stamped on a table
+  that received `DefaultSchema`; `Catalog` stays the catalog for tables that were already
+  schema-qualified. Models a BigQuery job whose defaultDataset lives in another project: `t` ->
+  defaultDataset project, `ds.t` -> job project. Unset = upstream behavior.
 - **Qualify resolution report** (`QualifyOpts.ResolutionReport` → `SourceKind` per source): exposes
   the source classification the qualify scope pass already computes. `Unresolved` is the zero value.
   DML roots populate from the §6.1 analysis traversal.
@@ -215,8 +316,13 @@ Additive analysis features; default behavior and fixture output unchanged.
   consumer-supplied `DefaultCatalog` + `CurrentDatabase`, calls a single global builtin set with a
   bare-name identity, qualified calls Unknown; ambiguity fails closed to Unknown). The
   catalog is a pure consumer input introspected from the live target — no name sets ship with
-  sqlglot-go — and resolution is report-only: the AST is never rewritten. Tests
-  `optimizer/engine_catalog_test.go`.
+  sqlglot-go — and resolution is report-only: the AST is never rewritten. BigQuery: an unqualified
+  call is a temp UDF of the statement or a builtin; `SAFE.f` resolves like `f`; `NET.f` and
+  `ns.f` are builtin by dotted lowercase name; `ds.f` / `proj.ds.f` is a UDF via `UDFSchemas` (proj
+  must be `DefaultCatalog`). Built-in names match case-insensitively and UDF names (temp and
+  persistent) exactly, per BigQuery's case rules (GoogleSQL lexical structure, "Case sensitivity"),
+  so `UDFSchemas` must hold names as defined; relations follow the Athena rule with case-kept path parts. Tests
+  `optimizer/engine_catalog_test.go`, `optimizer/engine_catalog_bigquery_test.go`.
 
 Neither is a grammar construct — no ledger row.
 
@@ -293,6 +399,9 @@ None change `.sql()`:
 ## 4. Cosmetic AST-shape divergences (output identical, `.ToS()` differs)
 
 - Comment bubbling: a trailing comment can attach to a slightly different node.
+- BigQuery `NORMALIZE_AND_CASEFOLD(x, NFKC)`. Upstream bug: its builder (`parsers/bigquery.py:268`)
+  leaves the form a `Column`, so lineage reads a column named `nfkc`. Fixed: the form is a `Var`,
+  as upstream's own `NORMALIZE` parser already makes it. SQL output is unchanged.
 - MySQL `PARTITION BY RANGE (YEAR(col))`: upstream wraps/unwraps `TsOrDsToDate`; the port elides
   both (capped in `fidelity_test.go` `maxASTDivergences`).
 

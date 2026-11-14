@@ -30,7 +30,7 @@ func registerDialectDispatch(name string, table map[expressions.Kind]func(*Gener
 	}
 	for kind, handler := range table {
 		if handler == nil {
-			panic("generator: nil dispatch override for dialect " + name)
+			panic("generator: nil dispatch override for dialect " + name + " kind " + expressions.ClassName(kind))
 		}
 		if _, exists := dialectDispatch[name][kind]; exists {
 			panic("generator: duplicate dispatch override for dialect " + name + " kind " + expressions.ClassName(kind))

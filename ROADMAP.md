@@ -72,7 +72,7 @@ Slices (historical ledger; each landed `go test ./...` green before the next):
      invariant), 18 invalid cases raise. qualify() runs end-to-end (JOIN with unqualified cols
      → qualified + stars expanded + validated). Carried 4a items done: NamedSelects KindSubquery
      (+ Selects()); AST-invariant assertion added to the optimizer harness (assertASTInvariants).
-   - 4c (DEFERRED, OFF probe's critical path): full TypeAnnotator/annotate_types (coercion
+   - 4c (DEFERRED — now HIGH PRIORITY, see Remaining work): full TypeAnnotator/annotate_types (coercion
      tables, per-node type rules). KEY FINDING: annotate_scope is NEVER called for base/mysql/
      postgres — both call sites are gated by ANNOTATE_ALL_SCOPES / SUPPORTS_STRUCT_STAR_EXPANSION,
      both false in base (qualify_columns.py:112,788). A minimal constructible TypeAnnotator +
@@ -107,6 +107,12 @@ The parse → generate round-trip is done for the ported corpus (see Status). Th
 mostly the **optimizer** (port 1:1 from `.reference/`, port the matching upstream tests,
 differential-check against the pinned Python):
 
+- **HIGH PRIORITY — full `annotate_types` (slice 4c).** Never ported: `optimizer/annotate_types.go`
+  is an empty stub. BigQuery needs it (`ANNOTATE_ALL_SCOPES`, `SUPPORTS_STRUCT_STAR_EXPANSION`):
+  without it a struct whose type comes from an expression (`SELECT x.* FROM (SELECT IF(c, a, b) AS
+  x FROM t)`) stays unexpanded, where upstream expands it (DEVIATIONS §1.23). Port
+  `optimizer/annotate_types.py` plus `typing/__init__.py` and `typing/bigquery.py`, then replace the
+  stand-in `literalType` / schema lookups in `optimizer/resolver.go`. Roughly 3-5 days.
 - THE REST OF THE OPTIMIZER (the big one): `simplify` (full — only `simplify_parens` is present),
   `normalize` (CNF/DNF), `pushdown_predicates`, `pushdown_projections`, `eliminate_ctes` /
   `eliminate_joins` / `eliminate_subqueries`, `merge_subqueries`, `unnest_subqueries`,
@@ -232,6 +238,23 @@ and (where it goes beyond upstream grammar) the Class-A ledger. Corpus/fidelity 
   computes, classified from the resolved source's dynamic type (never the node's `KindTable`).
   `Unresolved` is the zero value (fail-closed); nil report is a strict no-op. Composes with R3: a DML
   root classifies its target _and_ read-sources from the analysis traversal.
+
+## BigQuery dialect (slice 1 of the BigQuery-for-proxy-monster plan) — DONE
+
+`dialects.BigQuery()` ports `dialects/bigquery.py`, `parsers/bigquery.py` and
+`generators/bigquery.py`: tokenizer (backtick identifiers, raw/byte/triple-quoted strings, `#`
+comments), dashed/numeric/quoted-path table names, INFORMATION_SCHEMA views, SAFE./NET. prefixes,
+`SELECT AS STRUCT`, set-operation `BY NAME`/`CORRESPONDING`, `CAST ... FORMAT`, kwargs `=>`,
+`HAVING MAX`, implicit and `IN UNNEST`, `WITH OFFSET`, EXPORT DATA, ML./AI. functions, and the
+identifier case rules. Qualify: pseudo-columns, UNNEST struct fields and `struct_col.*` from schema
+and literal types (no full `annotate_types`, DEVIATIONS §1.23), `DefaultSchemaCatalog`. Corpus
+655/689; all BigQuery cases of the qualify_columns/qualify_tables/normalize_identifiers fixtures pass.
+Not yet ported: JSON path normalization, LOAD DATA, GAP_FILL, JSON_OBJECT, `PREFIXED_PIVOT_COLUMNS`,
+`CONSTRAINT_PARSERS["OPTIONS"]`, `NESTED_TYPE_TOKENS` (TABLE), `_parse_property` NOT DETERMINISTIC,
+and ML./AI. calls in projection position. Several BigQuery DDL forms (CLUSTER BY, column OPTIONS,
+CLONE/COPY, CREATE MODEL, table functions) still round-trip only as `Command`; no BigQuery rows in
+`fidelity_cases.txt` yet. All of these fail closed or are lineage-neutral.
+Next: DDL/DML fidelity, then scripting blocks as single statements (BEGIN…END, IF, LOOP, FOR…IN).
 
 ## Athena enabler parity (slice A of the Athena-for-proxy-monster plan) — DONE
 

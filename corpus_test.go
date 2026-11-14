@@ -239,6 +239,7 @@ const (
 	minPassTrino    = 67
 	minPassPresto   = 170
 	minPassHive     = 141
+	minPassBigQuery = 655
 )
 
 // Total floors catch dropped failing records that pass floors cannot detect.
@@ -250,6 +251,7 @@ const (
 	minTotalTrino    = 115
 	minTotalPresto   = 170
 	minTotalHive     = 141
+	minTotalBigQuery = 689
 )
 
 // TestCorpus is the single round-trip harness for both the base-dialect
@@ -303,6 +305,7 @@ func TestCorpus(t *testing.T) {
 		{"trino", minPassTrino, minTotalTrino},
 		{"presto", minPassPresto, minTotalPresto},
 		{"hive", minPassHive, minTotalHive},
+		{"bigquery", minPassBigQuery, minTotalBigQuery},
 	}
 	var counts []string
 	for _, floor := range floors {

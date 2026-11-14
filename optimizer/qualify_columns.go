@@ -148,7 +148,29 @@ func separatePseudocolumns(scope *Scope, pseudocolumns map[string]bool) {
 	if len(pseudocolumns) == 0 {
 		return
 	}
-	// TODO(slice 4c): port Pseudocolumn node replacement once pseudocolumn support exists.
+	// qualify_columns.py:173-192. Scopes collect only exact Column nodes, so a Pseudocolumn is
+	// neither qualified nor reported unresolved.
+	changed := false
+	isSelect := scope.Expression.Kind() == exp.KindSelect
+	for _, column := range scope.Columns() {
+		name := strings.ToUpper(column.Name())
+		if !pseudocolumns[name] {
+			continue
+		}
+		if name != "LEVEL" || (isSelect && scope.Expression.Arg("connect") != nil) {
+			args := exp.Args{}
+			for _, key := range exp.ArgKeys(exp.KindColumn) {
+				if v := column.Arg(key); v != nil {
+					args[key] = v
+				}
+			}
+			column.Replace(exp.New(exp.KindPseudocolumn, args))
+			changed = true
+		}
+	}
+	if changed {
+		scope.clearCache()
+	}
 }
 
 func popTableColumnAliases(derivedTables []exp.Expression) {
@@ -409,16 +431,6 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 						}
 					}
 				}
-			} else if dialect.ProjectionAliasesShadowSourceNames && (isGroupBy || isHaving || isQualify) {
-				columnTable := column.Text("table")
-				if table != nil {
-					columnTable = table.Name()
-				}
-				if projections[columnTable] {
-					column.Replace(exp.ToIdentifier(column.Name()))
-					replaced = true
-					return
-				}
 			}
 
 			if table != nil && (!hasAlias || skipReplace) {
@@ -493,6 +505,27 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 	if dialect.SupportsAliasRefsInJoinConditions {
 		for _, join := range expressionsFor(expression, "joins") {
 			replaceColumns(join, false, false)
+		}
+	}
+
+	// qualify_columns.py:455-473: in BigQuery's GROUP BY/HAVING/QUALIFY a qualifier that collides
+	// with a projection alias resolves to the projection, so such columns stay qualified and are
+	// marked shadow; the generator renders them bare.
+	if dialect.ProjectionAliasesShadowSourceNames {
+		for _, key := range []string{"group", "having", "qualify"} {
+			clause := asExpression(expression.Arg(key))
+			if clause == nil {
+				continue
+			}
+			for _, column := range findAllInScope(clause, exp.KindColumn) {
+				if column.Text("table") != "" && column.Text("schema") == "" {
+					if projections[column.Text("table")] {
+						column.Set("shadow", true)
+					} else {
+						column.Set("shadow", nil)
+					}
+				}
+			}
 		}
 	}
 
@@ -689,7 +722,7 @@ func convertColumnsToDots(scope *Scope, resolver *Resolver) {
 				}
 				root = parts[0]
 				parts = parts[1:]
-			} else if table := resolver.GetTable(root.Name()); table != nil {
+			} else if table := resolver.getTableAt(root.Name(), column); table != nil {
 				columnTableExpression = table
 			} else {
 				continue
@@ -747,7 +780,7 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 	for _, pivot := range scope.Pivots() {
 		for _, column := range pivot.FindAll(exp.KindColumn) {
 			if column.Text("table") == "" && resolver.AllColumns()[column.Name()] {
-				if table := resolver.GetTable(column.Name()); table != nil {
+				if table := resolver.getTableAt(column.Name(), column); table != nil {
 					column.Set("table", table)
 				}
 			}
@@ -828,8 +861,12 @@ func expandStarsInScope(scope *Scope, resolver *Resolver, usingColumnTables map[
 					addRenameColumns(expression.This(), tableKeys, renameColumns)
 					ilikePattern = addILikeColumns(expression.This())
 				}
-			} else if expression.Kind() == exp.KindDot {
-				// TODO(slice 4c): struct star expansion for BigQuery/RisingWave.
+			} else if expression.Kind() == exp.KindDot && dialect.SupportsStructStarExpansion {
+				// qualify_columns.py:902-912. RisingWave's parenthesized form is out of scope.
+				if structFields := expandStructStarsNoParens(expression, scope, resolver); len(structFields) > 0 {
+					newSelections = append(newSelections, structFields...)
+					continue
+				}
 			}
 		}
 
@@ -1118,4 +1155,78 @@ func isConstant(expression exp.Expression) bool {
 	default:
 		return false
 	}
+}
+
+// dotParts ports Dot.parts: the flattened catalog/schema/table/column/field parts.
+func dotParts(e exp.Expression) []exp.Expression {
+	switch e.Kind() {
+	case exp.KindDot:
+		return append(dotParts(e.This()), e.Expr())
+	case exp.KindColumn:
+		return e.Parts()
+	}
+	return []exp.Expression{e}
+}
+
+// expandStructStarsNoParens ports _expand_struct_stars_no_parens (qualify_columns.py:729-779):
+// BigQuery's t.struct_col.* flattens the struct's fields. The struct type comes from the schema
+// (resolver lookup) where upstream reads the annotated column type.
+func expandStructStarsNoParens(expression exp.Expression, scope *Scope, resolver *Resolver) []exp.Expression {
+	// divergence: upstream expands `s.* EXCEPT/REPLACE (...)` and drops the modifier, losing the
+	// replacement's columns; leave such a star unexpanded.
+	if star := expression.Expr(); star != nil && (truthy(star.Arg("except_")) || truthy(star.Arg("replace")) || truthy(star.Arg("rename"))) {
+		return nil
+	}
+	dotColumn := expression.Find(exp.KindColumn)
+	if dotColumn == nil || dotColumn.Text("table") == "" {
+		return nil
+	}
+	source, ok := scope.Sources[dotColumn.Text("table")]
+	if !ok {
+		return nil
+	}
+	kind := resolver.getColumnTypeFromScope(source, dotColumn)
+	if !exp.IsType(kind, exp.DTypeStruct) {
+		return nil
+	}
+
+	parts := dotParts(expression)
+	partsBetween := parts[1 : len(parts)-1]
+	for _, part := range partsBetween[1:] {
+		var next exp.Expression
+		for _, field := range expressionsFor(kind, "expressions") {
+			if this := field.This(); this == nil || this.Kind() != exp.KindIdentifier {
+				return nil
+			}
+			if field.Name() == part.Name() && exp.IsType(asExpression(field.Arg("kind")), exp.DTypeStruct) {
+				next = asExpression(field.Arg("kind"))
+				break
+			}
+		}
+		if next == nil {
+			return nil
+		}
+		kind = next
+	}
+
+	taken := map[string]bool{}
+	var selections []exp.Expression
+	for _, field := range expressionsFor(kind, "expressions") {
+		this := field.This()
+		if this == nil || this.Kind() != exp.KindIdentifier || taken[field.Name()] {
+			return nil
+		}
+		taken[field.Name()] = true
+		chain := make([]exp.Expression, 0, len(partsBetween)+1)
+		for _, part := range partsBetween {
+			chain = append(chain, part.Copy())
+		}
+		chain = append(chain, this.Copy())
+		column := exp.Column(exp.Args{"this": chain[0], "table": asExpression(dotColumn.Arg("table")).Copy()})
+		if len(chain) > 1 {
+			column = exp.DotBuild(append([]exp.Expression{column}, chain[1:]...))
+		}
+		selections = append(selections, exp.New(exp.KindAlias, exp.Args{"this": column, "alias": this.Copy()}))
+	}
+	return selections
 }

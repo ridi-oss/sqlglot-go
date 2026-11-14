@@ -57,7 +57,9 @@ fidelity is enforced too: no statement fakes a round-trip via a raw-text `exp.Co
 builds a structured node (`fidelity_test.go` + `testdata/fidelity_cases.txt`). Working for base + MySQL
 + Postgres: the tokenizer, the AST + node model, the parser, the generator (`Expression → SQL`),
 `schema.MappingSchema` + `DataType.build`, the `qualify` pass (qualify_tables → normalize_identifiers →
-qualify_columns → quote_identifiers → validate), and `traverse_scope` + the full `Scope` API.
+qualify_columns → quote_identifiers → validate), and `traverse_scope` + the full `Scope` API. Athena
+(Presto/Trino/Hive chain) and BigQuery are ported too; their remaining corpus gaps are tracked in
+`testdata/parity_gaps.txt` (see ROADMAP.md).
 
 On top of that faithful core, a set of **opt-in, additive** enabler APIs (all in DEVIATIONS.md, none
 change default same-dialect output) landed for the downstream lineage/gating consumer: search-path

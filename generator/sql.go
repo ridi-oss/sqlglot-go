@@ -177,6 +177,13 @@ func (g *Generator) dotSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) columnParts(e expressions.Expression) string {
+	if truthy(e.Arg("shadow")) && g.dialect.ProjectionAliasesShadowSourceNames {
+		// generator.py:1154-1156: the qualifier would be captured by a colliding projection alias.
+		return g.sqlKey(e, "this")
+	}
+	if g.isDialect("bigquery") && e.MetaGet("quoted_column") != nil {
+		return g.bigqueryColumnParts(e)
+	}
 	parts := []string{}
 	for _, key := range []string{"catalog", "schema", "table", "this"} {
 		if v := e.Arg(key); truthy(v) {
@@ -368,7 +375,11 @@ func (g *Generator) parameterSQL(e expressions.Expression) string {
 // rawStringSQL ports rawstring_sql (generator.py:1653-1659): a raw/heredoc string is
 // re-emitted as an ordinary quoted string literal (e.g. postgres `$$doc$$` -> `'doc'`).
 func (g *Generator) rawStringSQL(e expressions.Expression) string {
-	return g.quoteStart + g.escapeStr(e.Text("this")) + g.quoteEnd
+	text := e.Text("this")
+	if g.stringsSupportEscapedSequences {
+		text = strings.ReplaceAll(text, "\\", "\\\\")
+	}
+	return g.quoteStart + g.escapeStrOpts(text, escapeStrOptions{escapeBackslash: false}) + g.quoteEnd
 }
 
 // fileFormatPropertySQL renders the FileFormatProperty node as `FORMAT=<fmt>`, matching
@@ -551,11 +562,17 @@ func (g *Generator) queryModifiers(e expressions.Expression, sqls ...string) str
 		parts = append(parts, g.gen(lateral))
 	}
 	parts = append(parts, g.sqlKey(e, "prewhere"), g.sqlKey(e, "where"), g.sqlKey(e, "connect"), g.sqlKey(e, "group"), g.sqlKey(e, "having"))
-	parts = append(parts, g.sqlKey(e, "cluster"), g.sqlKey(e, "distribute"), g.sqlKey(e, "sort"))
+	windows := ""
 	if truthy(e.Arg("windows")) {
-		parts = append(parts, g.seg("WINDOW ")+g.expressions(exprsOptions{expression: e, key: "windows", flat: true}))
+		windows = g.seg("WINDOW ") + g.expressions(exprsOptions{expression: e, key: "windows", flat: true})
 	}
-	parts = append(parts, g.sqlKey(e, "qualify"), g.sqlKey(e, "order"))
+	if g.isDialect("bigquery") {
+		// generators/bigquery.py:475-481: QUALIFY comes before WINDOW.
+		parts = append(parts, g.sqlKey(e, "qualify"), windows, g.sqlKey(e, "order"))
+	} else {
+		parts = append(parts, g.sqlKey(e, "cluster"), g.sqlKey(e, "distribute"), g.sqlKey(e, "sort"))
+		parts = append(parts, windows, g.sqlKey(e, "qualify"), g.sqlKey(e, "order"))
+	}
 	parts = append(parts, g.offsetLimitModifiers(e, fetch, limit)...)
 	parts = append(parts, g.afterLimitModifiers(e)...)
 	parts = append(parts, g.optionsModifier(e), g.sqlKey(e, "for_"))
@@ -587,6 +604,9 @@ func (g *Generator) optionsModifier(e expressions.Expression) string {
 }
 
 func (g *Generator) selectSQL(e expressions.Expression) string {
+	if g.isDialect("bigquery") {
+		bigqueryUnqualifyUnnest(e)
+	}
 	hint := g.sqlKey(e, "hint")
 	distinct := g.sqlKey(e, "distinct")
 	if distinct != "" {
@@ -981,6 +1001,9 @@ func (g *Generator) setOperationSQL(e expressions.Expression) string {
 	distinctOrAll := ""
 	if hasDistinct && !distinct {
 		distinctOrAll = " ALL"
+	} else if g.dialect.SetOpDistinctRequired {
+		// generator.py:1865-1875: with no DISTINCT default, DISTINCT is always spelled out.
+		distinctOrAll = " DISTINCT"
 	}
 	sideKind := joinNonEmpty(" ", e.Text("side"), e.Text("kind"))
 	if sideKind != "" {
@@ -1117,6 +1140,10 @@ func (g *Generator) inSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) inUnnestOp(unnest expressions.Expression) string {
+	if g.isDialect("bigquery") {
+		// generators/bigquery.py:698-699.
+		return g.gen(unnest)
+	}
 	return "(SELECT " + g.gen(unnest) + ")"
 }
 
@@ -2267,6 +2294,9 @@ func unitToStrValue(unit expressions.Expression) expressions.Expression {
 	if unit == nil {
 		return expressions.LiteralString("DAY")
 	}
+	if unit.Kind() == expressions.KindWeekStart {
+		return expressions.LiteralString("WEEK")
+	}
 	if unit.Kind() == expressions.KindPlaceholder || (unit.Kind() != expressions.KindVar && unit.Kind() != expressions.KindLiteral) {
 		return unit
 	}
@@ -2279,7 +2309,7 @@ func unitToStrValue(unit expressions.Expression) expressions.Expression {
 func unitToVarValue(unit expressions.Expression) expressions.Expression {
 	if unit != nil {
 		switch unit.Kind() {
-		case expressions.KindVar, expressions.KindPlaceholder, expressions.KindColumn:
+		case expressions.KindVar, expressions.KindPlaceholder, expressions.KindColumn, expressions.KindWeekStart:
 			return unit
 		}
 	}
@@ -2464,9 +2494,11 @@ func (g *Generator) unnestSQL(e expressions.Expression) string {
 	aliasExpr := asExpression(e.Arg("alias"))
 	offset := e.Arg("offset")
 
+	// generators/bigquery.py:259 UNNEST_WITH_ORDINALITY = False.
+	withOrdinality := !g.isDialect("bigquery")
 	// Base UNNEST_WITH_ORDINALITY = true: fold a WITH OFFSET AS <col> (offset is an
 	// Expression) into the alias column list and clear the offset (generator.py:3444-3447).
-	if offsetExpr := asExpression(offset); aliasExpr != nil && offsetExpr != nil {
+	if offsetExpr := asExpression(offset); withOrdinality && aliasExpr != nil && offsetExpr != nil {
 		aliasExpr.Append("columns", offsetExpr)
 		// Clear only the ARG, not the local: upstream keeps `offset` truthy so WITH
 		// ORDINALITY still emits after folding WITH OFFSET AS <col> into the alias
@@ -2490,13 +2522,21 @@ func (g *Generator) unnestSQL(e expressions.Expression) string {
 	// WITH ORDINALITY is emitted whenever offset is set, independent of the alias
 	// (generator.py:3456-3457) -- keep this outside the alias check.
 	suffix := alias
-	if truthy(offset) {
+	switch {
+	case withOrdinality && truthy(offset):
 		suffix = " WITH ORDINALITY" + alias
+	case !withOrdinality && asExpression(offset) != nil:
+		suffix = alias + " WITH OFFSET AS " + g.gen(asExpression(offset))
+	case !withOrdinality && truthy(offset):
+		suffix = alias + " WITH OFFSET"
 	}
 	return "UNNEST(" + args + ")" + suffix
 }
 
 func (g *Generator) bracketSQL(e expressions.Expression) string {
+	if g.isDialect("bigquery") {
+		return g.bigqueryBracketSQL(e)
+	}
 	// Base IndexOffset is 0, so apply_index_offset is unnecessary for slice 2.
 	exprs := listFromValue(e.Arg("expressions"))
 	sqls := make([]string, 0, len(exprs))
@@ -2561,6 +2601,9 @@ func (g *Generator) intervalSQL(e expressions.Expression) string {
 }
 
 func (g *Generator) tableParts(e expressions.Expression) string {
+	if g.isDialect("bigquery") && e.MetaGet("quoted_table") != nil {
+		return g.bigqueryTableParts(e)
+	}
 	parts := []string{}
 	for _, key := range []string{"catalog", "schema", "this"} {
 		if v := e.Arg(key); v != nil {

@@ -15,6 +15,9 @@ func NormalizeIdentifiers(expression exp.Expression, dialect dialects.DialectTyp
 	if expression == nil {
 		return nil
 	}
+	if d.Name == "bigquery" {
+		markBigQueryTableNames(expression)
+	}
 	// Ports normalize_identifiers.py:66-78: prune subtrees under a case_sensitive-marked node
 	// and skip such nodes, normalizing only the rest. (store_original_column_identifiers is off
 	// by default, so its dot_parts branch is not ported here.) NB: the only upstream producer of
@@ -30,7 +33,9 @@ func NormalizeIdentifiers(expression exp.Expression, dialect dialects.DialectTyp
 			continue
 		}
 		if node.Kind() == exp.KindIdentifier {
-			if d.OpaqueFunctions && isOpaqueCallIdentifier(node) {
+			// BigQuery: a UDF call path such as Sales.f() / `p.Sales.f`() keeps its case like a
+			// table path (DEVIATIONS §1.22); resolvers fold the function name themselves.
+			if (d.OpaqueFunctions || d.Name == "bigquery") && isOpaqueCallIdentifier(node) {
 				// opaque_functions contract: a function call's name and schema qualifier stay
 				// spelled as written — the EngineCatalog resolver folds for lookup itself.
 				continue
@@ -42,7 +47,7 @@ func NormalizeIdentifiers(expression exp.Expression, dialect dialects.DialectTyp
 }
 
 // isOpaqueCallIdentifier reports whether the identifier is an Anonymous call's quoted-name
-// ("this") or the schema qualifier of Dot(Identifier, Anonymous).
+// ("this") or part of the qualifier path of Dot(path, Anonymous), e.g. `p.ds` in p.ds.f().
 func isOpaqueCallIdentifier(node exp.Expression) bool {
 	parent := node.Parent()
 	if parent == nil {
@@ -51,9 +56,13 @@ func isOpaqueCallIdentifier(node exp.Expression) bool {
 	if parent.Kind() == exp.KindAnonymous && node.ArgKey() == "this" {
 		return true
 	}
-	if parent.Kind() == exp.KindDot && node.ArgKey() == "this" {
-		if e := asExpression(parent.Arg("expression")); e != nil && e.Kind() == exp.KindAnonymous {
-			return true
+	for n := node; parent != nil && parent.Kind() == exp.KindDot; n, parent = parent, parent.Parent() {
+		if n.ArgKey() == "this" {
+			if e := asExpression(parent.Arg("expression")); e != nil && e.Kind() == exp.KindAnonymous {
+				// Only a plain name path qualifies a call: in f(x).Field.g(), Field is a field.
+				_, ok := pathParts(n)
+				return ok
+			}
 		}
 	}
 	return false

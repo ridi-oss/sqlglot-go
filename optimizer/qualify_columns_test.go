@@ -159,10 +159,11 @@ func expectOptimizeOrSchemaError(t *testing.T, fn func()) (recovered any) {
 
 func deferredQualifyColumnsFixture(pair sqlFixturePair) string {
 	upperSQL := strings.ToUpper(pair.SQL)
-	if strings.Contains(upperSQL, "LATERAL VIEW") || strings.Contains(upperSQL, "UNNEST(") || strings.Contains(upperSQL, "EXPLODE(") {
+	bigquery := pair.Meta["dialect"] == "bigquery"
+	if strings.Contains(upperSQL, "LATERAL VIEW") || (!bigquery && strings.Contains(upperSQL, "UNNEST(")) || strings.Contains(upperSQL, "EXPLODE(") {
 		return "UDTF/UNNEST resolver path is slice 4c"
 	}
-	if strings.Contains(upperSQL, "STRUCT(") {
+	if !bigquery && strings.Contains(upperSQL, "STRUCT(") {
 		return "STRUCT/PropertyEQ is slice 4c"
 	}
 	if strings.Contains(upperSQL, "READ_CSV(") || strings.Contains(upperSQL, "READ_PARQUET(") || strings.Contains(upperSQL, "ROWS FROM") {

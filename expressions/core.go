@@ -120,6 +120,17 @@ func newNode(k Kind, args Args) *Node {
 	if args == nil {
 		args = Args{}
 	}
+	// TimeUnit.__init__ (expressions/core.py:2055-2066): a bare date part becomes an uppercase Var.
+	// An existing Var is kept: Go rebuilds nodes where Python runs __init__ once.
+	if timeUnitKinds[k] {
+		if unit, ok := args["unit"].(Expression); ok && unit != nil && unit.Kind() != KindVar {
+			// divergence: a bare column becomes a unit only if it names a date part; upstream
+			// converts any one-part column, so a UDF of the same name loses a real column read.
+			if unit.Kind() != KindColumn || isDatePartColumn(unit) {
+				args["unit"] = TimeUnitVar(unit)
+			}
+		}
+	}
 	n := &Node{kind: k, args: map[string]any{}, index: -1}
 	seen := map[string]bool{}
 	for _, spec := range argTypesFor(k) {
@@ -378,7 +389,7 @@ func (n *Node) AliasOrName() string {
 
 func (n *Node) OutputName() string {
 	switch n.kind {
-	case KindColumn, KindLiteral, KindIdentifier, KindStar, KindDot, KindTableColumn:
+	case KindColumn, KindPseudocolumn, KindLiteral, KindIdentifier, KindStar, KindDot, KindTableColumn:
 		return n.Name()
 	case KindAlias:
 		return n.Alias()
@@ -1049,7 +1060,7 @@ func (n *Node) ToPy() any {
 
 func (n *Node) Parts() []Expression {
 	switch n.kind {
-	case KindColumn:
+	case KindColumn, KindPseudocolumn:
 		parts := []Expression{}
 		for _, key := range []string{"catalog", "schema", "table", "this"} {
 			if expr := asExpression(n.args[key]); expr != nil {
@@ -1484,4 +1495,32 @@ func DotBuild(expressions []Expression) Expression {
 		current = Dot(Args{"this": current, "expression": expression})
 	}
 	return current
+}
+
+// timeUnitKinds are the exp.TimeUnit subclasses ported so far (DateTrunc normalizes its own unit).
+var timeUnitKinds = map[Kind]bool{
+	KindDateAdd: true, KindDateDiff: true, KindDateSub: true, KindDatetimeAdd: true, KindDatetimeDiff: true,
+	KindDatetimeSub: true, KindDatetimeTrunc: true, KindLastDay: true, KindTimeAdd: true, KindTimeSub: true,
+	KindTimestampAdd: true, KindTimestampDiff: true, KindTimestampSub: true, KindTimestampTrunc: true,
+	KindTsOrDsAdd: true, KindTimeDiff: true, KindTimeTrunc: true,
+}
+
+// datePartNames are the date/time part keywords a TimeUnit accepts.
+var datePartNames = map[string]bool{
+	"MICROSECOND": true, "MILLISECOND": true, "SECOND": true, "MINUTE": true, "HOUR": true,
+	"DAY": true, "DAYOFWEEK": true, "DAYOFYEAR": true, "WEEK": true, "ISOWEEK": true,
+	"MONTH": true, "QUARTER": true, "YEAR": true, "ISOYEAR": true, "DATE": true,
+	"DATETIME": true, "TIME": true, "NANOSECOND": true, "EPOCH": true, "DECADE": true,
+	"CENTURY": true, "MILLENNIUM": true,
+}
+
+// isDatePartName accepts full names only: an abbreviation such as `d` is too likely a real column.
+func isDatePartName(name string) bool {
+	return datePartNames[strings.ToUpper(name)]
+}
+
+// isDatePartColumn reports whether a column is a bare, unquoted date-part name; a quoted one is a column.
+func isDatePartColumn(column Expression) bool {
+	id := column.This()
+	return len(column.Parts()) == 1 && id != nil && id.Arg("quoted") != true && isDatePartName(column.Name())
 }
