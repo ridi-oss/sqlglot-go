@@ -257,6 +257,11 @@ func _traverseScope(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 		_traverseTables(scope, out, mode)
 	} else if expression.Is(exp.TraitUDTF) {
 		_traverseUdtfs(scope, out, mode)
+		// divergence (DEVIATIONS §1.27): upstream never scopes a subquery inside a VALUES that sits
+		// behind a Subquery boundary (scope.py:979-1005), as in `LATERAL (VALUES ((SELECT p)))`.
+		if expression.Kind() == exp.KindValues && scope.ScopeType != ScopeTypeUDTF {
+			_traverseSubqueries(scope, out, mode)
+		}
 	} else if expression.Is(exp.TraitDDL) {
 		ddlExpression := asExpression(expression.Arg("expression"))
 		if ddlExpression != nil && ddlExpression.Is(exp.TraitQuery) {
@@ -862,9 +867,7 @@ func _traverseTables(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 			sourceOrder = appendSourceOrder(sourceOrder, key)
 
 			if expression != scope.Expression {
-				for _, join := range expressionsFor(expression, "joins") {
-					expressions = append(expressions, join.This())
-				}
+				expressions = insertItems(expressions, i+1, nil, expressionsFor(expression, "joins"))
 			}
 			continue
 		}
@@ -884,14 +887,9 @@ func _traverseTables(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 		} else if isDerivedTable(expression) {
 			scopeType = ScopeTypeDerivedTable
 			scopes = &scope.DerivedTableScopes
-			for _, join := range expressionsFor(expression, "joins") {
-				expressions = append(expressions, join.This())
-			}
+			expressions = insertItems(expressions, i+1, nil, expressionsFor(expression, "joins"))
 		} else {
-			expressions = append(expressions, expression.This())
-			for _, join := range expressionsFor(expression, "joins") {
-				expressions = append(expressions, join.This())
-			}
+			expressions = insertItems(expressions, i+1, expression.This(), expressionsFor(expression, "joins"))
 			continue
 		}
 
@@ -963,6 +961,20 @@ func _traverseUdtfs(scope *Scope, out *[]*Scope, mode scopeTraversalMode) {
 		scope.Sources[name] = sources[name]
 		scope.sourceOrder = appendSourceOrder(scope.sourceOrder, name)
 	}
+}
+
+// insertItems puts a nested FROM item and its joins right after position at-1, keeping FROM order.
+// divergence (DEVIATIONS §1.27): upstream appends them (scope.py:915,935), so a LATERAL inside a
+// join group would see the items joined after the group.
+func insertItems(expressions []exp.Expression, at int, head exp.Expression, joins []exp.Expression) []exp.Expression {
+	var items []exp.Expression
+	if head != nil {
+		items = append(items, head)
+	}
+	for _, join := range joins {
+		items = append(items, join.This())
+	}
+	return append(expressions[:at:at], append(items, expressions[at:]...)...)
 }
 
 func WalkInScope(expression exp.Expression, prune func(exp.Expression) bool) []exp.Expression {
@@ -1197,14 +1209,14 @@ func (s *Scope) Columns() []exp.Expression {
 		s.ensureCollected()
 		columns := append([]exp.Expression(nil), s.rawColumns...)
 		for _, child := range s.SubqueryScopes {
-			columns = append(columns, child.ExternalColumns()...)
+			columns = append(columns, unblocked(child.ExternalColumns())...)
 		}
 		for _, child := range s.UDTFScopes {
-			columns = append(columns, child.ExternalColumns()...)
+			columns = append(columns, unblocked(child.ExternalColumns())...)
 		}
 		for _, child := range s.DerivedTableScopes {
 			if child.canBeCorrelated {
-				columns = append(columns, child.ExternalColumns()...)
+				columns = append(columns, unblocked(child.ExternalColumns())...)
 			}
 		}
 
@@ -1224,7 +1236,9 @@ func (s *Scope) Columns() []exp.Expression {
 			}
 			parentIsWindowOrWithinGroup := ancestorParent != nil && (ancestorParent.Kind() == exp.KindWindow || ancestorParent.Kind() == exp.KindWithinGroup)
 			parentIsSelect := ancestorParent != nil && ancestorParent.Kind() == exp.KindSelect
-			include := ancestor == nil || column.Text("table") != "" || ancestor.Kind() == exp.KindSelect || (ancestor.Kind() == exp.KindTable && (ancestor.This() == nil || !ancestor.This().Is(exp.TraitFunc))) || ((ancestor.Kind() == exp.KindOrder || ancestor.Kind() == exp.KindDistinct) && (parentIsWindowOrWithinGroup || !parentIsSelect || !namedSelects[column.Name()])) || (ancestor.Kind() == exp.KindStar && column.ArgKey() != "except_")
+			// divergence (DEVIATIONS §1.27): upstream (scope.py:394) skips an unqualified column
+			// in a table function's arguments, so its read is never qualified or validated.
+			include := ancestor == nil || column.Text("table") != "" || ancestor.Kind() == exp.KindSelect || ancestor.Kind() == exp.KindTable || ((ancestor.Kind() == exp.KindOrder || ancestor.Kind() == exp.KindDistinct) && (parentIsWindowOrWithinGroup || !parentIsSelect || !namedSelects[column.Name()])) || (ancestor.Kind() == exp.KindStar && column.ArgKey() != "except_")
 			if include {
 				s.columns = append(s.columns, column)
 			}
@@ -1232,6 +1246,36 @@ func (s *Scope) Columns() []exp.Expression {
 		s.columnsDone = true
 	}
 	return s.columns
+}
+
+// blockColumn marks a column ambiguous in this scope, so no outer scope resolves it.
+func (s *Scope) blockColumn(column exp.Expression) {
+	column.Meta()["ambiguous"] = true
+	for scope := s; scope != nil; scope = scope.Parent {
+		scope.columnsDone = false
+		scope.externalColumnsDone = false
+		scope.localColumnsDone = false
+	}
+}
+
+// unblockColumns drops the marks an earlier Qualify left on this scope's own columns.
+func (s *Scope) unblockColumns() {
+	s.ensureCollected()
+	for _, column := range s.rawColumns {
+		if column.MetaGet("ambiguous") == true {
+			delete(column.Meta(), "ambiguous")
+		}
+	}
+}
+
+func unblocked(columns []exp.Expression) []exp.Expression {
+	var out []exp.Expression
+	for _, column := range columns {
+		if column.MetaGet("ambiguous") != true {
+			out = append(out, column)
+		}
+	}
+	return out
 }
 
 func (s *Scope) TableColumns() []exp.Expression {

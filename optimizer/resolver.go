@@ -61,24 +61,28 @@ func (r *Resolver) getTableAt(column any, at exp.Expression) exp.Expression {
 		columnName = expression.Name()
 	}
 
-	columnExpr, _ := column.(exp.Expression)
-	isColumn := columnExpr != nil && columnExpr.Kind() == exp.KindColumn
 	// divergence (DEVIATIONS §1.25): upstream's UNNEST-alias shadowing (resolver.py:326-353) can bind
 	// a column in an ON or a FROM item to an UNNEST joined after it, losing the earlier column's read.
 	// There no shadowing applies: an ambiguous name fails.
 	shadow := at == nil || r.dialect == nil || !r.dialect.UnnestColumnOnly || !r.inJoinOrFromItem(at)
-	tableName := r.getTableNameFromSources(columnName, nil, nil, shadow)
-
-	if tableName == "" && isColumn {
-		if joinContext := r.getColumnJoinContext(columnExpr); joinContext != nil {
-			tableName = r.getTableNameFromJoinContextRecover(columnName, joinContext, shadow)
-		}
+	// divergence (DEVIATIONS §1.27): upstream resolves against every source of the query, then
+	// (resolver.py:67-73) against the joins up to the column's; engines scope by position.
+	vis := r.visibility(at)
+	var tableName string
+	if vis.all {
+		tableName = r.getTableNameFromSources(columnName, nil, nil, shadow)
+	} else {
+		tableName = r.getTableNameFromSources(columnName, r.columnsOf(vis.names), vis.names, false)
 	}
 
-	if tableName == "" && r.inferSchema {
+	if tableName == "" && r.inferSchema && r.visibleCount(vis, columnName) == 0 {
 		allColumns := r.getAllSourceColumns()
+		order := r.sourceColumnsOrder
+		if !vis.all {
+			allColumns, order = r.columnsOf(vis.names), vis.names
+		}
 		var candidates []string
-		for _, source := range r.sourceColumnsOrder {
+		for _, source := range order {
 			columns := allColumns[source]
 			if len(columns) == 0 || containsString(columns, "*") {
 				candidates = append(candidates, source)
@@ -287,7 +291,12 @@ func (r *Resolver) getAllSourceColumns() map[string][]string {
 			r.sourceColumns[sourceName] = r.GetSourceColumns(sourceName)
 			r.sourceColumnsOrder = append(r.sourceColumnsOrder, sourceName)
 		}
-		for sourceName := range r.scope.LateralSources {
+		lateralSources := r.scope.LateralSources
+		// A VALUES list that is a FROM item by itself is not LATERAL: it sees no sibling.
+		if e := r.scope.Expression; e != nil && e.Kind() == exp.KindValues && e.Parent() != nil && (e.Parent().Kind() == exp.KindJoin || e.Parent().Kind() == exp.KindFrom) {
+			lateralSources = nil
+		}
+		for sourceName := range lateralSources {
 			if _, ok := r.sourceColumns[sourceName]; !ok {
 				r.sourceColumns[sourceName] = r.GetSourceColumns(sourceName)
 				r.sourceColumnsOrder = append(r.sourceColumnsOrder, sourceName)
@@ -326,59 +335,34 @@ func (r *Resolver) getTableNameFromSourcesRecover(columnName string, sourceColum
 	return r.getTableNameFromSources(columnName, sourceColumns, order, true)
 }
 
-func (r *Resolver) getTableNameFromJoinContextRecover(columnName string, joinContext exp.Expression, shadow bool) (tableName string) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			if _, ok := recovered.(*sqlerrors.OptimizeError); ok {
-				tableName = ""
-				return
-			}
-			panic(recovered)
-		}
-	}()
-	available, order := r.getAvailableSourceColumns(joinContext)
-	return r.getTableNameFromSources(columnName, available, order, shadow)
+func (r *Resolver) columnsOf(names []string) map[string][]string {
+	out := make(map[string][]string, len(names))
+	for _, name := range names {
+		out[name] = r.GetSourceColumns(name)
+	}
+	return out
 }
 
-func (r *Resolver) getColumnJoinContext(column exp.Expression) exp.Expression {
-	if r.scope == nil || r.scope.Expression == nil {
-		return nil
-	}
-	if len(expressionsFor(r.scope.Expression, "joins")) == 0 || truthy(r.scope.Expression.Arg("laterals")) || truthy(r.scope.Expression.Arg("pivots")) {
-		return nil
-	}
-
-	joinAncestor := column.FindAncestor(exp.KindJoin, exp.KindSelect)
-	if joinAncestor != nil && joinAncestor.Kind() == exp.KindJoin {
-		if _, ok := r.scope.SelectedSources()[joinAncestor.AliasOrName()]; ok {
-			return joinAncestor
-		}
-	}
-	return nil
+// ambiguous reports whether the sources visible at column offer its name more than once. No
+// outer query may then claim the column (DEVIATIONS §1.27).
+func (r *Resolver) ambiguous(column exp.Expression) bool {
+	return r.visibleCount(r.visibility(column), column.Name()) > 1
 }
 
-func (r *Resolver) getAvailableSourceColumns(joinAncestor exp.Expression) (map[string][]string, []string) {
-	availableSources := map[string][]string{}
-	order := []string{}
-	from := asExpression(r.scope.Expression.Arg("from_"))
-	if from != nil && from.This() != nil {
-		fromName := from.This().AliasOrName()
-		availableSources[fromName] = r.GetSourceColumns(fromName)
-		order = append(order, fromName)
+// visibleCount counts the visible sources known to have the column.
+func (r *Resolver) visibleCount(vis sourceVisibility, columnName string) int {
+	names := vis.names
+	if vis.all {
+		r.getAllSourceColumns()
+		names = r.sourceColumnsOrder
 	}
-
-	joins := expressionsFor(r.scope.Expression, "joins")
-	limit := joinAncestor.Index()
-	if limit < 0 || limit >= len(joins) {
-		limit = len(joins) - 1
+	count := 0
+	for _, name := range names {
+		if containsString(r.GetSourceColumns(name), columnName) {
+			count++
+		}
 	}
-	for i := 0; i <= limit && i < len(joins); i++ {
-		join := joins[i]
-		joinName := join.AliasOrName()
-		availableSources[joinName] = r.GetSourceColumns(joinName)
-		order = append(order, joinName)
-	}
-	return availableSources, order
+	return count
 }
 
 func (r *Resolver) getUnambiguousColumns(sourceColumns map[string][]string, order []string, shadow bool) map[string]string {
