@@ -274,6 +274,39 @@ typed functions only for BigQuery (elsewhere plain calls, as before the BigQuery
 Hive do not use the NORMALIZE keyword parser. Tests `bigquery_test.go`
 (`TestUDFArgumentsStayColumns`, `TestAthenaDateTruncColumnUnit`).
 
+### 1.27 Unqualified columns bind by FROM position; an ambiguous name is not correlated
+
+Upstream bug: `Resolver.get_table` looks an unqualified column up in every source of its query, and
+only when that is ambiguous in the joins up to the column's. Two things go wrong, both checked
+against Postgres 17 and MySQL 8.4:
+
+- A name two sources of a subquery have stays unqualified, and the enclosing query then claims it:
+  in `SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a JOIN b ON b.id = x)` with `x` in `o`, `a` and
+  `b`, upstream emits `b.id = o.x`. The engines reject the query as ambiguous.
+- A column binds to a source it cannot see: in `... EXISTS (SELECT 1 FROM a JOIN b ON a.id = ox
+  JOIN c ON TRUE)` with `ox` in `o` and `c`, upstream emits `c.ox`; the engines read `o.ox`.
+
+Fixed: a column sees the sources its position sees. An ON sees the items joined up to it inside its
+own join group (a parenthesized or nested join is a group); a LATERAL, UNNEST or table-function
+item sees the items before it; a derived table sees none; everything else in the SELECT sees all.
+One visible source with the name binds; none passes the column to the enclosing query; two or more
+leave it unqualified for every query, so validation fails. JOIN binds tighter than a comma, so in
+`FROM a, b JOIN c ON ...` the ON does not see `a`; MySQL's bare `a JOIN b` builds the same node but
+joins left to right, so the parser marks the comma form (`Meta()["comma"]`). BigQuery's comma joins
+left to right and parses as a CROSS JOIN.
+A PIVOT reads the item it is attached to, and a plain `VALUES` item sees no sibling. An
+unqualified column in a table function's arguments (`generate_series(1, p)`), which upstream leaves
+unqualified and unvalidated, is resolved like any other.
+In WHERE a select alias no longer replaces a name an enclosing query has (upstream expands
+`SELECT x.k AS ax FROM x WHERE x.k = ax` to `x.k = x.k` inside a subquery of `o(ax)`; the engines
+read `o.ax`). A subquery inside `LATERAL (VALUES ...)`, which upstream never scopes, is resolved,
+and nested FROM items are scoped in FROM order, so a lateral item in a join group does not see the
+items joined after the group (upstream appends nested items after the top-level joins). A struct
+field whose root two visible sources have (`s.f`) is ambiguous too when an outer query has a
+column `s`; and `o.q` names a table `o` of any enclosing query before a local column `o` (upstream
+checks the direct parent only). Code `optimizer/visibility.go`; test
+`TestQualifyColumnsJoinVisibility`.
+
 ## Opt-in behavioral extensions beyond upstream
 
 Additive analysis features; default behavior and fixture output unchanged.

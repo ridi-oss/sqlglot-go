@@ -81,6 +81,7 @@ func qualifyColumns(expression exp.Expression, schemaArg schema.SchemaType, expa
 
 		separatePseudocolumns(scope, pseudocolumns)
 
+		scope.unblockColumns()
 		resolver := NewResolver(scope, s, infer)
 		popTableColumnAliases(scope.CTEs())
 		popTableColumnAliases(scope.DerivedTables())
@@ -120,7 +121,8 @@ func qualifyColumns(expression exp.Expression, schemaArg schema.SchemaType, expa
 func ValidateQualifyColumns(expression exp.Expression, sql string) exp.Expression {
 	var allUnqualifiedColumns []exp.Expression
 	for _, scope := range traverseScopeForOptimizer(expression) {
-		if scope.Expression != nil && scope.Expression.Kind() == exp.KindSelect {
+		isSelect := scope.Expression != nil && scope.Expression.Kind() == exp.KindSelect
+		if isSelect {
 			unqualifiedColumns := scope.UnqualifiedColumns()
 			if externalColumns := scope.ExternalColumns(); len(externalColumns) > 0 && !scope.IsCorrelatedSubquery() && len(scope.Pivots()) == 0 {
 				column := externalColumns[0]
@@ -132,6 +134,12 @@ func ValidateQualifyColumns(expression exp.Expression, sql string) exp.Expressio
 				panic(&sqlerrors.OptimizeError{Msg: fmt.Sprintf("Column '%s' could not be resolved%s.", column.Name(), forTable)})
 			}
 			allUnqualifiedColumns = append(allUnqualifiedColumns, unqualifiedColumns...)
+		}
+		// Not covered above: an ambiguous struct root (`s.f`) or column of a VALUES or UNNEST item.
+		for _, column := range scope.Columns() {
+			if column.MetaGet("ambiguous") == true && (!isSelect || column.Text("table") != "") {
+				allUnqualifiedColumns = append(allUnqualifiedColumns, column)
+			}
 		}
 	}
 
@@ -433,6 +441,12 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 				}
 			}
 
+			// divergence (DEVIATIONS §1.27): WHERE cannot see a select alias, so a name an outer
+			// query has is a correlated column; upstream (qualify_columns.py:383-401) expands the alias.
+			if hasAlias && node.Kind() == exp.KindWhere && column.Text("table") == "" && outerHasColumn(scope, resolver, column.Name()) {
+				continue
+			}
+
 			if table != nil && (!hasAlias || skipReplace) {
 				column.Set("table", table)
 			} else if column.Text("table") == "" && hasAlias && aliasExpr != nil && !skipReplace {
@@ -706,7 +720,9 @@ func convertColumnsToDots(scope *Scope, resolver *Resolver) {
 		}
 
 		columnTable := column.Text("table")
-		if columnTable != "" && !selectedSources[columnTable] && (scope.Parent == nil || scope.Parent.Sources[columnTable] == nil || !scope.IsCorrelatedSubquery()) {
+		// divergence (DEVIATIONS §1.27): upstream (qualify_columns.py:612-613) checks the direct
+		// parent's sources only, so `o.q` naming a table two queries out reads a local column `o`.
+		if columnTable != "" && !selectedSources[columnTable] && (!outerHasSource(scope, columnTable) || !scope.IsCorrelatedSubquery()) {
 			parts := column.Parts()
 			if len(parts) == 0 {
 				continue
@@ -725,6 +741,10 @@ func convertColumnsToDots(scope *Scope, resolver *Resolver) {
 			} else if table := resolver.getTableAt(root.Name(), column); table != nil {
 				columnTableExpression = table
 			} else {
+				// `s.f` with two visible sources that have `s`: no outer query may claim `s` as its column.
+				if outerHasColumn(scope, resolver, root.Name()) && !outerHasSource(scope, columnTable) && resolver.visibleCount(resolver.visibility(column), root.Name()) > 1 {
+					scope.blockColumn(column)
+				}
 				continue
 			}
 
@@ -758,7 +778,8 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 		}
 
 		if columnTable == "" {
-			if len(scope.Pivots()) > 0 && column.FindAncestor(exp.KindPivot) == nil {
+			// Only a lone pivoted source certainly owns the column; with joins, resolve normally.
+			if len(scope.Pivots()) > 0 && len(scope.SelectedSources()) == 1 && column.FindAncestor(exp.KindPivot) == nil {
 				column.Set("table", exp.ToIdentifier(scope.Pivots()[len(scope.Pivots())-1].Alias()))
 				continue
 			}
@@ -768,11 +789,20 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 				if source, ok := scope.Sources[table.Name()].(*Scope); ok && source.ColumnIndex()[column] {
 					continue
 				}
+				// Outside its PIVOT a pivoted table is known by the pivot's alias.
+				if node := scope.SelectedSources()[table.Name()].Node; node != nil && column.FindAncestor(exp.KindPivot) == nil {
+					if pivots := expressionsFor(node, "pivots"); len(pivots) > 0 && pivots[len(pivots)-1].Alias() != "" {
+						table = exp.ToIdentifier(pivots[len(pivots)-1].Alias())
+					}
+				}
 				column.Set("table", table)
 			} else if resolver.dialect.TablesReferenceableAsColumns && len(column.Parts()) == 1 {
 				if _, ok := scope.SelectedSources()[columnName]; ok {
 					scope.Replace(column, exp.TableColumn(exp.Args{"this": column.This()}))
 				}
+			}
+			if table == nil && resolver.ambiguous(column) && !usingMerges(scope, resolver, column) {
+				scope.blockColumn(column)
 			}
 		}
 	}
@@ -786,6 +816,51 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 			}
 		}
 	}
+}
+
+// usingMerges reports whether an enclosing query's USING or NATURAL joins merge every visible
+// source of the column into one, as for `(a JOIN b USING (p)) CROSS JOIN LATERAL (SELECT p)`; that
+// query's USING expansion then resolves it.
+func usingMerges(scope *Scope, resolver *Resolver, column exp.Expression) bool {
+	merges := 0
+	for parent := scope.Parent; parent != nil; parent = parent.Parent {
+		if parent.Expression == nil || parent.Expression.Kind() != exp.KindSelect {
+			continue
+		}
+		for _, join := range parent.FindAll(exp.KindJoin) {
+			natural := join.Text("method") == "NATURAL"
+			for _, using := range expressionsFor(join, "using") {
+				natural = natural || using.Name() == column.Name()
+			}
+			if natural {
+				merges++
+			}
+		}
+	}
+	return merges > 0 && merges >= resolver.visibleCount(resolver.visibility(column), column.Name())-1
+}
+
+// outerHasSource reports whether an enclosing query has a source of that name.
+func outerHasSource(scope *Scope, name string) bool {
+	for parent := scope.Parent; parent != nil; parent = parent.Parent {
+		if _, ok := parent.Sources[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// outerHasColumn reports whether a query enclosing a correlated scope has a column of this name.
+func outerHasColumn(scope *Scope, resolver *Resolver, name string) bool {
+	if !scope.canBeCorrelated {
+		return false
+	}
+	for parent := scope.Parent; parent != nil; parent = parent.Parent {
+		if NewResolver(parent, resolver.schema, false).AllColumns()[name] {
+			return true
+		}
+	}
+	return false
 }
 
 // hasDuplicateName reports whether a source column list exposes the same name twice.

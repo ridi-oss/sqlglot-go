@@ -1665,6 +1665,9 @@ func (p *Parser) parseJoin(skipJoinToken bool, parseBracket bool, aliasTokensArg
 		join := p.expression(exp.Join(exp.Args{"this": table}), nil, nil)
 		if p.dialect.JoinsHaveEqualPrecedence {
 			join.Set("kind", "CROSS")
+		} else {
+			// MySQL's bare `a JOIN b` builds the same node but binds like a JOIN; Qualify tells them apart.
+			join.Meta()["comma"] = true
 		}
 		return join
 	}
