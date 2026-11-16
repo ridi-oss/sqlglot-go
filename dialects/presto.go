@@ -10,6 +10,7 @@ import (
 func Presto() *Dialect {
 	d := Base()
 	d.Name = "presto"
+	d.HavingIgnoresSelectAliases = true
 	// generators/presto.py:439-500.
 	d.ReservedKeywords = map[string]bool{
 		"alter":             true,

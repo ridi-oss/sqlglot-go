@@ -11,6 +11,7 @@ import (
 func Athena() *Dialect {
 	d := Base()
 	d.Name = "athena"
+	d.HavingIgnoresSelectAliases = true
 	// divergence: Athena folds quoted names too, matching Trino (presto.py:35).
 	d.NormalizationStrategy = CaseInsensitive
 	d.TokenizerFactory = newAthenaTokenizer

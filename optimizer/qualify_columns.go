@@ -79,10 +79,14 @@ func qualifyColumns(expression exp.Expression, schemaArg schema.SchemaType, expa
 		scopeExpression := scope.Expression
 		isSelect := scopeExpression != nil && scopeExpression.Kind() == exp.KindSelect
 
+		scope.unblockColumns()
 		separatePseudocolumns(scope, pseudocolumns)
 
-		scope.unblockColumns()
+		if d.HavingIgnoresSelectAliases && isSelect {
+			markNotAliasRefs(asExpression(scopeExpression.Arg("having")))
+		}
 		resolver := NewResolver(scope, s, infer)
+		resolver.havingSelectedOnly = d.HavingSeesOnlySelectedColumns
 		popTableColumnAliases(scope.CTEs())
 		popTableColumnAliases(scope.DerivedTables())
 		usingColumnTables := expandUsing(scope, resolver)
@@ -210,6 +214,7 @@ func orderedColumnNames(columns map[string]string, ordered []string, resolver *R
 }
 
 func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
+	resolver.mysqlHavingNames()
 	columns := map[string]string{}
 	updateSourceColumns := func(sourceName string) {
 		// onlyVisible: implicit (system) columns are not part of the row type, so NATURAL JOIN /
@@ -357,20 +362,48 @@ func expandUsing(scope *Scope, resolver *Resolver) map[string][]string {
 	}
 
 	if len(columnTables) > 0 {
+		merge := func(column exp.Expression, tables *orderedNameSet) {
+			var coalesceArgs []exp.Expression
+			for _, table := range tables.names {
+				coalesceArgs = append(coalesceArgs, exp.Column_(column.Name(), table, nil, nil, nil))
+			}
+			replacement := coalesce(coalesceArgs)
+			// TODO(slice 4c): STRUCT/PropertyEQ USING replacement.
+			if parent := column.Parent(); parent != nil && parent.Kind() == exp.KindSelect {
+				replacement = exp.AliasExpr(replacement, column.Name(), false)
+			}
+			scope.Replace(column, replacement)
+		}
+		seen := map[exp.Expression]bool{}
 		for _, column := range scope.Columns() {
+			seen[column] = true
 			if column.Text("table") == "" {
 				if tables := columnTables[column.Name()]; tables != nil {
-					var coalesceArgs []exp.Expression
-					for _, table := range tables.names {
-						coalesceArgs = append(coalesceArgs, exp.Column_(column.Name(), table, nil, nil, nil))
+					if sight, table, nested := resolver.mysqlHaving(column); sight == havingHides {
+						continue
+					} else if sight == havingUnsure && outerHasColumn(scope, resolver, column.Name()) {
+						scope.blockColumn(column)
+						continue
+					} else if table != "" && !nested {
+						column.Set("table", exp.ToIdentifier(table))
+						continue
 					}
-					replacement := coalesce(coalesceArgs)
-					if parent := column.Parent(); parent != nil && parent.Kind() == exp.KindSelect {
-						replacement = exp.AliasExpr(replacement, column.Name(), false)
-					} else {
-						// TODO(slice 4c): STRUCT/PropertyEQ USING replacement.
-					}
-					scope.Replace(column, replacement)
+					merge(column, tables)
+				}
+			}
+		}
+		// Scope.Columns leaves out a HAVING column named like a select item; in MySQL it is the
+		// merged column inside an aggregate, and otherwise unless a select alias has the name.
+		if having := asExpression(scope.Expression.Arg("having")); having != nil && resolver.havingSelectedOnly {
+			for _, column := range walkInScope(having, nil) {
+				tables := columnTables[column.Name()]
+				if column.Kind() != exp.KindColumn || column.Text("table") != "" || seen[column] || tables == nil {
+					continue
+				}
+				if _, table, _ := resolver.mysqlHaving(column); table != "" {
+					column.Set("table", exp.ToIdentifier(table))
+				} else if resolver.mysqlAggregateArg(column, having) || !resolver.havingAliases[strings.ToLower(column.Name())] {
+					merge(column, tables)
 				}
 			}
 		}
@@ -415,13 +448,24 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 			if expandOnlyGroupBy && isGroupBy && column.Parent() != node {
 				continue
 			}
+			sight, selectedTable, _ := resolver.mysqlHaving(column)
+			if column.MetaGet(notAliasRef) == true || sight == havingHides || (sight == havingUnsure && column.MetaGet("ambiguous") == true) {
+				continue
+			}
 
 			skipReplace := false
 			var table exp.Expression
 			if resolveTable && column.Text("table") == "" {
 				table = resolver.GetTable(column.Name())
+				if table == nil && selectedTable != "" {
+					table = exp.ToIdentifier(selectedTable)
+				}
 			}
 			alias, hasAlias := aliasToExpression[column.Name()]
+			if !hasAlias && resolver.havingSelectedOnly {
+				// MySQL matches a select alias without regard to case.
+				alias, hasAlias = aliasToExpression[strings.ToLower(column.Name())]
+			}
 			aliasExpr := alias.expression
 
 			if hasAlias && aliasExpr != nil {
@@ -429,6 +473,10 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 				// into a GROUP BY, nor into another (non-window) aggregate.
 				skipReplace = findInScope(aliasExpr, exp.TraitAggFunc) != nil &&
 					(isGroupBy || (findAncestorTrait(column, exp.TraitAggFunc) != nil && !ancestorBeforeSelectIsWindow(column)))
+
+				if isHaving && table != nil && resolver.mysqlAggregateArg(column, node) {
+					skipReplace = true
+				}
 
 				if (isHaving || isQualify) && dialect.ProjectionAliasesShadowSourceNames {
 					for _, node := range aliasExpr.FindAll(exp.KindColumn) {
@@ -472,6 +520,9 @@ func expandAliasRefsInScope(scope *Scope, resolver *Resolver, dialect *dialects.
 		replaceColumns(projection, false, false)
 		if projection.Kind() == exp.KindAlias {
 			aliasToExpression[projection.Alias()] = aliasRef{expression: projection.This(), index: i + 1}
+			if _, ok := aliasToExpression[strings.ToLower(projection.Alias())]; !ok && resolver.havingSelectedOnly {
+				aliasToExpression[strings.ToLower(projection.Alias())] = aliasRef{expression: projection.This(), index: i + 1}
+			}
 		}
 	}
 
@@ -778,6 +829,10 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 		}
 
 		if columnTable == "" {
+			sight, selectedTable, _ := resolver.mysqlHaving(column)
+			if sight == havingHides || column.MetaGet("ambiguous") == true {
+				continue
+			}
 			// Only a lone pivoted source certainly owns the column; with joins, resolve normally.
 			if len(scope.Pivots()) > 0 && len(scope.SelectedSources()) == 1 && column.FindAncestor(exp.KindPivot) == nil {
 				column.Set("table", exp.ToIdentifier(scope.Pivots()[len(scope.Pivots())-1].Alias()))
@@ -785,6 +840,14 @@ func qualifyColumnsInScope(scope *Scope, resolver *Resolver, allowPartialQualifi
 			}
 
 			table := resolver.GetTable(column)
+			if table == nil && selectedTable != "" {
+				table = exp.ToIdentifier(selectedTable)
+			}
+			// FROM or the outer query, depending on whether the call is an aggregate: fail.
+			if table != nil && sight == havingUnsure && outerHasColumn(scope, resolver, columnName) {
+				scope.blockColumn(column)
+				continue
+			}
 			if table != nil {
 				if source, ok := scope.Sources[table.Name()].(*Scope); ok && source.ColumnIndex()[column] {
 					continue
@@ -838,6 +901,16 @@ func usingMerges(scope *Scope, resolver *Resolver, column exp.Expression) bool {
 		}
 	}
 	return merges > 0 && merges >= resolver.visibleCount(resolver.visibility(column), column.Name())-1
+}
+
+// markNotAliasRefs marks the unqualified columns of a HAVING that cannot name a select alias
+// (DEVIATIONS §1.27), so they resolve like any other column.
+func markNotAliasRefs(having exp.Expression) {
+	for _, column := range walkInScope(having, nil) {
+		if column.Kind() == exp.KindColumn && column.Text("table") == "" {
+			column.Meta()[notAliasRef] = true
+		}
+	}
 }
 
 // outerHasSource reports whether an enclosing query has a source of that name.

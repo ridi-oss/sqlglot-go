@@ -1,6 +1,8 @@
 package optimizer
 
 import (
+	"strings"
+
 	exp "github.com/ridi-oss/sqlglot-go/expressions"
 )
 
@@ -177,4 +179,162 @@ func flatten(lists [][]string) []string {
 		out = append(out, list...)
 	}
 	return out
+}
+
+type havingSight int
+
+const (
+	havingSees havingSight = iota
+	// havingHides: the name is not this query's; an outer query has it or it is unknown.
+	havingHides
+	// havingUnsure: inside a call that may or may not be an aggregate.
+	havingUnsure
+)
+
+// mysqlAggregates: MySQL 8.4 Reference Manual, "Aggregate Function Descriptions" and ST_Collect.
+var mysqlAggregates = map[string]bool{
+	"AVG": true, "BIT_AND": true, "BIT_OR": true, "BIT_XOR": true, "COUNT": true, "GROUP_CONCAT": true,
+	"JSON_ARRAYAGG": true, "JSON_OBJECTAGG": true, "MAX": true, "MIN": true, "STD": true, "STDDEV": true,
+	"STDDEV_POP": true, "STDDEV_SAMP": true, "SUM": true, "VAR_POP": true, "VAR_SAMP": true, "VARIANCE": true,
+	"ST_COLLECT": true,
+}
+
+// mysqlAggregateArg reports whether the column is an argument of an aggregate in this HAVING,
+// where MySQL reads a FROM column before a select alias.
+func (r *Resolver) mysqlAggregateArg(column, having exp.Expression) bool {
+	if !r.havingSelectedOnly {
+		return false
+	}
+	for n := column.Parent(); n != nil && n != having; n = n.Parent() {
+		if n.Is(exp.TraitAggFunc) || (n.Kind() == exp.KindAnonymous && mysqlAggregates[strings.ToUpper(n.Name())]) {
+			return true
+		}
+	}
+	return false
+}
+
+// mysqlAggregates reports whether the query has a GROUP BY or an aggregate of its own.
+func (r *Resolver) mysqlAggregates(query, having exp.Expression) bool {
+	if query.Arg("group") != nil {
+		return true
+	}
+	for _, item := range append(query.Selects(), having) {
+		for _, node := range walkInScope(item, nil) {
+			aggregate := node.Is(exp.TraitAggFunc) || (node.Kind() == exp.KindAnonymous && mysqlAggregates[strings.ToUpper(node.Name())])
+			// A window function does not aggregate the query.
+			if aggregate && (node.Parent() == nil || node.Parent().Kind() != exp.KindWindow) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mysqlHaving ports MySQL's HAVING lookup (DEVIATIONS §1.27) for a column at or below this
+// query's HAVING: outside an aggregate, FROM supplies a name only if the select list or GROUP BY
+// has it as a column. The table is set when that column is written qualified.
+func (r *Resolver) mysqlHaving(column exp.Expression) (sight havingSight, table string, nested bool) {
+	query := r.scope.Expression
+	if !r.havingSelectedOnly || query == nil || query.Kind() != exp.KindSelect || column.Text("table") != "" {
+		return havingSees, "", false
+	}
+	having := asExpression(query.Arg("having"))
+	if having == nil {
+		return havingSees, "", false
+	}
+	// aggregate: the column is an aggregate's argument; outer: that aggregate is this query's.
+	aggregate, outer, unsure := false, false, false
+	// direct: the column sits in the HAVING of its own subquery, outside an aggregate.
+	direct := false
+	n := column.Parent()
+	for ; n != nil && n != having; n = n.Parent() {
+		switch {
+		case n.Kind() == exp.KindHaving:
+			direct = direct || (!nested && !aggregate)
+		case n.Kind() == exp.KindSelect:
+			nested, outer = true, false
+		case n.Is(exp.TraitAggFunc), n.Kind() == exp.KindAnonymous && mysqlAggregates[strings.ToUpper(n.Name())]:
+			aggregate, outer = true, true
+		case n.Kind() == exp.KindAnonymous:
+			// Under opaque_functions a call that is no built-in may be a loadable aggregate.
+			unsure = true
+		}
+	}
+	if n == nil {
+		return havingSees, "", false
+	}
+	r.mysqlHavingNames()
+	// A subquery of the HAVING reads a select alias in its own HAVING, elsewhere only when FROM
+	// lacks the name. The column stays an alias reference no outer query sees.
+	if nested && !outer && r.havingAliases[strings.ToLower(column.Name())] && (direct || (r.GetTable(column) == nil && !r.ambiguous(column))) {
+		r.scope.markHavingAliasRef(column)
+		return havingHides, "", nested
+	}
+	if aggregate {
+		return havingSees, "", false
+	}
+	if table, ok := r.havingNames[strings.ToLower(column.Name())]; ok || r.havingAll {
+		return havingSees, table, nested
+	}
+	// A subquery of the HAVING sees every FROM column unless the query groups or aggregates.
+	if nested && !r.mysqlAggregates(query, having) {
+		return havingSees, "", nested
+	}
+	if unsure {
+		return havingUnsure, "", nested
+	}
+	return havingHides, "", nested
+}
+
+// mysqlHavingNames collects the names the query's HAVING finds outside FROM, each with the table
+// of its column when written. MySQL's order: a select alias, a GROUP BY column, an unaliased
+// select column, the column behind an alias. USING expansion rewrites these, so it calls this first.
+func (r *Resolver) mysqlHavingNames() {
+	query := r.scope.Expression
+	if r.havingNames != nil || !r.havingSelectedOnly || query == nil || query.Kind() != exp.KindSelect {
+		return
+	}
+	r.havingNames = map[string]string{}
+	r.havingAliases = map[string]bool{}
+	add := func(item exp.Expression) {
+		for item.Kind() == exp.KindParen {
+			item = item.This()
+		}
+		names, table := []string{item.Name()}, item.Text("table")
+		switch {
+		case item.Kind() == exp.KindStar:
+			r.havingAll = true
+			return
+		case item.Kind() == exp.KindColumn && item.IsStar():
+			names = r.GetSourceColumns(table)
+		case item.Kind() != exp.KindColumn:
+			return
+		}
+		for _, name := range names {
+			if _, ok := r.havingNames[strings.ToLower(name)]; !ok {
+				r.havingNames[strings.ToLower(name)] = table
+			}
+		}
+	}
+	var aliased []exp.Expression
+	for _, item := range query.Selects() {
+		if item.Kind() == exp.KindAlias {
+			r.havingNames[strings.ToLower(item.Alias())] = ""
+			r.havingAliases[strings.ToLower(item.Alias())] = true
+			aliased = append(aliased, item.This())
+		}
+	}
+	if group := asExpression(query.Arg("group")); group != nil {
+		for _, item := range group.Expressions() {
+			add(item)
+		}
+	}
+	for _, item := range query.Selects() {
+		if item.Kind() != exp.KindAlias {
+			add(item)
+		}
+	}
+	for _, item := range aliased {
+		add(item)
+	}
 }

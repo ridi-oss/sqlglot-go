@@ -8,6 +8,7 @@ import (
 func Postgres() *Dialect {
 	d := Base()
 	d.Name = "postgres"
+	d.HavingIgnoresSelectAliases = true
 	d.QuoteStart = "'"
 	d.QuoteEnd = "'"
 	d.IdentifierStart = "\""
