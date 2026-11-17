@@ -304,7 +304,18 @@ and nested FROM items are scoped in FROM order, so a lateral item in a join grou
 items joined after the group (upstream appends nested items after the top-level joins). A struct
 field whose root two visible sources have (`s.f`) is ambiguous too when an outer query has a
 column `s`; and `o.q` names a table `o` of any enclosing query before a local column `o` (upstream
-checks the direct parent only). Code `optimizer/visibility.go`; test
+checks the direct parent only).
+An unqualified column in HAVING or QUALIFY that is no select alias is resolved like any other, so
+an outer query's column is read and an unknown name fails (upstream leaves both unqualified without
+an error). Postgres and Trino cannot name a select alias in HAVING at all
+(`Dialect.HavingIgnoresSelectAliases`), so there the name is always a column. MySQL's HAVING,
+outside an aggregate, sees a FROM column only if the select list or GROUP BY has it as a column
+(`Dialect.HavingSeesOnlySelectedColumns`); any other name is the outer query's. An aggregate's
+argument reads a FROM column before a select alias, and a subquery of the HAVING sees every FROM
+column unless the query groups or aggregates; a select alias it names in its own
+HAVING, or anywhere when FROM lacks the name, stays an unqualified alias reference. Under
+`opaque_functions` a call that is no built-in MySQL aggregate may be either, so a name both FROM
+and an outer query have fails there. Code `optimizer/visibility.go`; test
 `TestQualifyColumnsJoinVisibility`.
 
 ## Opt-in behavioral extensions beyond upstream

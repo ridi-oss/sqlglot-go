@@ -26,6 +26,11 @@ type Resolver struct {
 	unambiguousNoShadow map[string]string
 	allColumns          map[string]bool
 	inferSchema         bool
+	// havingSelectedOnly: Dialect.HavingSeesOnlySelectedColumns of the query being qualified.
+	havingSelectedOnly bool
+	havingNames        map[string]string
+	havingAliases      map[string]bool
+	havingAll          bool
 
 	getSourceColumnsCache map[sourceColumnsKey][]string
 }

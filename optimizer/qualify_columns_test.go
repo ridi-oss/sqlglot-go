@@ -223,6 +223,9 @@ func TestQualifyColumnsJoinVisibility(t *testing.T) {
 		{M("a", c("id")), "SELECT 1 FROM a CROSS JOIN GENERATE_SERIES(1, p) AS g", "could not be resolved"},
 		{M("o", c("p"), "a", c("p")), "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a JOIN (VALUES (p)) AS v(x) ON TRUE)", "o.p"},
 		{M("o", c("ax"), "a", c("id", "ax"), "b", c("id")), "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a JOIN (SELECT b.id FROM b WHERE b.id = ax) AS d ON TRUE)", "b.id = o.ax"},
+		// HAVING reads the outer query's column, and an unknown name fails.
+		{M("o", c("p"), "a", c("id")), "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING p > 0)", "HAVING o.p > 0"},
+		{M("a", c("id")), "SELECT 1 FROM a GROUP BY a.id HAVING nope > 0", "could not be resolved"},
 		// `s.f` names an outer table, though two local sources have a column `s`.
 		{M("s", c("f"), "x", c("id"), "a", c("s"), "b", c("s")), "SELECT 1 FROM s WHERE EXISTS (SELECT 1 FROM x WHERE EXISTS (SELECT 1 FROM a JOIN b ON TRUE WHERE s.f > 0))", "s.f > 0"},
 		{M("s", c("f", "id"), "a", c("s", "id"), "b", c("s", "id")), "UPDATE s SET f = (SELECT MAX(a.id) FROM a JOIN b ON a.id = b.id WHERE a.id = s.f)", "a.id = s.f"},
@@ -381,6 +384,105 @@ func TestQualifyColumnsJoinVisibility(t *testing.T) {
 	if got, _ := sqlglot.Generate(optimizer.Qualify(e, opts), "bigquery", generator.Options{}); !strings.Contains(got, "ON `a`.`p` > 0") {
 		t.Errorf("bigquery comma join: %s", got)
 	}
+
+	// HAVING cannot name a select alias in Postgres or Trino; it can in MySQL.
+	for d, want := range map[string]string{"postgres": "HAVING o.p > 0", "athena": "HAVING o.p > 0", "trino": "HAVING o.p > 0", "mysql": "HAVING a.q > 0"} {
+		e, err = sqlglot.ParseOne("SELECT 1 FROM o WHERE EXISTS (SELECT a.q AS p FROM a GROUP BY a.q HAVING p > 0)", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts.Dialect = d
+		opts.Schema = M("o", c("p"), "a", c("q"))
+		got, _ := sqlglot.Generate(optimizer.Qualify(e, opts), d, generator.Options{})
+		if got = strings.NewReplacer(`"`, "", "`", "").Replace(got); !strings.Contains(got, want) {
+			t.Errorf("%s having alias: %s", d, got)
+		}
+	}
+	opts.Dialect = "bigquery"
+
+	// Outside an aggregate, MySQL's HAVING sees a FROM column only through the select list or
+	// GROUP BY; otherwise the name is the outer query's. Postgres sees every FROM column.
+	having := M("o", c("p", "id"), "a", c("id", "p"), "b", c("p"), "g", c("id"), "h", c("id", "p"))
+	for _, tc := range [][3]string{
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a JOIN b ON TRUE GROUP BY a.id HAVING p > 0)", "HAVING o.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id, a.p HAVING p > 0)", "HAVING a.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT a.p FROM a GROUP BY a.id HAVING p > 0)", "HAVING a.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING MAX(p) > 0)", "MAX(a.p)"},
+		{"mysql", "SELECT 1 FROM a GROUP BY a.id HAVING p > 0", "could not be resolved"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING EXISTS (SELECT 1 FROM g GROUP BY g.id HAVING p > 0))", "HAVING o.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING EXISTS (SELECT 1 FROM g HAVING MAX(p) > 0))", "MAX(a.p)"},
+		{"mysql", "SELECT * FROM a HAVING p > 0", "HAVING a.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT g.id, h.* FROM g JOIN h ON TRUE HAVING p > 0)", "HAVING h.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT a.p + 1 AS x FROM a HAVING p > 0)", "HAVING o.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT a.p AS x FROM a HAVING p > 0)", "HAVING a.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT COUNT(*) FROM a HAVING ST_Collect(p) IS NOT NULL)", "(a.p)"},
+		{"mysql", "SELECT COUNT(*) AS n FROM a JOIN h ON a.id = h.id GROUP BY a.id HAVING id > 0", "HAVING a.id > 0"},
+		{"mysql", "SELECT COUNT(*) AS Cnt FROM a HAVING cnt > 0", "HAVING COUNT(*) > 0"},
+		{"mysql", "SELECT COUNT(*) AS cnt FROM a HAVING CNT > 0", "HAVING COUNT(*) > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT COUNT(*) AS P FROM a HAVING p > 0)", "HAVING COUNT(*) > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a JOIN h USING (id) HAVING id > 0)", "HAVING o.id > 0"},
+		// An aggregate's argument reads a FROM column before a select alias.
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT a.id AS p FROM a HAVING MAX(p) > 0)", "MAX(a.p)"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT g.id AS p FROM g HAVING MAX(p) > 0)", "MAX(g.id)"},
+		{"mysql, opaque_functions=true", "SELECT 1 FROM o WHERE EXISTS (SELECT a.id AS p FROM a HAVING max(p) > 0)", "max(a.p)"},
+		// A subquery of the HAVING sees every FROM column unless the query groups.
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a HAVING EXISTS (SELECT 1 FROM g WHERE g.id = p))", "g.id = a.p"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a HAVING EXISTS (SELECT 1 FROM g GROUP BY g.id HAVING p > 0))", "HAVING a.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT MAX(a.id) FROM a HAVING EXISTS (SELECT 1 FROM g GROUP BY g.id HAVING p > 0))", "HAVING o.p > 0"},
+		{"mysql", "SELECT SUM(a.id) OVER () AS n FROM a HAVING (SELECT p) > 0", "SELECT a.p"},
+		{"mysql", "SELECT a.p FROM a JOIN h ON a.id = h.id HAVING (SELECT MAX(g.id) FROM g HAVING MAX(g.id) > p) > 0", "> a.p"},
+		// A subquery of the HAVING reads a select alias in its own HAVING, elsewhere only when FROM lacks the name.
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT a.id AS p FROM a HAVING EXISTS (SELECT 1 FROM g GROUP BY g.id HAVING p > 0))", "HAVING p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT g.id AS p FROM g HAVING EXISTS (SELECT 1 FROM g AS z WHERE z.id = p))", "z.id = p)"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT a.id AS p FROM a HAVING EXISTS (SELECT 1 FROM g WHERE g.id = p))", "g.id = a.p"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT a.id AS p FROM a HAVING EXISTS (SELECT 1 FROM g HAVING MAX(p) > 0))", "MAX(a.p)"},
+		// The name's table: a GROUP BY column, then an unaliased select column, then the column behind an alias.
+		{"mysql", "SELECT a.p AS x FROM a JOIN h ON a.id = h.p GROUP BY h.p HAVING p > 0", "HAVING h.p > 0"},
+		{"mysql", "SELECT h.p AS x FROM a JOIN h ON TRUE GROUP BY a.p HAVING p > 0", "HAVING a.p > 0"},
+		{"mysql", "SELECT a.id AS aid, h.id FROM a LEFT JOIN h ON a.id = h.id HAVING id IS NULL", "HAVING h.id IS NULL"},
+		{"mysql", "SELECT a.p FROM a JOIN h ON TRUE HAVING p > 0", "HAVING a.p > 0"},
+		{"mysql", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY (a.p) HAVING p > 0)", "HAVING a.p > 0"},
+		// With USING: the selected column, or the merged GROUP BY key.
+		{"mysql", "SELECT a.p AS x FROM a RIGHT JOIN h USING (p) HAVING p IS NULL", "HAVING a.p IS NULL"},
+		{"mysql", "SELECT COUNT(*) AS n FROM a JOIN h USING (p) GROUP BY p HAVING p > 0", "HAVING COALESCE(a.p, h.p) > 0"},
+		{"mysql, opaque_functions=true", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a JOIN h USING (id) HAVING my_fn(id) > 0)", "Ambiguous column"},
+		{"mysql", "SELECT a.p FROM a JOIN h USING (p) HAVING MAX(p) > 0", "MAX(COALESCE(a.p, h.p))"},
+		{"mysql", "SELECT a.id AS p FROM a JOIN h USING (p) HAVING MAX(p) > 0", "MAX(COALESCE(a.p, h.p))"},
+		{"mysql", "SELECT a.id AS p FROM a JOIN h USING (p) HAVING p > 0", "HAVING a.id > 0"},
+		{"mysql", "SELECT a.p FROM a JOIN h USING (p) GROUP BY h.p HAVING (SELECT p) > 0", "SELECT COALESCE(a.p, h.p)"},
+		// The outer select list has the name too.
+		{"mysql", "SELECT p FROM a WHERE EXISTS (SELECT g.id FROM g GROUP BY g.id HAVING g.id = p)", "g.id = a.p"},
+		{"bigquery", "SELECT p FROM a WHERE EXISTS (SELECT g.id FROM g QUALIFY g.id = p)", "g.id = a.p"},
+		// A GROUP BY alias two sources have as a column still expands.
+		{"mysql", "SELECT DATE(a.p) AS p, COUNT(*) AS n FROM a JOIN h ON TRUE GROUP BY p", "GROUP BY DATE(a.p)"},
+		{"mysql, opaque_functions=true", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING max(p) > 0)", "max(a.p)"},
+		{"mysql, opaque_functions=true", "SELECT 1 FROM a GROUP BY a.id HAVING abs(max(p)) > 0", "max(a.p)"},
+		{"mysql, opaque_functions=true", "SELECT 1 FROM a GROUP BY a.id HAVING my_agg(p) > 0", "my_agg(a.p)"},
+		{"mysql, opaque_functions=true", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING my_fn(p) > 0)", "Ambiguous column"},
+		{"mysql, opaque_functions=true", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING p > 0)", "HAVING o.p > 0"},
+		{"postgres", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a GROUP BY a.id HAVING p > 0)", "HAVING a.p > 0"},
+		{"postgres", "SELECT 1 FROM o WHERE EXISTS (SELECT 1 FROM a JOIN b ON TRUE GROUP BY a.id HAVING p > 0)", "Ambiguous column"},
+	} {
+		e, err = sqlglot.ParseOne(tc[1], tc[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts.Dialect = tc[0]
+		opts.Schema = having
+		got := func() (out string) {
+			defer func() {
+				if r := recover(); r != nil {
+					out = fmt.Sprint(r)
+				}
+			}()
+			out, _ = sqlglot.Generate(optimizer.Qualify(e, opts), tc[0], generator.Options{})
+			return strings.NewReplacer(`"`, "", "`", "").Replace(out)
+		}()
+		if !strings.Contains(got, tc[2]) {
+			t.Errorf("%s: %s\n got %s\nwant %s", tc[0], tc[1], got, tc[2])
+		}
+	}
+	opts.Dialect = "bigquery"
 
 	// A struct field on a root two visible sources have is ambiguous, not the outer query's.
 	st := func() *schema.Mapping {

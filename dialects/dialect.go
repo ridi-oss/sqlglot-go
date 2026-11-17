@@ -122,10 +122,15 @@ type Dialect struct {
 	DisablesAliasRefExpansion          bool
 	SupportsAliasRefsInJoinConditions  bool
 	ProjectionAliasesShadowSourceNames bool
-	TablesReferenceableAsColumns       bool
-	SupportsStructStarExpansion        bool
-	ExcludesPseudocolumnsFromStar      bool
-	QueryResultsAreStructs             bool
+	// HavingIgnoresSelectAliases: HAVING cannot name a select alias (Postgres, Trino).
+	HavingIgnoresSelectAliases bool
+	// HavingSeesOnlySelectedColumns: outside an aggregate, HAVING sees a FROM column only if the
+	// select list or GROUP BY names it (MySQL).
+	HavingSeesOnlySelectedColumns bool
+	TablesReferenceableAsColumns  bool
+	SupportsStructStarExpansion   bool
+	ExcludesPseudocolumnsFromStar bool
+	QueryResultsAreStructs        bool
 	// SetOpDistinctRequired ports SET_OP_DISTINCT_BY_DEFAULT = None (dialects/bigquery.py:151):
 	// UNION/EXCEPT/INTERSECT must spell out DISTINCT or ALL.
 	SetOpDistinctRequired bool

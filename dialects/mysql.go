@@ -73,6 +73,7 @@ func parseMySQLVersion(value string) (int, error) {
 func MySQL() *Dialect {
 	d := Base()
 	d.Name = "mysql"
+	d.HavingSeesOnlySelectedColumns = true
 	// generators/mysql.py:118 SUPPORTS_ALTER_COLUMN_NULLABILITY = True.
 	d.SupportsAlterColumnNullability = true
 	d.QuoteStart = "'"

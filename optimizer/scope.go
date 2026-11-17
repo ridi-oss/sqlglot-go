@@ -1221,14 +1221,20 @@ func (s *Scope) Columns() []exp.Expression {
 		}
 
 		namedSelects := map[string]bool{}
+		// Engines match a select alias in HAVING without regard to case.
+		namedSelectsFold := map[string]bool{}
 		if s.Expression != nil && s.Expression.Is(exp.TraitQuery) {
 			for _, name := range s.Expression.NamedSelects() {
 				namedSelects[name] = true
+				namedSelectsFold[strings.ToLower(name)] = true
 			}
 		}
 
 		s.columns = nil
 		for _, column := range columns {
+			if column.MetaGet(havingAliasRef) == true {
+				continue
+			}
 			ancestor := column.FindAncestor(exp.KindSelect, exp.KindQualify, exp.KindOrder, exp.KindHaving, exp.KindHint, exp.KindTable, exp.KindStar, exp.KindDistinct)
 			var ancestorParent exp.Expression
 			if ancestor != nil {
@@ -1238,7 +1244,10 @@ func (s *Scope) Columns() []exp.Expression {
 			parentIsSelect := ancestorParent != nil && ancestorParent.Kind() == exp.KindSelect
 			// divergence (DEVIATIONS §1.27): upstream (scope.py:394) skips an unqualified column
 			// in a table function's arguments, so its read is never qualified or validated.
-			include := ancestor == nil || column.Text("table") != "" || ancestor.Kind() == exp.KindSelect || ancestor.Kind() == exp.KindTable || ((ancestor.Kind() == exp.KindOrder || ancestor.Kind() == exp.KindDistinct) && (parentIsWindowOrWithinGroup || !parentIsSelect || !namedSelects[column.Name()])) || (ancestor.Kind() == exp.KindStar && column.ArgKey() != "except_")
+			// divergence (DEVIATIONS §1.27): upstream skips every unqualified column of a HAVING or
+			// QUALIFY, so one that is no select alias (an outer column) is never qualified or validated.
+			inHaving := ancestor != nil && (ancestor.Kind() == exp.KindHaving || ancestor.Kind() == exp.KindQualify) && (ancestor.Parent() != s.Expression || !namedSelectsFold[strings.ToLower(column.Name())] || column.MetaGet(notAliasRef) == true)
+			include := inHaving || ancestor == nil || column.Text("table") != "" || ancestor.Kind() == exp.KindSelect || ancestor.Kind() == exp.KindTable || ((ancestor.Kind() == exp.KindOrder || ancestor.Kind() == exp.KindDistinct) && (parentIsWindowOrWithinGroup || !parentIsSelect || !namedSelects[column.Name()])) || (ancestor.Kind() == exp.KindStar && column.ArgKey() != "except_")
 			if include {
 				s.columns = append(s.columns, column)
 			}
@@ -1248,9 +1257,26 @@ func (s *Scope) Columns() []exp.Expression {
 	return s.columns
 }
 
+// notAliasRef marks a HAVING column that cannot be a select alias.
+const notAliasRef = "not_alias_ref"
+
+// havingAliasRef marks a column that names a select alias of the enclosing query whose HAVING holds it.
+const havingAliasRef = "having_alias_ref"
+
+func (s *Scope) markHavingAliasRef(column exp.Expression) {
+	if column.MetaGet(havingAliasRef) != true {
+		column.Meta()[havingAliasRef] = true
+		s.resetColumns()
+	}
+}
+
 // blockColumn marks a column ambiguous in this scope, so no outer scope resolves it.
 func (s *Scope) blockColumn(column exp.Expression) {
 	column.Meta()["ambiguous"] = true
+	s.resetColumns()
+}
+
+func (s *Scope) resetColumns() {
 	for scope := s; scope != nil; scope = scope.Parent {
 		scope.columnsDone = false
 		scope.externalColumnsDone = false
@@ -1264,6 +1290,9 @@ func (s *Scope) unblockColumns() {
 	for _, column := range s.rawColumns {
 		if column.MetaGet("ambiguous") == true {
 			delete(column.Meta(), "ambiguous")
+		}
+		if column.MetaGet(havingAliasRef) == true {
+			delete(column.Meta(), havingAliasRef)
 		}
 	}
 }
