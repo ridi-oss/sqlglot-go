@@ -18,6 +18,14 @@ merged, tags the version and publishes the GitHub release. See
 [AGENTS.md § Releasing](./AGENTS.md#releasing). Entries for **v0.5.0 and earlier** were written by hand
 before release-please was adopted.
 
+## [0.39.1](https://github.com/ridi-oss/sqlglot-go/compare/v0.39.0...v0.39.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **qualify:** bind unqualified columns by FROM position; an ambiguous name is not correlated ([#121](https://github.com/ridi-oss/sqlglot-go/issues/121)) ([e1917a0](https://github.com/ridi-oss/sqlglot-go/commit/e1917a0febc96d29142195ff5338bfeb0e23ba9d))
+* **qualify:** resolve HAVING and QUALIFY columns the way each engine does ([#123](https://github.com/ridi-oss/sqlglot-go/issues/123)) ([a9ddfac](https://github.com/ridi-oss/sqlglot-go/commit/a9ddfac4c3b95332294442479e467046a50456dc))
+
 ## [0.39.0](https://github.com/ridi-oss/sqlglot-go/compare/v0.38.0...v0.39.0) (2026-11-14)
 
 
